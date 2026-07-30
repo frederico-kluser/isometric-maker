@@ -100,6 +100,16 @@ if (ageMs > TTL_MINUTES * 60_000) {
  * weakened shows up in the diff, and the post-edit gate still has to go green
  * before anything is promoted.
  */
+// A skill whose signal is a human, not a command, is authorised by a token that
+// nothing automated stands behind. Saying so is the only honest option.
+if (token.ok === true && token.manual_signal === true) {
+  console.error(
+    `NOTE: ${skill} declares a MANUAL verification signal — no script can confirm this change.\n` +
+      `The token records that the evals ran, not that a human agreed. Confirm with the user before` +
+      ` relying on it.`,
+  );
+}
+
 if (token.ok !== true) {
   console.error(
     `NOTE: ${skill} is currently FAILING its evals. Allowing this write as a REPAIR.\n` +

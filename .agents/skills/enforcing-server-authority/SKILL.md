@@ -25,7 +25,7 @@ Permadeath is total and nothing is ever restored, so a failure of authority is n
 is the irreversible destruction of someone's progress with no appeal:
 
 > "Nenhuma decisão de dano, acerto, morte, loot ou transação de item pode originar no cliente."
-> — `AGENTS.md:51@4a84b2d0`
+> — `AGENTS.md:51@b5b22e84`
 
 > "**nenhuma restauração, nunca.** Nem por bug do servidor, nem por queda de rede, nem por decisão de
 > suporte." — `docs/adr/0003-permadeath-total.md:17@b24cc681`

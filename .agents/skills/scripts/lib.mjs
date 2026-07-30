@@ -96,7 +96,11 @@ export function blobHash(absPath) {
  * against anything, and the hash is required because without it a citation
  * cannot go stale — it would silently keep vouching for content that changed.
  */
-const CITATION = /`([A-Za-z0-9._\/-]+\.[A-Za-z0-9]+):(\d+)@([0-9a-f]{8})`/g;
+// A trailing `-NN` range is accepted and the START line is what gets checked.
+// Without the range branch a citation written as `file.md:55-74@hash` matched
+// nothing at all and was silently unverified — worse than an obviously broken
+// citation, because it looked checked.
+const CITATION = /`([A-Za-z0-9._\/-]+\.[A-Za-z0-9]+):(\d+)(?:-\d+)?@([0-9a-f]{8})`/g;
 
 export function extractCitations(body) {
   return [...body.matchAll(CITATION)].map((m) => ({

@@ -18,7 +18,7 @@ an enum value, a price, or a response code.
 ### The rule, and why it is unusually strict
 
 > "A API do PixelLab **muda sem versionar** — o `info.version` do spec é literalmente `"dev"`."
-> — `AGENTS.md:22@4a84b2d0`
+> — `AGENTS.md:22@b5b22e84`
 
 The vendored snapshot is the source of truth, not your memory and not any blog:
 `tools/pixellab-pipeline/openapi/openapi-v2.json`, captured 2026-07-29, sha256 `5b11c9a7afa1…`
@@ -94,7 +94,7 @@ never against the requested value, or the atlas cuts the sprites' heads off.
 ### Prices are always estimates
 
 Write "preço estimado", never a flat price. PixelLab labels its own column `Estimated Price* (USD)`
-with the note that it varies with GPU time (`AGENTS.md:33@4a84b2d0`). One conflict is still
+with the note that it varies with GPU time (`AGENTS.md:33@b5b22e84`). One conflict is still
 unresolved and must stay marked as such: the spec's formula and the published table disagree on
 `/create-character-v3` at 64×64 (1 vs 2 generations); the repo's rule is to use the larger
 (`docs/01-pixellab/custos-e-limites.md:59@86c1d244`).

@@ -29,10 +29,47 @@
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
-  EVALS_DIR, VALIDATION_DIR, listSkills, skillPath, parseSkill,
+  EVALS_DIR, VALIDATION_DIR, REPO_ROOT, listSkills, skillPath, parseSkill,
   extractCitations, checkCitation, readJson, RED, GREEN, YELLOW, DIM, RESET,
 } from './lib.mjs';
+
+/**
+ * Run the skill's own declared verification_signal.
+ *
+ * Without this the runner could mint a green token while the signal the skill
+ * itself names as authoritative was failing — a token that says "verified"
+ * about something nobody verified, which is the precise failure the write gate
+ * exists to prevent.
+ *
+ * Two guards:
+ *   - Recursion. The meta-skills declare this very script as their signal, so a
+ *     nested run would not terminate. The env flag makes the inner run skip the
+ *     signal step instead of spawning another one.
+ *   - Non-executable signals. `enforcing-server-authority` declares "explicit
+ *     user confirmation", which no script can check. Those are reported as
+ *     manual rather than silently treated as passed.
+ */
+const EXECUTABLE = /^\s*(cd|node|npm|npx|bash|sh|git|make|python3?)\b/;
+
+function runDeclaredSignal(signal) {
+  if (!signal) return { kind: 'none' };
+  if (!EXECUTABLE.test(signal)) return { kind: 'manual', signal };
+  if (process.env['SKILL_EVAL_NESTED'] === '1') return { kind: 'skipped-nested', signal };
+
+  const r = spawnSync('sh', ['-c', signal], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout: 180_000,
+    env: { ...process.env, SKILL_EVAL_NESTED: '1' },
+  });
+  return {
+    kind: r.status === 0 ? 'pass' : 'fail',
+    signal,
+    out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split('\n').slice(-6).join('\n'),
+  };
+}
 
 /**
  * Words too common to carry routing signal, in both languages the repo uses.
@@ -151,7 +188,19 @@ for (const skill of skills) {
     }
   }
 
-  results.push({ skill, failures, warnings });
+  // 4. the skill's own declared verification signal
+  const sig = runDeclaredSignal(front?.metadata?.verification_signal);
+  if (sig.kind === 'fail') {
+    failures.push(`verification_signal falhou: \`${sig.signal}\`\n      ${sig.out.replace(/\n/g, '\n      ')}`);
+  } else if (sig.kind === 'manual') {
+    warnings.push(`verification_signal é manual e não pode ser checado por script: "${sig.signal}"`);
+  } else if (sig.kind === 'skipped-nested') {
+    warnings.push('verification_signal não executado (execução aninhada, evitando recursão)');
+  } else if (sig.kind === 'none') {
+    warnings.push('nenhum verification_signal declarado');
+  }
+
+  results.push({ skill, failures, warnings, manualSignal: sig.kind === 'manual' });
   if (failures.length > 0) anyFailed = true;
 
   // A token is the artifact the write-gate hook looks for. It is only written
@@ -165,6 +214,9 @@ for (const skill of skills) {
         skill,
         ok: failures.length === 0,
         at: new Date().toISOString(),
+        // Surfaced so the write gate can tell the human that nothing automated
+        // stands behind this skill's authorisation.
+        manual_signal: sig.kind === 'manual',
         failures,
       }, null, 2)}\n`,
     );

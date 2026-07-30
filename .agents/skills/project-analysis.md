@@ -7,7 +7,7 @@ Provenance format throughout: `path:line@blob8`, where `blob8` is the first 8 ch
 passage must be revalidated, not that it is wrong.
 
 **Language note.** This artifact and every generated SKILL.md body are in English, per the
-architect directive that commissioned this system. That diverges from `AGENTS.md:5-16@4a84b2d0`,
+architect directive that commissioned this system. That diverges from `AGENTS.md:5@b5b22e84`,
 which puts documentation in pt-BR. The divergence is deliberate and narrow: it covers only the
 skills system (agent-facing instructions), not `docs/`, not the README, not game text. Router
 questions and `TASK_PLAN.md` are pt-BR by hard requirement. Quotes from project docs stay verbatim
@@ -22,28 +22,28 @@ These are the rules that must shape every skill. Quoted, not paraphrased.
 ### 1.1 Money is the primary hazard
 
 > "Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o
-> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@4a84b2d0`
+> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@b5b22e84`
 
 > "**Sempre rode `pixellab plan` e `pixellab estimate` antes de qualquer geração.** Nunca use
-> `--force` sem `--reason`. `generate` gasta dinheiro real." — `AGENTS.md:39@4a84b2d0`
+> `--force` sem `--reason`. `generate` gasta dinheiro real." — `AGENTS.md:39@b5b22e84`
 
 > "**Nunca resubmeta um job cujo id você tem.** É o bug mais caro possível neste sistema."
 > — `docs/01-pixellab/modelo-assincrono.md:46@1be351ba`
 
 Two hashing decisions are called out as load-bearing, and both are implemented as stated:
 
-> "O `inputHash` é dos **pixels decodificados**, não dos bytes do arquivo." — `AGENTS.md:41@4a84b2d0`
+> "O `inputHash` é dos **pixels decodificados**, não dos bytes do arquivo." — `AGENTS.md:42@b5b22e84`
 > — implemented at `tools/pixellab-pipeline/src/catalog.ts:93@2a45b362`.
 
 > "O hash do schema OpenAPI **não entra** no `specHash`. […] Drift de schema é **aviso** do
-> `doctor`, nunca invalidação de cache." — `AGENTS.md:42-43@4a84b2d0` — implemented at
+> `doctor`, nunca invalidação de cache." — `AGENTS.md:43@b5b22e84` — implemented at
 > `tools/pixellab-pipeline/src/catalog.ts:106@2a45b362`, warning at
 > `tools/pixellab-pipeline/src/cli.ts:206@b333647e`.
 
 ### 1.2 Never write about the PixelLab API from memory
 
 > "A API do PixelLab **muda sem versionar** — o `info.version` do spec é literalmente `"dev"`."
-> — `AGENTS.md:22@4a84b2d0`
+> — `AGENTS.md:22@b5b22e84`
 
 The vendored spec at `tools/pixellab-pipeline/openapi/openapi-v2.json` is the single source of
 truth: `openapi 3.1.0`, `info.version="dev"`, 79 paths, 56 POST, 235 schemas, sha256
@@ -51,18 +51,18 @@ truth: `openapi 3.1.0`, `info.version="dev"`, 79 paths, 56 POST, 235 schemas, sh
 
 > Every price is an estimate: "All prices are estimates and will vary because of variation in the
 > GPU processing time." — quoted at `docs/01-pixellab/custos-e-limites.md:14@86c1d244`. Skills must
-> write "preço estimado", per `AGENTS.md:33@4a84b2d0`.
+> write "preço estimado", per `AGENTS.md:33@b5b22e84`.
 
 ### 1.3 `mode='pro'` in animation is forbidden by default
 
 > "custa 20–40 gerações **por direção** (160–320 para as 8). O default do projeto é
-> `mode='template'`, que custa 1 geração por direção." — `AGENTS.md:45-46@4a84b2d0`,
+> `mode='template'`, que custa 1 geração por direção." — `AGENTS.md:45@b5b22e84`,
 > ratified by `docs/adr/0006-animacao-em-template-mode.md:5@554b0d42`.
 
 ### 1.4 Server authority is not negotiable
 
 > "Nenhuma decisão de dano, acerto, morte, loot ou transação de item pode originar no cliente."
-> — `AGENTS.md:51@4a84b2d0`
+> — `AGENTS.md:51@b5b22e84`
 
 > "**nenhuma restauração, nunca.** Nem por bug do servidor, nem por queda de rede, nem por decisão
 > de suporte." — `docs/adr/0003-permadeath-total.md:17@b24cc681`
@@ -77,7 +77,7 @@ Docs and player-facing text pt-BR; code identifiers, code folder names and commi
 (`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@abdd2ed9`). And:
 
 > "**Nunca assine `Co-authored-by Claude` automaticamente** — o usuário decide caso a caso."
-> — `AGENTS.md:18@4a84b2d0`
+> — `AGENTS.md:18@b5b22e84`
 
 ### 1.6 Canonical direction order
 
@@ -104,7 +104,7 @@ check instead.
 | Switch fallthrough and missing `override` rejected — **pipeline only** | `noFallthroughCasesInSwitch`, `noImplicitOverride` — `tools/pixellab-pipeline/tsconfig.json:13-14@e8e110a2` | Scope matters: sprite-studio does not set these. |
 | Atlas packing is byte-deterministic | `tools/pixellab-pipeline/src/atlas.test.ts:35@d28e4f8a` (6 tests) | The one existing regression net. |
 
-**Not guaranteed by anything, currently prose only** (`AGENTS.md:55-74@4a84b2d0`): absolute paths,
+**Not guaranteed by anything, currently prose only** (`AGENTS.md:55@b5b22e84`): absolute paths,
 ISO dates, syntax hint on every code block, honest pitfalls section, marking estimate/derived/
 unverified, "Atualizar a tabela de `docs/README.md` ao adicionar uma doc nova — sempre", no
 speculative docs, and the whole language split. These are the candidates where a skill's prose is
@@ -166,7 +166,7 @@ at `south` counter-clockwise (documented as the *return* order); and
 
 `template_animation_id` is a plain string with **no enum** in the spec; its description lists 10 ids
 then literally truncates with `...`. Any skill claiming a complete template list would be inventing
-one — which `AGENTS.md:20@4a84b2d0` forbids.
+one — which `AGENTS.md:20@b5b22e84` forbids.
 
 ### C. TypeScript execution model
 `.ts` extension on every relative import and `node:` prefix on every builtin are not style — they
@@ -233,7 +233,7 @@ built on top of them would otherwise encode the bug as the rule.
 11. `npm run refresh-openapi` points at `tools/pixellab-pipeline/scripts/refresh-openapi.mjs`; the
     directory does not exist.
 12. `npm run codegen` emits `openapi/schema.d.ts`, which nothing imports and which is not on disk —
-    so the compile-error drift detector promised by `AGENTS.md:31@4a84b2d0` and
+    so the compile-error drift detector promised by `AGENTS.md:31@b5b22e84` and
     `docs/adr/0002-cliente-rest-gerado-do-openapi.md:30@56cea0d4` is inert.
 13. `README.md:13@ac80ebc0` links `ferramentas/pixellab-pipeline/` (folder is `tools/`), and
     `README.md:11` links `docs/00-visao-geral/conceito.md`, which was never written. 15 broken

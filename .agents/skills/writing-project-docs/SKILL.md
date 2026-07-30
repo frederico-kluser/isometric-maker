@@ -31,7 +31,7 @@ in `docs/` exists in the vendored OpenAPI spec** (`:28`). That last one is the i
 is what stops the documentation from rotting the way the previous guide did.
 
 The seven the checker cannot see are the ones an agent silently breaks
-(`AGENTS.md:55@4a84b2d0`):
+(`AGENTS.md:55@b5b22e84`):
 
 1. absolute paths always, never relative
 2. dates in ISO form
@@ -47,7 +47,7 @@ index is the map, and a doc missing from it is a doc nobody finds.
 ### Honesty is a hard rule, not a tone preference
 
 > "Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior
-> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:76@4a84b2d0`
+> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:75@b5b22e84`
 
 The existing docs do this well and the pattern is worth copying: `docs/01-pixellab/custos-e-limites.md:237@86c1d244`
 lists what remains unverified, and `docs/adr/0007-fase1-vm-unica.md:24@385b9c10` marks its central
@@ -56,7 +56,7 @@ common way a correct document becomes a wrong one.
 
 ### No speculative documentation
 
-> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@4a84b2d0`
+> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@b5b22e84`
 
 `docs/README.md` lists 57 entries and 42 of them are still `pendente`. Adding prose to a pending
 entry is only worth doing when the thing it describes exists.
@@ -70,7 +70,7 @@ commit messages: **English** (`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@ab
 And a rule that overrides the machine-wide default:
 
 > "**Nunca assine `Co-authored-by Claude` automaticamente** — o usuário decide caso a caso."
-> — `AGENTS.md:18@4a84b2d0`
+> — `AGENTS.md:18@b5b22e84`
 
 ### ADRs: the part that is irreversible
 

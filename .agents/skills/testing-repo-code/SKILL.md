@@ -47,7 +47,7 @@ property, byte-identical determinism of the packed sheet
 | `src/generate.ts` | submit/poll/ledger, and the never-resubmit rule |
 | `src/queue.ts` | state transitions, expiry deadlines, the limiter |
 
-This matters beyond coverage hygiene. `AGENTS.md:38@4a84b2d0` states the idempotency guarantee as
+This matters beyond coverage hygiene. `AGENTS.md:37@b5b22e84` states the idempotency guarantee as
 though a test enforced it:
 
 > "Se você mexer em `src/catalog.ts` ou na função de hash, o teste de idempotência tem que continuar

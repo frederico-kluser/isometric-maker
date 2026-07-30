@@ -18,7 +18,7 @@ after any crash or interruption.
 ### The contract
 
 > "Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o
-> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@4a84b2d0`
+> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@b5b22e84`
 
 `plan` and `estimate` never touch the network in a paid way. `generate` spends. That asymmetry is
 the whole design, and it only holds while the hashes hold.
@@ -96,6 +96,11 @@ silently inactive.
    — a lost local file means paying again.
 5. **CI trap.** Non-TTY without `--yes` returns exit 2 even when the verdict is `allow`
    (`tools/pixellab-pipeline/src/cli.ts:285@b333647e`).
+6. **`verify` proves less than its name suggests.** It compares file existence and byte size only
+   (`tools/pixellab-pipeline/src/cli.ts:172@b333647e`); the `sha256` recorded at generation time
+   (`tools/pixellab-pipeline/src/generate.ts:169@d7959fa4`) is never re-read. A green `verify` means
+   the artifacts are present and the right length — not that they are the right images. A truncated
+   download that happens to match the recorded size passes.
 
 ### The never-resubmit rule
 

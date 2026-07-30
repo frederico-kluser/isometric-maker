@@ -26,7 +26,7 @@ if merged, or *never retrieved* if split".
 six or seven. This map lands at seven functional skills plus the two mandated meta-skills. Nothing
 was added "for completeness": there is no skill for the sprite-studio UI (its README already carries
 that knowledge and it is a leaf tool), none for git workflow (three rules, they live in `AGENTS.md`),
-and none for cloud/infra (`AGENTS.md:73@4a84b2d0` forbids documenting infra that does not exist).
+and none for cloud/infra (`AGENTS.md:73@b5b22e84` forbids documenting infra that does not exist).
 
 **Scope boundary against the global skills.** `/home/ondokai/Projects/ferro-e-cinzas-skills/` already
 installs `pixellab-assets` and `ferro-engine` machine-wide. Those carry *general* API lore and
@@ -57,7 +57,7 @@ its global counterpart and defers to it rather than restating it.
   the deterministic form of the repo's hardest rule.
 - **Triggers:** any mention of a PixelLab endpoint, parameter, enum, size limit, price, animation
   template, direction ordering, `background_job_id`, or refreshing the spec.
-- **Why it exists:** `AGENTS.md:20-22@4a84b2d0` forbids writing about this API from memory, and the
+- **Why it exists:** `AGENTS.md:22@b5b22e84` forbids writing about this API from memory, and the
   spec is 387 KB with enums nested under `anyOf: [{real},{null}]` so naive lookups silently miss
   constraints. The skill's job is to make consulting the spec cheaper than guessing.
 - **Bundles:** `scripts/inspect-spec.mjs` (tested `jq`/node queries as a CLI), plus
