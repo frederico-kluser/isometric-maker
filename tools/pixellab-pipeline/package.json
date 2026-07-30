@@ -1,0 +1,30 @@
+{
+  "name": "@ferro-e-cinzas/pixellab-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build-time asset pipeline for PixelLab API v2. Idempotent, budget-guarded, resumable.",
+  "type": "module",
+  "bin": {
+    "pixellab": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "echo \"Node 24 executa .ts direto; use typecheck\"",
+    "codegen": "openapi-typescript openapi/openapi-v2.json -o openapi/schema.d.ts",
+    "refresh-openapi": "node scripts/refresh-openapi.mjs",
+    "cli": "node src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/*.test.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.34.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "openapi-typescript": "^7.5.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
