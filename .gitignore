@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+# artefatos brutos do PixelLab: grandes, reconstruíveis pelo lockfile
+tools/pixellab-pipeline/.cache/
+# estado de fila e ledger: local, não versionado
+tools/pixellab-pipeline/.pixellab/queue-state.json
+
+# arte gerada pelo estúdio: reconstruível a partir de studio.json
+tools/sprite-studio/assets/
