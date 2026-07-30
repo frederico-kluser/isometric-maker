@@ -2,11 +2,11 @@
 
 > **Quick Start (TL;DR)**
 >
-> Todo asset visual do jogo vem daqui. A API muda sem versionar, então a fonte da verdade é o spec vendorizado, não a memória nem os blogs.
+> Todo asset visual que o editor produz vem daqui. A API muda sem versionar, então a fonte da verdade é o spec vendorizado, não a memória nem os blogs.
 >
 > ```bash
 > export PIXELLAB_SECRET="seu-token"   # https://pixellab.ai/account
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 > node src/cli.ts balance
 > ```
 
@@ -16,26 +16,18 @@ Cinco fatos que você precisa saber antes de escrever qualquer linha de código:
 2. **A maioria das gerações é assíncrona.** 23 dos 56 endpoints POST devolvem `202` + `background_job_id`; você faz poll em `GET /background-jobs/{id}`. Latência típica de **2 a 5 minutos** por job.
 3. **Custa dinheiro real por chamada** — e a variação entre modos é de até 40×. `mode='standard'` custa 1 geração; `mode='pro'` custa 20–40. Leia [`custos-e-limites.md`](custos-e-limites.md) **antes** de rodar um lote.
 4. **O SDK oficial de JS não serve.** `@pixellab-code/pixellab@1.0.2` tem `api.pixellab.ai/v1` hardcoded e expõe 8 das 56 operações. Usamos cliente gerado do OpenAPI. Ver [ADR 0002](../adr/0002-cliente-rest-gerado-do-openapi.md).
-5. **A consistência de estilo não vem de `seed`.** Vem de paleta forçada + imagem de referência + derivar variantes de um personagem-base em vez de gerar cada um do zero. Ver [`consistencia-estilo.md`](consistencia-estilo.md).
+5. **A consistência de estilo não vem de `seed`.** Vem de paleta forçada, imagem de referência, e derivar variantes de um personagem-base em vez de gerar cada um do zero. É por isso que o construtor de personagem congela as artes cardeais em vez de pedir oito sprites independentes.
 
 ## Índice
 
 | Documento | O que responde |
 |---|---|
-| [`autenticacao-e-saldo.md`](autenticacao-e-saldo.md) | Token, header, `GET /balance`, as duas unidades de cobrança |
 | [`modelo-assincrono.md`](modelo-assincrono.md) | `202` + job id, poll, os códigos estranhos (423, 410, 529), concorrência |
-| [`endpoints-personagens.md`](endpoints-personagens.md) | 8 direções, v3, Pro, `create-character-state`, proporções, templates de corpo |
-| [`endpoints-animacao.md`](endpoints-animacao.md) | `template` vs `v3` vs `pro`, a biblioteca de animações prontas, custo por direção |
-| [`endpoints-tilesets.md`](endpoints-tilesets.md) | Wang tiles, `corners`, `pattern_4x4`, encadeamento de biomas |
-| [`endpoints-imagem.md`](endpoints-imagem.md) | pixflux, pixen, bitforge, inpaint, rotate, image-to-pixelart |
-| [`endpoints-objetos-ui.md`](endpoints-objetos-ui.md) | `map-objects` (e sua expiração em 8 h), UI, fonte, retrato, lip-sync |
 | [`custos-e-limites.md`](custos-e-limites.md) | **Tabela de preço estimado e limite de tamanho por endpoint** |
-| [`consistencia-estilo.md`](consistencia-estilo.md) | Como fazer 2.700 imagens parecerem do mesmo jogo |
-| [`autotiling.md`](autotiling.md) | Do `pattern_4x4` até terreno desenhado no PixiJS |
-| [`cookbook.md`](cookbook.md) | Receitas para os casos concretos deste jogo |
-| [`limitacoes.md`](limitacoes.md) | O que não funciona bem, sem marketing |
 | [`licenca-e-termos.md`](licenca-e-termos.md) | Quem é dono do asset, uso comercial, Open RAIL-M, ausência de indenização |
 | [`delta-vs-guia-antigo.md`](delta-vs-guia-antigo.md) | O que mudou desde `tech-docs/games/5.md` |
+
+**O resto da superfície da API não está escrito em prosa aqui — e é deliberado.** Um manual paralelo ao spec envelhece em silêncio, que é exatamente como o guia antigo apodreceu. As perguntas por endpoint são respondidas consultando o spec vendorizado, e as armadilhas por família moram nas skills de `.agents/skills/` (dez delas cobrem os 79 endpoints), que têm verificação automática contra o spec.
 
 ## As seis superfícies do PixelLab
 
@@ -68,7 +60,7 @@ Porque a documentação pública sobre PixelLab é sistematicamente errada em tr
 
 ## Referências
 
-- [`https://api.pixellab.ai/v2/openapi.json`](https://api.pixellab.ai/v2/openapi.json) — fonte da verdade, vendorizada em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/` (capturada 2026-07-29, sha256 em `PROVENIENCIA.txt`)
+- [`https://api.pixellab.ai/v2/openapi.json`](https://api.pixellab.ai/v2/openapi.json) — fonte da verdade, vendorizada em `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/` (capturada 2026-07-29, sha256 em `PROVENIENCIA.txt`)
 - [`https://api.pixellab.ai/v2/llms.txt`](https://api.pixellab.ai/v2/llms.txt) — índice legível por máquina
 - [`https://api.pixellab.ai/v2/redoc`](https://api.pixellab.ai/v2/redoc) — referência navegável
 - [`https://api.pixellab.ai/mcp/docs`](https://api.pixellab.ai/mcp/docs) — docs do MCP, onde estão as latências e as bandas de `generations`

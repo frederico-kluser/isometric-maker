@@ -5,7 +5,7 @@
 > Tela de autoria: modelo base nu e careca nas 8 direções, poses, e guarda-roupa que vale para todos os personagens. O token nunca chega ao navegador.
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/sprite-studio
+> cd /home/ondokai/Projects/isometric-maker/tools/sprite-studio
 > export PIXELLAB_SECRET="..."
 > npm run dev        # http://localhost:5174
 > ```
@@ -90,14 +90,14 @@ Três decisões, e o porquê de cada uma:
 ## Limitações conhecidas
 
 - **Sem editor visual de esqueleto.** Pose `skeleton` se cadastra pela tela, mas os keypoints se editam à mão no JSON.
-- **Sem paper-doll em tempo de execução.** O guarda-roupa gera um personagem completo vestido, não uma camada separada — e isso é deliberado: **a API não tem primitiva de equipamento entre personagens**, e o `transfer-outfit-v2` é limitado a 3 frames por job acima de 80px. As três soluções que jogos reais usam estão em [`docs/03-arquitetura/paper-doll-e-equipamento.md`](../../docs/03-arquitetura/paper-doll-e-equipamento.md).
+- **Sem paper-doll em tempo de execução.** O guarda-roupa gera um personagem completo vestido, não uma camada separada — e isso é deliberado: **a API não tem primitiva de equipamento entre personagens**, e o `transfer-outfit-v2` é limitado a 3 frames por job acima de 80px. As três soluções que jogos reais usam estão em [`docs/02-personagem/guarda-roupa-e-silhueta.md`](../../docs/02-personagem/guarda-roupa-e-silhueta.md).
 - **Sem aprovar/reprovar na tela.** Regerar sobrescreve. O `rejectedHashes` do pipeline resolve isso do lado do lote, mas ainda não está ligado aqui.
 - **Sem guard de orçamento na tela.** O `cost.ts` do pipeline tem os tetos; o estúdio ainda não os consulta antes de submeter.
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/docs/01-pixellab/` — o manual da API
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — o spec, fonte de verdade
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/api.ts` — o transporte reaproveitado (429/529/423, backoff, poll)
+- `/home/ondokai/Projects/isometric-maker/docs/01-pixellab/` — o manual da API
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json` — o spec, fonte de verdade
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/api.ts` — o transporte reaproveitado (429/529/423, backoff, poll)
 
 **Última atualização:** 2026-07-30

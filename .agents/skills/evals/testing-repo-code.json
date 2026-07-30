@@ -20,7 +20,7 @@
     },
     {
       "must_contain": "That test does not exist",
-      "why": "AGENTS.md claims an idempotency test enforces the guarantee; the skill must keep contradicting that claim until it is true"
+      "why": "AGENTS.md now names the missing idempotency test itself; the skill must keep stating the gap plainly until the test lands, so no agent reads the guarantee as enforced"
     },
     {
       "must_contain": "There is no CI",

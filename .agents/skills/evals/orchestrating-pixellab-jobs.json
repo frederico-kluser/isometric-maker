@@ -1,0 +1,40 @@
+{
+  "skill": "orchestrating-pixellab-jobs",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "fazer o poll do job ate terminar", "should_trigger": true },
+    { "query": "tratar o erro 429 da API", "should_trigger": true },
+    { "query": "quantos creditos ainda sobraram na conta", "should_trigger": true },
+    { "query": "retomar a geracao depois do crash", "should_trigger": true },
+    { "query": "o job travou e nao sai de processing", "should_trigger": true },
+    { "query": "escrever o ADR da decisao de combate", "should_trigger": false },
+    { "query": "converter a foto em pixel art", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "36 hand back a job id and 23 declare",
+      "why": "the load-bearing count: 13 async endpoints answer 200, so the status code cannot classify them"
+    },
+    {
+      "must_contain": "shape of the body",
+      "why": "the only correct branch; a code-based branch is wrong even in principle for the dual 200/202 pair"
+    },
+    {
+      "must_contain": "already been charged",
+      "why": "the id must be persisted before the first poll or the generation is lost with no refund"
+    },
+    {
+      "must_contain": "529",
+      "why": "non-standard rate-limit code absent from most clients' transient lists"
+    },
+    {
+      "must_contain": "stalled",
+      "why": "dedicated job routes emit statuses the generic route never does; treating them as failure abandons live jobs"
+    },
+    {
+      "must_contain": "auto-delete 8 hours",
+      "why": "map object artefacts expire, so the download URL is not a durable reference"
+    }
+  ],
+  "check_provenance": true
+}

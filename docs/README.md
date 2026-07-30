@@ -2,147 +2,105 @@
 
 > **Quick Start (TL;DR)**
 >
-> Comece por [`01-pixellab/README.md`](./01-pixellab/README.md) se vai gerar arte, ou por [`02-design/combate-zonas-oscilantes.md`](./02-design/combate-zonas-oscilantes.md) se quer entender o que torna este jogo diferente.
+> Quer entender o produto? [`00-produto/visao.md`](00-produto/visao.md). Quer gerar arte? [`01-pixellab/README.md`](01-pixellab/README.md). Quer saber por que algo é do jeito que é? [`adr/`](adr/).
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
-> node src/cli.ts plan     # nunca gasta
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-07-29**. As pastas são numeradas do concreto (o jogo) para o abstrato (infra), seguindo o padrão de `/home/ondokai/Projects/config`.
+Estado em **2026-07-30**: **22 arquivos, e todos existem**. Esta tabela não lista documento que não foi escrito — a versão anterior deste índice prometia 57 entradas e entregava 15, e a correção foi tirar a promessa, não apressar a escrita.
 
-## 00 — Visão geral
+As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
-| Arquivo | Descrição | Estado |
+## 00 — Produto
+
+| Arquivo | Descrição |
+|---|---|
+| [`visao.md`](00-produto/visao.md) | O que o editor é, **o que ele não é**, as quatro partes e os requisitos de ambiente |
+| [`glossario.md`](00-produto/glossario.md) | O mesmo conceito em português e em inglês, e as armadilhas de vocabulário |
+
+## 01 — PixelLab
+
+A API que gera a arte. Ela **muda sem versionar**, então a prosa aqui é mínima por decisão: o que envelhece mal fica no spec vendorizado e nas skills, que têm verificação automática contra ele.
+
+| Arquivo | Descrição |
+|---|---|
+| [`README.md`](01-pixellab/README.md) | Os cinco fatos, as seis superfícies do produto, os três erros que os blogs cometem |
+| [`custos-e-limites.md`](01-pixellab/custos-e-limites.md) | Preço estimado e limite de tamanho por endpoint, e o orçamento de um projeto |
+| [`modelo-assincrono.md`](01-pixellab/modelo-assincrono.md) | `202` mais job id, poll, os códigos estranhos (423, 410, 529), concorrência |
+| [`licenca-e-termos.md`](01-pixellab/licenca-e-termos.md) | Posse do asset, uso comercial, Open RAIL-M, ausência de indenização de IP |
+| [`delta-vs-guia-antigo.md`](01-pixellab/delta-vs-guia-antigo.md) | Errata de 15 itens contra o guia antigo em `tech-docs/games/5.md` |
+
+## 02 — Personagem
+
+| Arquivo | Descrição |
+|---|---|
+| [`guarda-roupa-e-silhueta.md`](02-personagem/guarda-roupa-e-silhueta.md) | Por que a API não faz paper-doll, as três soluções que jogos reais usam, e por que silhueta é restrição de autoria |
+
+## Pastas reservadas
+
+Numeração reservada, **sem arquivo em disco**. A convenção 12 diz que doc de infra escrita antes de existir infra é ficção — então cada pasta nasce junto com o código que descreve, nunca antes.
+
+| Pasta | O que vai morar ali | Onda |
 |---|---|---|
-| `conceito.md` | O jogo em cinco regras e por que cada uma existe | pendente |
-| `pilares-de-design.md` | Os quatro pilares e a regra de veto: feature que reduz risco é rejeitada por default | pendente |
-| `glossario.md` | Vocabulário pt-BR do jogo e do código | pendente |
+| `03-mapa/` | Projeção e coordenadas, o formato do mapa XYZ, autoladrilhamento e regras de peça | W2 |
+| `04-mecanicas/` | Movimento, colisão, degrau e salto por altura | W3 |
+| `05-runtime/` | Como o projeto exportado é carregado e executado | W4 |
+| `06-editor/` | Arquitetura do editor, o formato do arquivo de projeto, strings e i18n | W0 e W1 |
 
-## 01 — PixelLab (o manual)
-
-A parte mais profunda. Toda arte do jogo vem daqui, e a documentação pública sobre esta API é sistematicamente errada.
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| [`README.md`](./01-pixellab/README.md) | Índice, as seis superfícies do produto, os três erros que os blogs cometem | **pronto** |
-| [`custos-e-limites.md`](./01-pixellab/custos-e-limites.md) | Preço estimado e limite de tamanho por endpoint, as três armadilhas de custo, orçamento do jogo | **pronto** |
-| `autenticacao-e-saldo.md` | Bearer, `PIXELLAB_SECRET`, `GET /balance`, as duas unidades de cobrança | pendente |
-| [`modelo-assincrono.md`](./01-pixellab/modelo-assincrono.md) | `202` + `background_job_id`, poll, os códigos 423/410/529, concorrência por tier | **pronto** |
-| `endpoints-personagens.md` | 8 direções, v3, Pro, `create-character-state`, proporções, templates de corpo | pendente |
-| `endpoints-animacao.md` | `template` vs `v3` vs `pro`, biblioteca de animações, custo por direção | pendente |
-| `endpoints-tilesets.md` | Wang tiles, `corners`, `pattern_4x4`, encadeamento de biomas | pendente |
-| `endpoints-imagem.md` | pixflux, pixen, bitforge, inpaint, rotate | pendente |
-| `endpoints-objetos-ui.md` | `map-objects` e a expiração em 8 h, UI, fonte, retrato | pendente |
-| `consistencia-estilo.md` | Como fazer 2.700 imagens parecerem do mesmo jogo | pendente |
-| `autotiling.md` | Do `pattern_4x4` ao terreno desenhado no PixiJS | pendente |
-| `cookbook.md` | Receitas contra o nosso pipeline | pendente |
-| `limitacoes.md` | O que não funciona bem, sem marketing | pendente |
-| [`licenca-e-termos.md`](./01-pixellab/licenca-e-termos.md) | Posse dos assets, uso comercial, Open RAIL-M, ausência de indenização de IP | **pronto** |
-| [`delta-vs-guia-antigo.md`](./01-pixellab/delta-vs-guia-antigo.md) | Errata de 15 itens contra `/home/ondokai/Projects/tech-docs/games/5.md`, e o que dele continua válido | **pronto** |
-
-## 02 — Design (GDD)
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| [`combate-zonas-oscilantes.md`](./02-design/combate-zonas-oscilantes.md) | A mecânica central: alvo travado, zonas oscilantes, dano por ângulo, anti-cheat e o risco de não ser divertido | **pronto** |
-| `permadeath-e-full-loot.md` | O que é apagado, o corpo saqueável, e a curva de reengajamento pós-morte | pendente |
-| `equipamento-define-classe.md` | Build é equipamento; perder o set é perder a classe | pendente |
-| `pocoes-e-regeneracao.md` | Cura lenta e gradual como fluxo de regeneração, não cura instantânea, e o efeito disso no PvP | pendente |
-| `stamina-descanso-sono.md` | Consumo, descanso, sono e o acampamento como objetivo | pendente |
-| `zonas-e-pvp.md` | Faixas de risco e por que alguém entraria na pior delas | pendente |
-| `criaturas-e-monstros.md` | Bestiário: é a fonte que alimenta o catálogo de assets | pendente |
-| `missoes.md` | Contratos e recompensas sem ponto de exclamação | pendente |
-
-## 03 — Arquitetura
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| `servidor-autoritativo.md` | Loop de tick, predição só do jogador local, o que o cliente nunca decide | pendente |
-| `netcode-e-protocolo.md` | WebSocket binário, orçamento de bytes/s por jogador como KPI de custo | pendente |
-| `interest-management-aoi.md` | Grid espacial e o caso patológico de 80 jogadores no mesmo tile | pendente |
-| `sharding-de-zonas.md` | Uma zona = um processo; handoff com escrow de inventário | pendente |
-| `banco-de-dados.md` | DDL de `character`, `item`, `item_ledger`, `corpse`, `consignment_listing` | pendente |
-| `transacao-de-morte-e-loot.md` | Morte + full loot atômicos e à prova de duplicação | pendente |
-| `efeitos-por-tick.md` | Regeneração e stamina sem um timer por jogador por efeito | pendente |
-| [`paper-doll-e-equipamento.md`](./03-arquitetura/paper-doll-e-equipamento.md) | Equipamento visível em 8 direções: o que a API não resolve e as 3 soluções de jogos reais | **pronto** |
-
-## 04 — Cloud
-
-Escrito por último, de propósito: doc de infra antes de existir infra é ficção.
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| `fase-1-vm-unica.md` | Uma VM em São Paulo, docker compose, 200–500 CCU | pendente |
-| `fase-2-gke-agones.md` | GKE + Agones, e o que **não** melhora ao migrar | pendente |
-| `custos-brl.md` | Custo mensal em BRL. Achado central: **egress domina a conta, não CPU** | pendente |
-| `gatilho-de-migracao.md` | Critério numérico para sair da fase 1, e os anti-gatilhos | pendente |
-
-## 05 — Economia
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| `economia-player-driven.md` | Nenhum item entra no mundo sem passar por um jogador | pendente |
-| `consignacao-npc.md` | O NPC não cria e não compra: só revende item de jogador | pendente |
-| `sinks-e-inflacao.md` | Reparo, taxa, decomposição, e a morte como o maior sink do jogo | pendente |
-| `anti-rmt.md` | RMT é inevitável: detectar e tornar caro | pendente |
-
-## 06 — Anti-cheat e moderação
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| `sem-gms.md` | O que substitui cada ticket de GM, e o que explicitamente não terá remédio | pendente |
-| `validacao-server-side.md` | Movimento, cooldown, plausibilidade estatística de acerto por zona | pendente |
-| `anti-bot.md` | Detecção comportamental e por que CAPTCHA em MMO é ruim | pendente |
-| `anti-dupe.md` | Trigger que torna `UPDATE` ad-hoc de item estruturalmente impossível | pendente |
-
-## 07 — Pipeline de assets
-
-| Arquivo | Descrição | Estado |
-|---|---|---|
-| `catalogo-e-idempotencia.md` | As três hashes e a tabela de decisão de invalidação | pendente |
-| `atlas-e-pixijs.md` | Spritesheet, extrusão, e as cinco regras de pixel-perfect | pendente |
-| `orcamento-e-tempo.md` | Quanto custa e quanto demora a biblioteca completa | pendente |
-
-### Ferramentas
+## Ferramentas
 
 | Ferramenta | O que faz | Estado |
 |---|---|---|
-| [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de orçamento e atlas | **funcional** |
-| [`tools/sprite-studio`](../tools/sprite-studio/README.md) | Tela de autoria: corpo base 8 direções, poses, guarda-roupa | **funcional** |
+| [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de custo e empacotador de atlas | **funcional** |
+| [`tools/sprite-studio`](../tools/sprite-studio/README.md) | Tela de autoria: corpo base nas 8 direções, poses, guarda-roupa. Evolui para o construtor de personagem | **funcional** |
+| [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
 
 ## ADR — decisões registradas
 
-Nunca editadas. Uma decisão revista gera ADR novo que substitui a anterior.
+Nunca editadas. Uma decisão revista gera ADR novo que substitui a anterior, e a antiga fica exatamente como foi escrita. A ADR nova declara `**Substitui:** ADR NNNN` numa linha logo abaixo do Status; a coluna `Situação` abaixo é o único lugar onde a supersessão aparece para quem lê o índice.
 
-| ADR | Decisão | Estado |
+| ADR | Decisão | Situação |
 |---|---|---|
-| [`0001`](./adr/0001-pixijs-em-vez-de-cocos.md) | PixiJS 8 + Vite no cliente, divergindo da pesquisa própria que apontava Cocos Creator | **pronto** |
-| [`0002`](./adr/0002-cliente-rest-gerado-do-openapi.md) | Cliente REST do OpenAPI vendorizado, não o SDK oficial | **pronto** |
-| [`0003`](./adr/0003-permadeath-total.md) | Permadeath total, sem exceção, sem restauração | **pronto** |
-| [`0004`](./adr/0004-combate-alvo-travado-zonas-oscilantes.md) | Combate travado no alvo com zonas oscilantes | **pronto** |
-| [`0005`](./adr/0005-low-top-down-8-direcoes.md) | `view: "low top-down"`, 8 direções, ordem canônica S,SW,W,NW,N,NE,E,SE | **pronto** |
-| [`0006`](./adr/0006-animacao-em-template-mode.md) | Animação em `mode='template'`; `pro` proibido sem decisão explícita | **pronto** |
-| [`0007`](./adr/0007-fase1-vm-unica.md) | Fase 1 VM única em São Paulo, com gatilho numérico para GKE + Agones | **pronto** |
-| [`0008`](./adr/0008-idioma-docs-ptbr-codigo-en.md) | Docs e texto de jogo em pt-BR; código e commits em inglês | **pronto** |
+| [`0001`](./adr/0001-pixijs-em-vez-de-cocos.md) | PixiJS 8 + Vite no cliente, divergindo da pesquisa própria que apontava Cocos Creator | substituída por 0014 |
+| [`0002`](./adr/0002-cliente-rest-gerado-do-openapi.md) | Cliente REST do OpenAPI vendorizado, não o SDK oficial | vigente |
+| `0003` | Permadeath total | apagada — escopo removido pela 0010 |
+| `0004` | Combate travado no alvo com zonas oscilantes | apagada — escopo removido pela 0010 |
+| [`0005`](./adr/0005-low-top-down-8-direcoes.md) | `view: "low top-down"`, 8 direções, ordem canônica S,SW,W,NW,N,NE,E,SE | substituída por 0015 |
+| [`0006`](./adr/0006-animacao-em-template-mode.md) | Animação em `mode='template'`; `pro` proibido sem decisão explícita | vigente |
+| `0007` | Fase 1 em VM única, com gatilho numérico para GKE | apagada — escopo removido pela 0010 |
+| [`0008`](./adr/0008-idioma-docs-ptbr-codigo-en.md) | Docs em pt-BR; código e commits em inglês | vigente |
+| [`0009`](./adr/0009-conhecimento-pixijs-vendorizado.md) | Tipos e skills oficiais do PixiJS 8.19.0 vendorizados; skills citam, não reescrevem a API | vigente |
+| [`0010`](./adr/0010-pivo-para-editor-isometrico.md) | **O produto é um editor isométrico, não um MMORPG** | vigente |
+| [`0011`](./adr/0011-repo-isometric-maker-pasta-power-abuse.md) | Repositório `isometric-maker`, pasta local continua `power-abuse` | substituída por 0017 |
+| [`0012`](./adr/0012-guard-de-orcamento-informativo.md) | O guard de orçamento informa e nunca recusa | vigente |
+| [`0013`](./adr/0013-geometria-isometrica-64x32-z16.md) | Tile 64×32, nível Z de 16 px, Z inteiro e discreto | vigente |
+| [`0014`](./adr/0014-pixijs-para-o-editor.md) | PixiJS 8 continua, agora contra o argumento oposto | vigente |
+| [`0015`](./adr/0015-low-top-down-8-direcoes-isometrico.md) | `low top-down`, 8 direções, e o endpoint que o isométrico obriga | vigente |
+| [`0016`](./adr/0016-ui-ptbr-strings-centralizadas.md) | UI em pt-BR com strings centralizadas desde o primeiro commit | vigente |
+| [`0017`](./adr/0017-nome-unico-isometric-maker.md) | Um nome só: `isometric-maker` no repositório, na pasta e nos pacotes | vigente |
 
 ## Skills
 
-Duas Agent Skills em `/home/ondokai/Projects/ferro-e-cinzas-skills/`, instaladas por symlink em todos os agentes da máquina:
+**29 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
 
-| Skill | Cobre |
-|---|---|
-| `pixellab-assets` | Gerar pixel art sem torrar crédito. Inclui `inspect-spec.mjs`, que responde sobre a API lendo o spec |
-| `ferro-engine` | A engine: netcode, combate, anti-dupe, moderação sem GM |
+Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, e o restante é tarefa e meta.
+
+`enforcing-server-authority` foi **retirada com o pivô e não tem sucessora** — o assunto dela deixou de existir.
 
 ## Histórico
 
-- **2026-07-29** — Repositório criado. Spec v2 do PixelLab vendorizado (sha256 `5b11c9a7afa1…`). Pipeline com `plan`/`estimate`/`balance`/`verify`/`doctor` funcionando. Manual de custos e limites, doc de combate e as 8 ADRs escritos.
+| Data | O que mudou |
+|---|---|
+| 2026-07-29 | Documentação inicial: manual do PixelLab, design de combate, as oito primeiras ADRs |
+| 2026-07-30 | Sprite Studio; conhecimento do PixelLab e do PixiJS vendorizado em vinte skills; ADR 0009 |
+| 2026-07-30 | **Pivô para o isometric-maker** ([ADR 0010](./adr/0010-pivo-para-editor-isometrico.md)): docs e ADRs de MMORPG apagados, sete ADRs novas, índice reescrito sem entrada inexistente |
 
 ## Referências
 
-- [`/home/ondokai/Projects/power-abuse/AGENTS.md`](../AGENTS.md) — regras para agentes, incluindo as 12 convenções de documentação
-- [`/home/ondokai/Projects/config/CLAUDE.md`](/home/ondokai/Projects/config/CLAUDE.md) — origem das 8 convenções obrigatórias de doc
-- [`/home/ondokai/Projects/tech-docs/games/5.md`](/home/ondokai/Projects/tech-docs/games/5.md) — guia anterior do PixelLab, **defasado**; ver `01-pixellab/delta-vs-guia-antigo.md`
+- [`/home/ondokai/Projects/isometric-maker/README.md`](../README.md) — visão geral do repositório
+- [`/home/ondokai/Projects/isometric-maker/AGENTS.md`](../AGENTS.md) — instruções para agentes, e as 12 convenções de documentação
+- [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
+- [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-07-29
+**Última atualização:** 2026-07-30

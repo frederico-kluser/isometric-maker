@@ -21,7 +21,7 @@ O SDK não alcança nada de que precisamos: personagem em 8 direções, tilesets
 
 ## Decisão
 
-Chamar a REST v2 diretamente sobre o `fetch` nativo do Node 24. O spec (`openapi 3.1.0`, 79 paths, 235 schemas, 387 KB) é **vendorizado** em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json`, com data de captura e sha256 em `PROVENIENCIA.txt`.
+Chamar a REST v2 diretamente sobre o `fetch` nativo do Node 24. O spec (`openapi 3.1.0`, 79 paths, 235 schemas, 387 KB) é **vendorizado** em `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json`, com data de captura e sha256 em `PROVENIENCIA.txt`.
 
 ## Consequências
 

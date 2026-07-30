@@ -1,17 +1,17 @@
-# AGENTS.md — Power Abuse
+# AGENTS.md — isometric-maker
 
-Instruções para agentes de código que trabalham neste repositório. `CLAUDE.md` é symlink para este arquivo.
+Instruções para agentes de código que trabalham neste repositório. `CLAUDE.md` é symlink para este arquivo. Leia também **Nome do repositório e caminhos**, mais abaixo: o nome da pasta diverge do nome do repositório de propósito.
 
 ## Idioma — não confunda os dois eixos
 
 | O que | Idioma |
 |---|---|
 | Documentação (`docs/`), README, ADRs, comentários explicativos longos | **português do Brasil** |
-| Todo texto que o jogador lê (UI, itens, diálogo, mensagens de erro do jogo) | **português do Brasil** |
+| Todo texto que o usuário do editor lê (UI, mensagens de erro) e o texto do jogo exportado | **português do Brasil** |
 | Código: identificadores, tipos, funções, arquivos de código, chaves de JSON de dados | **inglês** |
 | Mensagens de commit, branches, PRs | **inglês** |
 
-Nomes de pasta de **documentação** são em português (`docs/05-economia/`). Nomes de pasta de **código** são em inglês (`tools/`, `src/`, `packages/`) — em 40 projetos seus, nenhum diretório de código tem nome em português, e essa regra segue o padrão.
+Nomes de pasta de **documentação** são em português (`docs/03-mapa/`). Nomes de pasta de **código** são em inglês (`tools/`, `src/`, `packages/`) — em 40 projetos seus, nenhum diretório de código tem nome em português, e essa regra segue o padrão.
 
 **Divergência registrada:** `/home/ondokai/Projects/config/CLAUDE.md` manda commit em PT-BR imperativo. Aqui o commit é em inglês, porque este é repositório de código e segue `/home/ondokai/Projects/leet-code-rpg/README.md`. Está em [ADR 0008](docs/adr/0008-idioma-docs-ptbr-codigo-en.md).
 
@@ -24,7 +24,7 @@ A API do PixelLab **muda sem versionar** — o `info.version` do spec é literal
 A fonte da verdade neste repositório é o spec vendorizado:
 
 ```
-/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json
+/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json
 (+ PROVENIENCIA.txt com data de captura e sha256)
 ```
 
@@ -34,9 +34,9 @@ Ao citar preço, escreva **"preço estimado"**. A própria PixelLab rotula a col
 
 ## Regra dura: nada de custo surpresa
 
-Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o mesmo spec **não deve gastar nada**. Se você mexer em `src/catalog.ts` ou na função de hash, o teste de idempotência tem que continuar passando — saldo idêntico antes e depois.
+Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o mesmo spec **não deve gastar nada**. Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro — saldo idêntico antes e depois. **O teste que prova isso ainda não existe; escrevê-lo é item de entrada da próxima onda.**
 
-**Sempre rode `pixellab plan` e `pixellab estimate` antes de qualquer geração.** Nunca use `--force` sem `--reason`. `generate` gasta dinheiro real.
+**Sempre rode `pixellab plan` e `pixellab estimate` antes de qualquer geração.** O guard **informa e nunca recusa** ([ADR 0012](docs/adr/0012-guard-de-orcamento-informativo.md)) — ele estima, mostra o gasto da sessão e do mês, e pede confirmação. Nunca use `--force` sem `--reason`: `--force` fura a **idempotência**, não o orçamento.
 
 Duas decisões de hash que parecem detalhe e não são:
 - O `inputHash` é dos **pixels decodificados**, não dos bytes do arquivo. Reencodar um PNG muda os bytes e não muda a imagem; hashear bytes cobraria de novo por nada.
@@ -44,15 +44,15 @@ Duas decisões de hash que parecem detalhe e não são:
 
 Nunca use `mode='pro'` em animação sem uma decisão explícita registrada: custa 20–40 gerações **por direção** (160–320 para as 8). O default do projeto é `mode='template'`, que custa 1 geração por direção.
 
-## Servidor autoritativo não é negociável
+## O que este projeto não é
 
-O jogo tem permadeath, full loot e nenhum GM. Isso significa que uma falha de autoridade não é um bug de balanceamento, é a destruição do progresso de alguém sem recurso.
+Este é um **editor de jogos isométricos**, local e de usuário único ([ADR 0010](docs/adr/0010-pivo-para-editor-isometrico.md)). Não há jogadores — há um usuário, na própria máquina.
 
-- Nenhuma decisão de dano, acerto, morte, loot ou transação de item pode originar no cliente.
-- Toda transferência de item passa por transação e ledger idempotente. Ver `docs/03-arquitetura/`.
-- O cliente é código público. Trate tudo que vem dele como hostil.
+- Sem servidor autoritativo, sem multiplayer, sem netcode, sem protocolo de rede, sem sharding.
+- Sem permadeath, full loot, economia entre jogadores, anti-cheat ou moderação. Não existe GM porque não existe partida.
+- Reintroduzir qualquer um desses itens exige ADR nova. `scripts/check-docs.sh` falha se um desses termos reaparecer em `docs/`.
 
-## Estilo de documentação — as 8 convenções obrigatórias
+## Estilo de documentação — as 12 convenções obrigatórias
 
 Herdadas de `/home/ondokai/Projects/config/CLAUDE.md`, que é o padrão do usuário:
 
@@ -74,6 +74,8 @@ Além disso, específico deste repo:
 
 Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior que documentação ausente, porque ninguém vai checar depois.
 
+**ADR não se edita.** Uma decisão revista gera ADR nova, que declara `**Substitui:** ADR NNNN` numa linha logo abaixo do Status; a tabela de `docs/README.md` marca a antiga na coluna `Situação`. O mecanismo é unidirecional: o arquivo novo ganha um campo, o antigo nunca é tocado.
+
 ## Comandos
 
 Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da sua ferramenta.
@@ -82,9 +84,10 @@ Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da
 cd tools/pixellab-pipeline && npm test         # node --test src/*.test.ts
 cd tools/pixellab-pipeline && npm run typecheck
 cd tools/sprite-studio     && npm run typecheck
-bash scripts/check-docs.sh                     # convenções de doc + endpoints citados
+bash scripts/check-docs.sh                     # convenções de doc + endpoints + termos proibidos + links
 node .agents/skills/scripts/lint-skills.mjs    # formato das skills
 node .agents/skills/scripts/run-skill-evals.mjs
+node tools/pixi-reference/scripts/vendor-types.mjs --check   # integridade do vendor do PixiJS
 ```
 
 Não há linter, formatter nem CI neste repositório. O compilador e esses scripts são as únicas opiniões automatizadas que existem.
@@ -97,12 +100,20 @@ Toda tarefa passa por [`.agents/skills/project-router`](.agents/skills/project-r
 
 Três hooks em `.claude/settings.json` tornam determinístico o que prosa não garante: escrita em `SKILL.md` existente exige token de validação fresco; `.env` e `secrets/` são ilegíveis; padrões destrutivos de shell são bloqueados. Hooks são lidos no início da sessão — editar `settings.json` só vale na próxima.
 
-**As skills são em inglês, por decisão do sistema que as gerou** — divergem da regra de idioma acima, que continua valendo para `docs/`, README e texto de jogo. As perguntas do router ao usuário e o `TASK_PLAN.md` são em português, por requisito funcional.
+**As skills são em inglês, por decisão do sistema que as gerou** — divergem da regra de idioma acima, que continua valendo para `docs/`, README e texto do editor. As perguntas do router ao usuário e o `TASK_PLAN.md` são em português, por requisito funcional.
+
+A skill `enforcing-server-authority` foi **retirada com o pivô e não tem sucessora**: o assunto dela deixou de existir. A ausência é decisão, não acidente.
+
+## Nome do repositório e caminhos
+
+Repositório, pasta local e escopo npm são o mesmo nome: **`isometric-maker`**. Todo caminho absoluto aponta para `/home/ondokai/Projects/isometric-maker/`, e os pacotes são `@isometric-maker/*`.
+
+A [ADR 0011](docs/adr/0011-repo-isometric-maker-pasta-power-abuse.md) tinha mantido a pasta com o nome antigo para não quebrar worktrees; a [ADR 0017](docs/adr/0017-nome-unico-isometric-maker.md) reverteu isso e purgou o nome anterior. O nome `power-abuse` só sobrevive no **arquivo** da 0011, que nomeia a decisão desfeita — e deve continuar lá.
 
 ## Referências
 
 - [`README.md`](README.md) — visão geral do projeto
 - [`docs/README.md`](docs/README.md) — índice da documentação
+- [`docs/00-produto/visao.md`](docs/00-produto/visao.md) — o que o editor é e o que ele não é
 - [`docs/adr/`](docs/adr/) — decisões e seus motivos
 - [`.agents/skills/catalog.md`](.agents/skills/catalog.md) — índice das skills
-- [`.agents/skills/project-analysis.md`](.agents/skills/project-analysis.md) — o levantamento que originou as skills

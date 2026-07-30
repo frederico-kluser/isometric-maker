@@ -29,7 +29,7 @@ node --test --test-name-pattern="extrusion" src/*.test.ts   # one test
 Tests are co-located as `src/<module>.test.ts` and import from `node:test` and
 `node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@d28e4f8a`).
 
-`tools/sprite-studio` has **no test script at all** (`tools/sprite-studio/package.json:8@ecf4958f`).
+`tools/sprite-studio` has **no test script at all** (`tools/sprite-studio/package.json:8@ee3664ec`).
 Its only automated signal is `npm run typecheck`.
 
 ### What is covered, and what is not
@@ -47,15 +47,19 @@ property, byte-identical determinism of the packed sheet
 | `src/generate.ts` | submit/poll/ledger, and the never-resubmit rule |
 | `src/queue.ts` | state transitions, expiry deadlines, the limiter |
 
-This matters beyond coverage hygiene. `AGENTS.md:37@e451cfee` states the idempotency guarantee as
-though a test enforced it:
+This matters beyond coverage hygiene. `AGENTS.md:37@eb529ae5` states the idempotency guarantee and,
+in the same sentence, names the fact that nothing enforces it:
 
-> "Se você mexer em `src/catalog.ts` ou na função de hash, o teste de idempotência tem que continuar
-> passando — saldo idêntico antes e depois."
+> "Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro —
+> saldo idêntico antes e depois. **O teste que prova isso ainda não existe; escrevê-lo é item de
+> entrada da próxima onda.**"
 
-That test does not exist. Until it does, a change to those modules produces **no external signal**,
-which under this repo's memory rules means nothing learned there can be persisted on a test result —
-only on an explicit user confirmation. Say so rather than implying a green suite covered it.
+That test does not exist. The difference from before is only that the contract now admits it instead
+of implying otherwise — the gap is named, dated and owned, but it is still a gap.
+
+Until it lands, a change to those modules produces no external signal, which under this repo's
+memory rules means nothing learned there can be persisted on a test result — only on an explicit
+user confirmation. Say so rather than implying a green suite covered it.
 
 ### What a good test looks like here
 

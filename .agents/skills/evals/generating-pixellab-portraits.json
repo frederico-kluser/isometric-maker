@@ -1,0 +1,36 @@
+{
+  "skill": "generating-pixellab-portraits",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "gerar o retrato do NPC pro dialogo", "should_trigger": true },
+    { "query": "sincronizar a boca com a fala", "should_trigger": true },
+    { "query": "animacao de fala da cabeca falante", "should_trigger": true },
+    { "query": "converter o sprite inteiro num busto", "should_trigger": true },
+    { "query": "quantos visemes gerar por expressao", "should_trigger": true },
+    { "query": "calcular o dano no tick do servidor", "should_trigger": false },
+    { "query": "rodar o lint das skills", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "only step that costs",
+      "why": "the whole cost structure: pay once per expression, then every line of dialogue is free"
+    },
+    {
+      "must_contain": "the one a game should call",
+      "why": "lip-sync returns a frame plan an engine can time exactly; a GIF cannot"
+    },
+    {
+      "must_contain": "must match across every expression",
+      "why": "a viseme_count mismatch is a 400, not a silent fallback"
+    },
+    {
+      "must_contain": "stores nothing",
+      "why": "the stateless portrait form loses the frames unless the response is persisted"
+    },
+    {
+      "must_contain": "Requires a paid plan",
+      "why": "the pipeline can be built entirely on a free tier and then fail at the only step that matters"
+    }
+  ],
+  "check_provenance": true
+}

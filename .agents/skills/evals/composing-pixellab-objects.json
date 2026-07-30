@@ -1,0 +1,33 @@
+{
+  "skill": "composing-pixellab-objects",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "gerar o bau e o barril do cenario", "should_trigger": true },
+    { "query": "criar os objetos do mapa", "should_trigger": true },
+    { "query": "objeto visto de 8 angulos", "should_trigger": true },
+    { "query": "escolher quais frames candidatos ficar", "should_trigger": true },
+    { "query": "apagar o objeto e as rotacoes dele", "should_trigger": true },
+    { "query": "criar um estado novo do objeto", "should_trigger": true },
+    { "query": "rodar os testes do pipeline", "should_trigger": false },
+    { "query": "registrar a decisao num ADR novo", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "review",
+      "why": "the status that holds paid candidates until frames are selected or dismissed"
+    },
+    {
+      "must_contain": "auto-deletes 8 hours after creation",
+      "why": "map object artefacts expire; storing the URL instead of the PNG loses them"
+    },
+    {
+      "must_contain": "Do not pass `directions` for 1-direction objects",
+      "why": "a confusing rejection that looks like a bug in the caller's direction list"
+    },
+    {
+      "must_contain": "defaults to **`v3`**",
+      "why": "object animation already defaults to the cheap mode, unlike the character route"
+    }
+  ],
+  "check_provenance": true
+}

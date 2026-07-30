@@ -19,7 +19,7 @@ that would be legal in a normal TypeScript project.
 
 Node 24 runs `.ts` files directly by stripping types. The `build` script says so literally:
 `echo "Node 24 executa .ts direto; use typecheck"`
-(`tools/pixellab-pipeline/package.json:11@395c57f1`). `engines.node` is `>=24` in both tools. The CLI
+(`tools/pixellab-pipeline/package.json:11@4db3c05c`). `engines.node` is `>=24` in both tools. The CLI
 is executed as `node src/cli.ts`, and `bin.pixellab` points straight at the `.ts` source.
 
 Two consequences that look like style and are not:
@@ -32,7 +32,7 @@ Two consequences that look like style and are not:
 
 `tools/sprite-studio/server/api.ts:15@c243f115` imports the pipeline's client **across package
 boundaries by relative path**: `'../../pixellab-pipeline/src/api.ts'`. There is no dependency
-declared for it in `tools/sprite-studio/package.json@7406282e` — the coupling is a filesystem path,
+declared for it in `tools/sprite-studio/package.json@ee3664ec` — the coupling is a filesystem path,
 which is why `server.fs.allow` is widened in `tools/sprite-studio/vite.config.ts:12@eb395849`.
 
 So the same file has to resolve under **two different module resolutions at once**: `NodeNext` for

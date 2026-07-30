@@ -1,0 +1,148 @@
+---
+name: generating-pixellab-characters
+description: Picks between the four PixelLab character-creation endpoints, whose costs differ by up to 40x for the same request, and covers the character lifecycle - reference images per direction, canvas inflation, states, ZIP export, tags. Use whenever a task creates, rotates, inspects, exports or deletes a PixelLab character, or chooses between standard, pro and v3 generation - including Portuguese phrasings like "gerar o personagem", "criar o sprite do NPC", "as 8 direcoes", "qual modo usar", "baixar o personagem", "apagar o personagem", "imagem de referencia por direcao". Use it before writing any request body that creates a character. Triggers on create-character-with-4-directions, create-character-with-8-directions, create-character-pro, create-character-v3, create-character-state, character_id, template_id, mannequin, proportions.
+metadata:
+  type: knowledge
+  verification_signal: node .agents/skills/scripts/check-spec-claims.mjs
+---
+
+# Generating PixelLab characters
+
+## When to use
+
+Before creating a character, and before choosing which of the four creation endpoints to call. The
+wrong choice is not a style difference — it is a bill between 1 and 40 generations for the same
+sprite.
+
+## Injected knowledge
+
+### Four endpoints that all produce "a character with 8 directions"
+
+Query them, do not recall them:
+
+```bash
+S=.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs
+node $S tag "Character from template"
+node $S endpoint /create-character-with-8-directions
+node $S flow /create-character-v3
+```
+
+| Endpoint | Size range | Cost order | What it ignores |
+|---|---|---|---|
+| `/create-character-with-4-directions` | 16–128 | cheapest | — |
+| `/create-character-with-8-directions` `mode='standard'` | 16–128 | 1 generation | — |
+| `/create-character-with-8-directions` `mode='pro'` | 16–128 | 20–40 generations | `outline`, `shading`, `detail`, `proportions`, `text_guidance_scale` |
+| `/create-character-pro` | 32–168 | 20–40 generations | the style-hint fields entirely; it takes `style_description` instead |
+| `/create-character-v3` | 32–256 | formula, see below | `outline`/`detail` **when a reference image is given** |
+
+`mode='standard'` on the 8-direction endpoint is the project's backbone: one generation for all
+eight rotations (`docs/01-pixellab/custos-e-limites.md:70@fe52f3d5`). Every other route costs more,
+and `mode='pro'` costs more **and** discards the style parameters you passed — a silent downgrade,
+not an error.
+
+`/create-character-v3` is the only one whose cost is a published formula rather than a table:
+`ceil(w*h*8 / 65536)` generations with a reference image, and `1 + ceil(s*s*8 / 65536)` from scratch
+where `s = max(width, height)`. Treat every resulting number as a **preço estimado**
+(`docs/01-pixellab/custos-e-limites.md:59@fe52f3d5`).
+
+### All four are asynchronous, and none of them says 202
+
+This is the trap that loses paid generations. All four return **`200`** with a `background_job_id`
+in the body — not `202`. Code that branches on the status code to decide "did I get an image or a
+job?" will read `image` off a body that has no image, discard the job id, and pay again.
+
+```bash
+node $S list --async | grep '200\*'    # the 13 async endpoints that answer 200
+```
+
+`character_id` comes back immediately, before any rotation exists. Persist it **before** the first
+poll: the money left at submit, and the id is the only way back to the artefact.
+
+### The canvas is not the size you asked for — and the factor differs per endpoint
+
+Two different inflation rules coexist, and using the wrong one crops heads off:
+
+- `/create-character-with-4-directions` and `/create-character-with-8-directions` inflate by
+  **~40%** — ask 64×64, get roughly 90×90 (`tools/pixellab-pipeline/src/endpoints.ts:80@b6e61f99`).
+- `/create-character-pro` pads the persisted canvas to **~2x** the requested frame size.
+
+Crop against the returned metadata, never against the requested value.
+
+### This endpoint has no return *order* — it hands back a dictionary keyed by name
+
+The `directions` field on `/create-character-with-8-directions` accepts keys in the spec's own
+order — south, south-east, east, north-east, north, north-west, west, south-west — described as a
+"Fixed 8-rotation layout in clockwise order starting from south". That is the *layout* it draws, and
+the request side is all it governs.
+
+There is no response order to match it against. The spec says this endpoint "creates 8 rotation
+images in a **dictionary format** for easy access by direction name" and "Returns dictionary of
+images by direction name" (`tools/pixellab-pipeline/openapi/openapi-v2.json`, printable with
+`node $S endpoint /create-character-with-8-directions`). The schemas agree: `CharacterRotationUrls`
+is an object with a property per direction, `south`/`west`/`east`/`north` required and the four
+diagonals nullable "(8-dir only)". So **index by direction name, never by position** — there is no
+array whose order you could be reading, only whatever order the JSON keys happened to arrive in, and
+being wrong about it raises nothing.
+
+Two related traps in the same neighbourhood. The 200 block still carries an old `images`-by-name
+example while its declared schema is the job response (`background_job_id` + `character_id`) — one
+more reason to read the schema and not the example. And `DIRECTIONS_8` in this repo — S, SW, W, NW,
+N, NE, E, SE (`tools/pixellab-pipeline/src/endpoints.ts:45@b6e61f99`) — is the frame-naming order
+plus the documented return order of a **different** endpoint, `/generate-8-rotations-v2`. Reusing it
+as a positional key into this one's output produces sprites that walk sideways, with no error
+anywhere.
+
+### Reference images per direction have rules the spec states only in prose
+
+Optional `directions` map, `mode='standard'` only:
+
+- Missing directions are generated; provided ones are frozen and used as-is.
+- Each image's dimensions must match `image_size` **exactly**, or 422.
+- Bipedal templates require `south` if any reference is given. Quadruped templates
+  (`bear`, `cat`, `dog`, `horse`, `lion`) additionally require `east`.
+- When references are provided, `proportions` and bone scaling are **ignored** — the images drive
+  the pose. Passing both is not an error; the proportions simply do nothing.
+
+`template_id` defaults to `mannequin`. `proportions` applies to humanoids only.
+
+### Perspective must be passed explicitly, every time
+
+The camera enum is `CameraView` = side, low top-down, high top-down
+
+The project uses `low top-down` everywhere
+(`docs/adr/0005-low-top-down-8-direcoes.md:19@0f447499`). It is the default on the character
+endpoints but **not** on every endpoint the same character has to sit next to — omit it on a tileset
+call and the terrain lands in a different projection from the sprite.
+
+### The style hints are hints, and one of them contradicts the named enum
+
+`outline`, `shading` and `detail` are documented as "soft guidance — the model may not follow
+exactly". They are plain strings on the character endpoints, not enums, so a typo is accepted
+silently and simply has no effect.
+
+Worse: the character endpoints' prose lists the detail options as low / medium / **high** detail,
+while the spec's named `Detail` enum ends in `highly detailed`. The tileset and image endpoints
+enforce the enum. Copying the character endpoint's wording into a tileset request is a 422.
+
+### Lifecycle: the parts that fail after generation succeeded
+
+| Call | The catch |
+|---|---|
+| `GET /characters/{character_id}` | `rotation_urls` is **null unless `status == 'completed'`** — polling the job is not optional |
+| `GET /characters/{character_id}/zip` | returns **423** while anything is still generating, including animations |
+| `POST /create-character-state` | source must be completed; result is grouped with the source via `group_id` |
+| `DELETE /characters/{character_id}` | permanent, and takes every animation with it |
+| `PATCH /characters/{character_id}/tags` | **replaces** all tags; max 20 tags, 50 chars each |
+| `POST /characters/{character_id}/portrait` | **free**, no generation runs |
+
+The ZIP is the cheapest way to get everything at once: `rotations/`, `animations/`, and a
+`metadata.json` carrying keypoints for every frame — which is what makes pixel-accurate collision
+possible without re-deriving it.
+
+## References
+
+- `querying-pixellab-api` — the spec-query discipline and the traps that apply to every endpoint
+- `rotating-pixellab-sprites` — turning an existing sprite into 8 views without recreating it
+- `animating-pixellab-sprites` — what to do with `character_id` once rotations exist
+- `orchestrating-pixellab-jobs` — polling, the 200-vs-202 split, retry codes
+- `guarding-generation-cost` — the plan → estimate → generate order that keeps this affordable

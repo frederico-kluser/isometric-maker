@@ -1,0 +1,28 @@
+{
+  "skill": "applying-pixi-filters",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "destacar a celula sob o cursor", "should_trigger": true },
+    { "query": "adicionar um efeito de brilho na selecao", "should_trigger": true },
+    { "query": "colocar sombra embaixo do personagem", "should_trigger": true },
+    { "query": "recortar a area do painel de preview com mascara", "should_trigger": true },
+    { "query": "esmaecer as camadas de Z acima da que estou editando", "should_trigger": true },
+    { "query": "conferir o saldo antes de gerar", "should_trigger": false },
+    { "query": "escrever o teste de regressao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "rendering detour",
+      "why": "a filter is not a property; the render-target switch is the entire cost model"
+    },
+    {
+      "must_contain": "Prefer art to shaders",
+      "why": "outline, cursor highlight and shadow are cheaper and sharper as authored pixels in a pixel-art editor"
+    },
+    {
+      "must_contain": "Nothing here has been measured",
+      "why": "the budget table is reasoning, not a profile, and must not be quoted as measurement"
+    }
+  ],
+  "check_provenance": true
+}

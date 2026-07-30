@@ -1,0 +1,37 @@
+{
+  "skill": "animating-pixellab-sprites",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "animar o personagem andando", "should_trigger": true },
+    { "query": "quantos frames posso pedir na animacao", "should_trigger": true },
+    { "query": "qual modo de animacao usar, template ou pro", "should_trigger": true },
+    { "query": "interpolar entre duas poses do sprite", "should_trigger": true },
+    { "query": "estimar o esqueleto do personagem", "should_trigger": true },
+    { "query": "transferir a roupa pra todos os frames", "should_trigger": true },
+    { "query": "configurar o servidor autoritativo de dano", "should_trigger": false },
+    { "query": "adicionar uma dependencia no package json", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "160–320 for all eight",
+      "why": "the cost of mode=pro; it is also the worse mode, which is why the default is template"
+    },
+    {
+      "must_contain": "cannot be enumerated from the spec",
+      "why": "template_animation_id truncates with an ellipsis; claiming a complete list is invention"
+    },
+    {
+      "must_contain": "must be even",
+      "why": "frame_count on animate-with-text-v3 rejects odd counts after the request is built"
+    },
+    {
+      "must_contain": "exactly 3 frames",
+      "why": "animate-with-skeleton is a three-frame window model; other counts are rejected"
+    },
+    {
+      "must_contain": "opposite defaults",
+      "why": "directions defaults to all in template mode and to south only in custom mode"
+    }
+  ],
+  "check_provenance": true
+}

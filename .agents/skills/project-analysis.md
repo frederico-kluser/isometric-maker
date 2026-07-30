@@ -1,5 +1,11 @@
 # Project Analysis — Power Abuse
 
+> **HISTORICAL — describes the product before the pivot.** This file surveys a permadeath MMORPG.
+> That product no longer exists: `docs/adr/0010-pivo-para-editor-isometrico.md` replaced it with
+> **isometric-maker**, a local single-user isometric game editor. Server authority, combat, permadeath
+> and anti-cheat are out of scope. Kept because `project-router` names it part of the audit trail and
+> forbids deleting it. Read it as a record of how the skill library came to be, never as current truth.
+
 Phase 1 artifact of the knowledge-skills bootstrap. Input for `skill-map.md`.
 
 Provenance format throughout: `path:line@blob8`, where `blob8` is the first 8 chars of

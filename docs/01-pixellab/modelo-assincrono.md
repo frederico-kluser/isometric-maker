@@ -5,8 +5,8 @@
 > **23 dos 56 endpoints POST** devolvem `202` + `background_job_id`. Você paga no submit e busca o resultado depois. Guarde o id em disco **antes** do primeiro poll.
 >
 > ```bash
-> node /home/ondokai/Projects/ferro-e-cinzas-skills/pixellab-assets/scripts/inspect-spec.mjs \
->   /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json --list
+> node /home/ondokai/Projects/isometric-maker/.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs \
+>   /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json --list
 > ```
 
 ## O que é síncrono e o que não é
@@ -86,7 +86,7 @@ Duas regras que evitam ficar permanentemente limitado:
 ## Referências
 
 - `https://api.pixellab.ai/mcp/docs` — latências, verificado 2026-07-29
-- O spec vendorizado em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json`
+- O spec vendorizado em `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json`
 - Implementação: `src/api.ts` (transporte e poll) e `src/queue.ts` (estado à prova de queda)
 
 **Última atualização:** 2026-07-29

@@ -1,0 +1,36 @@
+{
+  "skill": "interpolating-pixi-state",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o personagem anda tremendo na tela", "should_trigger": true },
+    { "query": "suavizar o movimento entre celulas", "should_trigger": true },
+    { "query": "interpolar entre celulas do grid", "should_trigger": true },
+    { "query": "o boneco pisca atras da parede quando pula", "should_trigger": true },
+    { "query": "o movimento acelera em outro monitor", "should_trigger": true },
+    { "query": "gerar as animacoes das criaturas", "should_trigger": false },
+    { "query": "adicionar uma linha no indice das docs", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "Interpolation is a **display** technique",
+      "why": "an interpolated value rounded back into the model is how a project file acquires a z the format cannot express"
+    },
+    {
+      "must_contain": "goes from integer z to integer z",
+      "why": "ADR 0013 has no half level; both ends of a jump stay integers and the parabola is screen-only"
+    },
+    {
+      "must_contain": "the logical z, never the visual one",
+      "why": "sorting off the jump arc makes a jumping character flicker across the wall it passes"
+    },
+    {
+      "must_contain": "There is no movement code in this repository",
+      "why": "nothing here was measured; the skill must say so rather than sound authoritative about tuning"
+    },
+    {
+      "must_contain": "the weakest-evidence member",
+      "why": "upstream covers none of this; the skill must rank itself honestly instead of sounding settled"
+    }
+  ],
+  "check_provenance": true
+}

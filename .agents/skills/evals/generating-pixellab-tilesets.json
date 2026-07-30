@@ -1,0 +1,37 @@
+{
+  "skill": "generating-pixellab-tilesets",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "gerar o tileset do terreno", "should_trigger": true },
+    { "query": "como montar o mapa com os tiles que voltaram", "should_trigger": true },
+    { "query": "transicao entre grama e areia no tileset", "should_trigger": true },
+    { "query": "criar um tile isometrico", "should_trigger": true },
+    { "query": "tileset de plataforma pro sidescroller", "should_trigger": true },
+    { "query": "quantos tiles vem quando o transition size e 1", "should_trigger": true },
+    { "query": "implementar o full loot na morte do jogador", "should_trigger": false },
+    { "query": "por que o typecheck falhou nesse arquivo", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "vertex",
+      "why": "Wang autotiling here is on the vertex grid, not the cell grid; getting this wrong produces seams"
+    },
+    {
+      "must_contain": "pattern_4x4",
+      "why": "the field to match tiles on; connections is deprecated and unpopulated"
+    },
+    {
+      "must_contain": "21 distinct corner combinations",
+      "why": "four wall-continuation tiles share corners with a twin, so corners alone collapses them"
+    },
+    {
+      "must_contain": "Do not hardcode either count",
+      "why": "the route also serves older tilesets that report other counts"
+    },
+    {
+      "must_contain": "plugin UI tutorial",
+      "why": "the public map-tiles guide is not API documentation and must not be cited as one"
+    }
+  ],
+  "check_provenance": true
+}

@@ -40,8 +40,8 @@ export type EndpointId = (typeof ENDPOINT_IDS)[number];
 export const CAMERA_VIEWS = ['side', 'low top-down', 'high top-down'] as const;
 export type CameraView = (typeof CAMERA_VIEWS)[number];
 
-/** Canonical return order of the 8-rotation endpoints. Naming frames in any
- *  other order silently makes sprites face the wrong way. */
+/** Return order of `/generate-8-rotations-v2`, verbatim from its spec text. NOT
+ *  an order for `/create-character-with-8-directions`: that returns a dict. */
 export const DIRECTIONS_8 = [
   'south', 'south-west', 'west', 'north-west',
   'north', 'north-east', 'east', 'south-east',

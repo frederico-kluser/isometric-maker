@@ -50,18 +50,43 @@ is irreversible or spends money.
 
 ### 4. Select skills
 
-Read `.agents/skills/catalog.md` and pick. On ambiguity prefer the most domain-specific skill. The
-usual mappings:
+Read `.agents/skills/catalog.md` and pick. On ambiguity prefer the most domain-specific skill.
+
+For PixelLab work the pattern is **hub plus family**: `querying-pixellab-api` carries the rules that
+hold everywhere — the spec is the only source, the size schemas are per-endpoint, the status code
+does not tell you whether a call is asynchronous — and one domain skill carries the family's own
+traps. Loading the family without the hub is how a per-endpoint limit gets quoted as a global one.
+
+The usual mappings:
 
 | The task involves | Load |
 |---|---|
-| anything about the PixelLab API surface | `querying-pixellab-api` |
+| anything about the PixelLab API surface | `querying-pixellab-api` — the **hub**, then the family below |
+| creating a character, its lifecycle, ZIP, tags, states | `generating-pixellab-characters` |
+| turning a sprite to face another way, frame ordering | `rotating-pixellab-sprites` |
+| animation, frame counts, animation modes, skeletons | `animating-pixellab-sprites` |
+| props, map objects, the review/select-frames flow | `composing-pixellab-objects` |
+| terrain, Wang tilesets, isometric tiles, tiles-pro | `generating-pixellab-tilesets` |
+| text-to-image, model choice, prompt enhancement | `creating-pixellab-images` |
+| inpaint, edit, resize, remove background, to-pixelart | `editing-pixellab-images` |
+| portraits, visemes, lip-sync, talking heads | `generating-pixellab-portraits` |
+| UI panels, HUD elements, pixel fonts | `designing-pixellab-interfaces` |
+| polling, retries, error codes, balance, job lifecycle | `orchestrating-pixellab-jobs` |
 | generating assets, the pipeline CLI, catalog or cost code | `guarding-generation-cost` |
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
-| client, server, netcode, combat, loot, economy, anti-cheat | `enforcing-server-authority` |
+| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate |
 | no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
+
+`routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in
+`tools/pixi-reference/vendor/skills/`. Delegate the renderer half of a task to it rather than picking
+from that set here — it exists so this table does not have to grow by thirty-six rows.
+
+**There is no server, and no skill claims otherwise.** This repository is a local single-user
+isometric editor (`docs/adr/0010-pivo-para-editor-isometrico.md`); `enforcing-server-authority` was
+retired with the pivot and has no successor. A task about combat, loot, netcode or anti-cheat is out
+of scope — say so and ask, rather than routing it somewhere.
 
 ### 5. Assemble the chain
 
