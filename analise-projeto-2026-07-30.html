@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="pt-BR" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Ferro e Cinzas — estado do projeto em 2026-07-30</title>
+
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+      integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous">
+
+<style>
+  [id] { scroll-margin-top: 5rem; }
+
+  pre { position: relative; margin-bottom: 1rem; }
+  pre code.hljs { padding-right: 4rem; border-radius: var(--bs-border-radius); font-size: .875rem; }
+
+  .copy-btn { position: absolute; top: .5rem; right: .5rem; opacity: .4; transition: opacity .15s; }
+  pre:hover .copy-btn, .copy-btn:focus-visible { opacity: 1; }
+
+  .tab-pane:focus-visible { outline: 0; box-shadow: 0 0 0 .2rem rgba(var(--bs-emphasis-color-rgb), .15); }
+
+  @media print {
+    .nav-tabs, .copy-btn { display: none !important; }
+    .tab-content > .tab-pane { display: block !important; opacity: 1 !important; page-break-inside: avoid; }
+    .tab-pane::before { content: attr(data-print-title); display: block;
+                        font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
+  }
+</style>
+</head>
+
+<body class="bg-body">
+
+<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold"><i class="bi bi-fire me-1"></i>Ferro e Cinzas</span>
+    <span class="navbar-text small text-body-secondary d-none d-md-inline">análise de estado &middot; 2026-07-30 &middot; commit <code>d371ce9</code></span>
+  </div>
+</nav>
+
+<main class="container py-4" style="max-width: 62rem">
+
+  <header class="mb-4">
+    <h1 class="display-6 fw-semibold">Onde o projeto está, dois dias depois do primeiro commit</h1>
+    <p class="lead text-body-secondary">
+      Quatro commits, ~4.135 linhas de TypeScript, 16 documentos. As duas ferramentas rodam e passam
+      nos checks. O jogo em si não começou — e a regra que protege o seu dinheiro está apoiada num
+      teste que não existe.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      <span class="badge text-bg-secondary">branch <code>main</code>, working tree limpo</span>
+      <span class="badge text-bg-secondary">node 24.15.0</span>
+      <span class="badge text-bg-success">6/6 testes</span>
+      <span class="badge text-bg-warning">7 problemas</span>
+    </div>
+  </header>
+
+  <div class="alert alert-danger d-flex gap-2" role="alert">
+    <i class="bi bi-cash-coin flex-shrink-0 fs-5"></i>
+    <div>
+      <strong>Leia isto antes de qualquer aba.</strong>
+      O <code>AGENTS.md</code> afirma: <em>&ldquo;se você mexer em <code>src/catalog.ts</code> ou na
+      função de hash, o teste de idempotência tem que continuar passando&rdquo;</em>.
+      <strong>Esse teste não existe.</strong> Os 6 testes que passam cobrem atlas, util e endpoints —
+      nenhum toca em <code>catalog.ts</code>, <code>cost.ts</code>, <code>generate.ts</code> ou
+      <code>queue.ts</code>. A regra dura mais cara do projeto não tem rede.
+    </div>
+  </div>
+
+  <ul class="nav nav-tabs" id="doc-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-diagnostico" data-bs-toggle="tab" data-bs-target="#pane-diagnostico"
+              type="button" role="tab" aria-controls="pane-diagnostico" aria-selected="true">
+        <i class="bi bi-clipboard2-pulse me-1"></i>Diagnóstico
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-funciona" data-bs-toggle="tab" data-bs-target="#pane-funciona"
+              type="button" role="tab" aria-controls="pane-funciona" aria-selected="false">
+        <i class="bi bi-check2-circle me-1"></i>O que funciona
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-falta" data-bs-toggle="tab" data-bs-target="#pane-falta"
+              type="button" role="tab" aria-controls="pane-falta" aria-selected="false">
+        <i class="bi bi-hourglass-split me-1"></i>O que falta
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-problemas" data-bs-toggle="tab" data-bs-target="#pane-problemas"
+              type="button" role="tab" aria-controls="pane-problemas" aria-selected="false">
+        <i class="bi bi-bug me-1"></i>Problemas <span class="badge text-bg-danger ms-1">7</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-proximos" data-bs-toggle="tab" data-bs-target="#pane-proximos"
+              type="button" role="tab" aria-controls="pane-proximos" aria-selected="false">
+        <i class="bi bi-signpost-split me-1"></i>Próximos passos
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 rounded-bottom p-4" id="doc-tabs-content">
+
+    <!-- ══════════════════════════════════════════════════ DIAGNÓSTICO -->
+    <div class="tab-pane fade show active" id="pane-diagnostico" role="tabpanel"
+         aria-labelledby="tab-diagnostico" tabindex="0" data-print-title="Diagnóstico">
+
+      <h2 class="h4">O veredicto em três frases</h2>
+      <p>
+        A <strong>fundação está sólida e é incomum</strong>: o spec da API está vendorizado com data e
+        hash, o custo foi modelado antes de existir arte, e as decisões estão em ADRs que explicam o
+        porquê. Isso é ordem de trabalho melhor que a maioria dos projetos de jogo.
+      </p>
+      <p>
+        Mas <strong>nada foi executado de verdade</strong>: nenhum asset gerado, nenhum PNG em disco,
+        nenhuma linha de cliente ou servidor. Tudo que existe é ferramenta e documento.
+      </p>
+      <p>
+        E <strong>três das garantias prometidas nos documentos não estão implementadas</strong> — a
+        idempotência não tem teste, o detector de drift do spec não detecta nada, e o estúdio gasta
+        sem passar pelo guard de orçamento.
+      </p>
+
+      <h2 class="h4 mt-4" id="verificacoes">O que eu rodei e o que deu</h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr><th>Verificação</th><th>Comando</th><th>Resultado</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Typecheck do pipeline</td>
+              <td><code>npm run typecheck</code></td>
+              <td><span class="badge text-bg-success">limpo</span></td>
+            </tr>
+            <tr>
+              <td>Testes do pipeline</td>
+              <td><code>npm test</code></td>
+              <td><span class="badge text-bg-success">6/6</span> <span class="text-body-secondary small">mas ver <a href="#pane-problemas">problema 1</a></span></td>
+            </tr>
+            <tr>
+              <td>Typecheck do estúdio</td>
+              <td><code>npm run typecheck</code></td>
+              <td><span class="badge text-bg-success">limpo</span></td>
+            </tr>
+            <tr>
+              <td>Convenções de documentação</td>
+              <td><code>scripts/check-docs.sh</code></td>
+              <td><span class="badge text-bg-success">16 docs conformes</span></td>
+            </tr>
+            <tr>
+              <td>Endpoints citados existem no spec</td>
+              <td><code>scripts/check-docs.sh</code></td>
+              <td><span class="badge text-bg-success">todos</span></td>
+            </tr>
+            <tr>
+              <td>Planejamento de custo</td>
+              <td><code>node src/cli.ts plan</code></td>
+              <td><span class="badge text-bg-success">17 assets &middot; US$&nbsp;1,13</span></td>
+            </tr>
+            <tr>
+              <td>Ambiente</td>
+              <td><code>node src/cli.ts doctor</code></td>
+              <td><span class="badge text-bg-warning">1 erro</span> <span class="text-body-secondary small"><code>PIXELLAB_SECRET</code> não exportado — esperado</span></td>
+            </tr>
+            <tr>
+              <td>Links de markdown</td>
+              <td>varredura própria</td>
+              <td><span class="badge text-bg-danger">15 quebrados</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="h4 mt-4" id="mapa">O mapa em números</h2>
+      <div class="row g-3">
+        <div class="col-6 col-lg-3">
+          <div class="card h-100 text-center"><div class="card-body">
+            <div class="display-6 fw-semibold">4.135</div>
+            <div class="small text-body-secondary">linhas de TypeScript</div>
+          </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100 text-center"><div class="card-body">
+            <div class="display-6 fw-semibold">15 / 57</div>
+            <div class="small text-body-secondary">documentos escritos no índice</div>
+          </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100 text-center"><div class="card-body">
+            <div class="display-6 fw-semibold text-danger">0</div>
+            <div class="small text-body-secondary">assets gerados</div>
+          </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100 text-center"><div class="card-body">
+            <div class="display-6 fw-semibold text-danger">0</div>
+            <div class="small text-body-secondary">linhas de jogo</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="alert alert-primary d-flex gap-2 mt-4" role="alert">
+        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+        <div>
+          <strong>Em uma linha:</strong> a ferramentaria está pronta e nunca foi usada. O próximo passo
+          honesto é gastar um dólar de verdade e ver o pipeline inteiro provar que lê o payload certo.
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════ FUNCIONA -->
+    <div class="tab-pane fade" id="pane-funciona" role="tabpanel"
+         aria-labelledby="tab-funciona" tabindex="0" data-print-title="O que funciona">
+
+      <h2 class="h4">Quatro commits, tudo de pé</h2>
+      <p>
+        Working tree limpo, nada pendente, nada solto. A progressão dos commits mostra uma ordem de
+        trabalho deliberada: primeiro as regras, depois o conhecimento da API, depois a ferramenta em
+        lote, depois a ferramenta de autoria.
+      </p>
+
+<pre><code class="language-text">80bd353  chore: scaffold project with agent instructions and doc conventions
+068976a  docs: add PixelLab manual, combat design and the first eight ADRs
+b556d01  feat(pipeline): add idempotent, budget-guarded PixelLab asset pipeline
+d371ce9  feat(studio): add sprite studio for base model, poses and wardrobe</code></pre>
+
+      <h2 class="h4 mt-4" id="pipeline">O pipeline de assets</h2>
+      <p>
+        Nove comandos, exit codes documentados como contrato, guard de orçamento em três camadas
+        (por asset US$&nbsp;0,30 &middot; por execução US$&nbsp;15 &middot; por mês US$&nbsp;60). O
+        <code>plan</code> resolve o catálogo inteiro e não toca na rede:
+      </p>
+
+<pre><code class="language-bash">$ node src/cli.ts plan
+
+Catálogo: 17 assets
+Lockfile: 0 entradas · openapi 5b11c9a7afa1 de 2026-07-29
+
+Ação            Assets
+─────────────── ──────
+generate            17
+
+Grupo                      Assets   Estimado
+────────────────────────── ────── ──────────
+creature-animations             9   US$ 1.03
+creatures                       3 US$ 0.0519
+props                           3 US$ 0.0297
+terrain                         2 US$ 0.0198
+
+Estimativa do run: US$ 1.13  (faixa US$ 0.9632 – US$ 1.47, confiança: extrapolated)
+Jobs a submeter: 17
+Tempo estimado: 21 min com 2 jobs simultâneos (tier t1)
+
+Nada foi gerado. `plan` nunca gasta.</code></pre>
+
+      <p>
+        As decisões de hash que o <code>AGENTS.md</code> chama de &ldquo;detalhe que não é detalhe&rdquo;
+        estão realmente implementadas: <code>catalog.ts:93</code> hasheia os <strong>pixels
+        decodificados</strong> via <code>sharp().raw()</code>, não os bytes do arquivo — reencodar um PNG
+        não cobra de novo. E o hash do schema OpenAPI fica de fora do <code>specHash</code>: drift vira
+        aviso no <code>doctor</code>, nunca invalidação de cache.
+      </p>
+
+      <h2 class="h4 mt-4" id="testes">Os testes que existem</h2>
+<pre><code class="language-bash">$ npm test
+
+✔ packGrid emits a PixiJS-shaped spritesheet with correct frame rects
+✔ extrusion duplicates the border colour outside the frame rect
+✔ packing is deterministic — same input, byte-identical PNG
+✔ sortFrames orders by direction then frame index
+✔ canonicalJson is stable across key order and drops undefined
+✔ size validation catches the constraints that cost money after submit
+
+ℹ tests 6 · pass 6 · fail 0</code></pre>
+      <p class="text-body-secondary">
+        São bons testes — determinismo byte-a-byte do atlas é exatamente a propriedade certa a fixar.
+        O problema é a cobertura, não a qualidade. Ver <a href="#pane-problemas">Problemas</a>.
+      </p>
+
+      <h2 class="h4 mt-4" id="docs-ok">A documentação e o linter dela</h2>
+      <p>
+        O <code>scripts/check-docs.sh</code> faz duas coisas que quase nenhum projeto faz: valida as
+        convenções de formato <em>e</em> confere que todo endpoint citado em prosa existe no spec
+        vendorizado. É a defesa direta contra o modo como o guia antigo
+        (<code>~/Projects/tech-docs/games/5.md</code>) envelheceu.
+      </p>
+
+<pre><code class="language-bash">$ bash scripts/check-docs.sh
+
+== convenções de doc ==
+  ok: 16 docs conformes
+== endpoints citados existem no spec vendorizado ==
+  ok: todo endpoint citado existe no spec</code></pre>
+
+      <p>As oito ADRs estão escritas e cobrem o que precisa estar decidido antes de escrever código:</p>
+      <ul>
+        <li><strong>0001</strong> PixiJS 8 + Vite, divergindo da pesquisa própria que apontava Cocos</li>
+        <li><strong>0002</strong> REST direto sobre o spec vendorizado, não o SDK oficial (que tem <code>/v1</code> hardcoded e 8 operações contra 56)</li>
+        <li><strong>0003</strong> permadeath total &middot; <strong>0004</strong> combate de alvo travado com zonas oscilantes</li>
+        <li><strong>0005</strong> <code>low top-down</code>, 8 direções, ordem canônica S,SW,W,NW,N,NE,E,SE</li>
+        <li><strong>0006</strong> animação em <code>mode='template'</code>; <code>pro</code> proibido sem decisão explícita</li>
+        <li><strong>0007</strong> fase 1 em VM única com gatilho numérico &middot; <strong>0008</strong> idioma por eixo</li>
+      </ul>
+
+      <h2 class="h4 mt-4" id="studio">O sprite studio</h2>
+      <p>
+        Typecheck limpo, e três decisões de arquitetura bem tomadas: o token nunca chega ao navegador
+        (middleware do Vite, <code>server/api.ts</code>), o registro de jobs mora no servidor — então
+        recarregar a página não perde trabalho <em>já pago</em> —, e o estado de autoria vive em
+        <code>studio.json</code> versionado, não em banco.
+      </p>
+      <div class="alert alert-success d-flex gap-2" role="alert">
+        <i class="bi bi-award-fill flex-shrink-0"></i>
+        <div>
+          O README do estúdio faz algo raro: <strong>lista as próprias limitações sem vender a
+          ferramenta</strong>, incluindo o fato de que só existem 10 templates de animação e que
+          <code>walk</code>, <code>run</code> e <code>jump</code> não estão entre eles. É a convenção 9
+          do <code>AGENTS.md</code> cumprida à risca.
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════ FALTA -->
+    <div class="tab-pane fade" id="pane-falta" role="tabpanel"
+         aria-labelledby="tab-falta" tabindex="0" data-print-title="O que falta">
+
+      <h2 class="h4">Nenhum asset existe</h2>
+      <p>
+        O pipeline nunca rodou fora do modo <code>plan</code>. O <code>doctor</code> confirma:
+        lockfile inexistente, <code>.cache</code> vazio. E <code>packages/game-assets/atlas/</code> é
+        um diretório vazio esperando o primeiro spritesheet.
+      </p>
+
+<pre><code class="language-bash">$ node src/cli.ts doctor
+
+  ok   node 24.15.0 (exige ≥ 24)
+  ERRO PIXELLAB_SECRET definido
+  ok   spec vendorizado em .../openapi/openapi-v2.json
+  ok   PROVENIENCIA.txt com sha256 (5b11c9a7afa1, 2026-07-29)
+  info lockfile: ainda não existe
+  info cache:    vazio
+  ok   catálogo com 17 assets</code></pre>
+
+      <p class="text-body-secondary">
+        Consequência prática: <code>extractImages</code>, <code>writeFrames</code> e o mapeamento de
+        direções do estúdio são <strong>hipóteses sobre o formato do payload</strong>. Nenhum deles
+        jamais viu uma resposta real da API.
+      </p>
+
+      <h2 class="h4 mt-4" id="sem-jogo">Nenhuma linha de jogo</h2>
+      <p>
+        A ADR 0001 escolheu PixiJS 8 e a ADR 0007 desenhou a fase 1 da infra, mas não existe
+        <code>src/</code> de cliente, nem de servidor, nem de netcode. As duas pastas de código do
+        repositório são as duas ferramentas de arte.
+      </p>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Parte</th><th>README diz</th><th>Realidade</th></tr></thead>
+          <tbody>
+            <tr><td>Documentação do PixelLab</td><td>em construção</td><td>5 de 15 arquivos escritos</td></tr>
+            <tr><td>Pipeline de assets</td><td>em construção</td><td><span class="badge text-bg-success">funcional</span> — 9 comandos, testado, roda</td></tr>
+            <tr><td>GDD</td><td>em construção</td><td>1 de 8 arquivos</td></tr>
+            <tr><td>Arquitetura de servidor</td><td>em construção</td><td>1 de 8 arquivos, nenhum código</td></tr>
+            <tr><td>Cliente / servidor / gameplay</td><td>não começou</td><td>correto</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-body-secondary">
+        A coluna &ldquo;em construção&rdquo; está informando zero. O pipeline funcional e o GDD de
+        um oitavo recebem o mesmo rótulo.
+      </p>
+
+      <h2 class="h4 mt-4" id="docs-pendentes">42 dos 57 documentos do índice não existem</h2>
+      <p>
+        O <code>docs/README.md</code> lista 57 entradas com coluna de estado: <strong>15 prontas</strong>
+        (7 de conteúdo + as 8 ADRs) e <strong>42 pendentes</strong>. Três pastas inteiras existem só na
+        tabela:
+      </p>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="card h-100"><div class="card-body">
+            <h3 class="h6 card-title"><code>04-cloud/</code></h3>
+            <p class="card-text small text-body-secondary mb-0">
+              4 docs pendentes. Não existe no disco — e isso é <em>deliberado</em>: a convenção 12 diz
+              que doc de infra antes de existir infra é ficção.
+            </p>
+          </div></div>
+        </div>
+        <div class="col-md-4">
+          <div class="card h-100"><div class="card-body">
+            <h3 class="h6 card-title"><code>05-economia/</code></h3>
+            <p class="card-text small text-body-secondary mb-0">
+              4 docs pendentes. Economia player-driven, consignação, sinks, anti-RMT — tudo por escrever.
+            </p>
+          </div></div>
+        </div>
+        <div class="col-md-4">
+          <div class="card h-100"><div class="card-body">
+            <h3 class="h6 card-title"><code>06-anti-cheat/</code></h3>
+            <p class="card-text small text-body-secondary mb-0">
+              4 docs pendentes. Inclui <code>sem-gms.md</code>, que o README raiz trata como requisito
+              de arquitetura.
+            </p>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="alert alert-secondary d-flex gap-2 mt-3" role="alert">
+        <i class="bi bi-lightbulb flex-shrink-0"></i>
+        <div>
+          Isto <strong>não é crítica</strong>. O repositório tem dois dias e a ordem escolhida — spec,
+          custo, ferramenta, arte, jogo — é defensável e rara. A observação é sobre o índice prometer
+          um mapa que ainda é quase todo território em branco.
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════ PROBLEMAS -->
+    <div class="tab-pane fade" id="pane-problemas" role="tabpanel"
+         aria-labelledby="tab-problemas" tabindex="0" data-print-title="Problemas">
+
+      <h2 class="h4">Sete achados, do mais caro ao mais barato</h2>
+      <p class="text-body-secondary">
+        Os três primeiros são divergências entre o que os documentos <em>prometem</em> e o que o código
+        <em>faz</em>. Os quatro últimos somam uns vinte minutos de trabalho.
+      </p>
+
+      <div class="card mb-3 border-danger">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-danger me-2">1</span><strong>Os testes não cobrem o que gasta dinheiro</strong></span>
+          <span class="badge text-bg-danger">crítico</span>
+        </div>
+        <div class="card-body">
+          <p>
+            <code>src/atlas.test.ts</code> é o único arquivo de teste do repositório, e importa apenas
+            <code>atlas.ts</code>, <code>util.ts</code> e <code>endpoints.ts</code>. Ficam sem teste
+            algum os três módulos onde mora o dinheiro:
+          </p>
+          <ul>
+            <li><code>catalog.ts:93</code> <code>inputHash</code> e <code>catalog.ts:217</code> <code>computeSpecHash</code> — decidem se um asset é regerado</li>
+            <li><code>cost.ts:326</code> <code>checkBudget</code> — o guard de orçamento inteiro, os três tetos</li>
+            <li><code>generate.ts</code> / <code>queue.ts</code> — a garantia de nunca resubmeter job já pago</li>
+          </ul>
+          <p class="mb-0">
+            O <code>AGENTS.md</code> escreve a garantia como se ela fosse verificada por teste. Ela não é.
+            Um refactor inocente em <code>catalog.ts</code> hoje pode duplicar a fatura sem que nada
+            fique vermelho.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3 border-danger">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-danger me-2">2</span><strong>O detector de drift do spec não detecta drift</strong></span>
+          <span class="badge text-bg-danger">crítico</span>
+        </div>
+        <div class="card-body">
+          <p>A ADR 0002 e o <code>AGENTS.md</code> prometem a mesma mecânica:</p>
+          <blockquote class="blockquote border-start border-3 ps-3 fs-6">
+            <p class="mb-0">
+              &ldquo;Atualizar o snapshot transforma quebra de contrato em <strong>erro de
+              compilação</strong> em vez de bug em produção.&rdquo; &mdash; ADR 0002, linha 30
+            </p>
+          </blockquote>
+          <p>
+            O mecanismo seria o <code>npm run codegen</code>, que gera <code>openapi/schema.d.ts</code>.
+            Só que <strong>nenhum arquivo importa esse tipo</strong> — <code>api.ts</code> escreve os
+            tipos à mão. O <code>openapi-typescript</code> está em devDependencies sem consumidor.
+          </p>
+<pre><code class="language-bash">$ grep -rn "schema.d" --include="*.ts" tools/
+# nenhum resultado — só a linha do package.json que gera o arquivo</code></pre>
+          <p class="mb-0">
+            Na prática: trocar o spec vendorizado por um incompatível e rodar
+            <code>npm run typecheck</code> hoje passa limpo. A proteção descrita em duas fontes de
+            verdade do projeto não está ligada.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3 border-warning">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-warning me-2">3</span><strong>O estúdio gasta fora do guard</strong></span>
+          <span class="badge text-bg-warning">alto</span>
+        </div>
+        <div class="card-body">
+          <p>
+            <code>server/api.ts:398</code> (<code>POST /api/generate</code>) submete direto para a
+            PixelLab. Não consulta <code>cost.ts</code>, não estima antes, e não escreve no ledger que o
+            <code>pixellab balance</code> lê para calcular o gasto do mês.
+          </p>
+          <p class="mb-0">
+            O README do estúdio já registra isso como limitação conhecida — o que é honesto. Mas o
+            efeito colateral é que <strong>o estúdio é hoje o caminho mais fácil de furar a regra
+            &ldquo;nada de custo surpresa&rdquo;</strong>, e o gasto feito por ele fica invisível para o
+            teto mensal de US$&nbsp;60.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-secondary me-2">4</span><strong>15 links de markdown quebrados</strong></span>
+          <span class="badge text-bg-secondary">médio</span>
+        </div>
+        <div class="card-body">
+          <p>Dois deles estão no README raiz, que é a porta de entrada do repositório:</p>
+<pre><code class="language-text">README.md                        -> docs/00-visao-geral/conceito.md   (nunca escrito)
+README.md                        -> ferramentas/pixellab-pipeline/    (a pasta chama tools/)
+docs/01-pixellab/README.md       -> 10 arquivos "pendente"
+docs/01-pixellab/custos-e-limites.md -> consistencia-estilo.md
+docs/adr/0003-permadeath-total.md    -> ../02-design/permadeath-e-full-loot.md</code></pre>
+          <p class="mb-0">
+            O <code>ferramentas/</code> é resíduo de uma renomeação de pasta que o README não acompanhou.
+            O <code>check-docs.sh</code> já valida convenções e endpoints — validar link é uma dúzia de
+            linhas no python que já está lá.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-secondary me-2">5</span><strong><code>npm run refresh-openapi</code> está quebrado</strong></span>
+          <span class="badge text-bg-secondary">médio</span>
+        </div>
+        <div class="card-body">
+<pre><code class="language-json">"refresh-openapi": "node scripts/refresh-openapi.mjs"</code></pre>
+          <p class="mb-0">
+            O diretório <code>tools/pixellab-pipeline/scripts/</code> não existe. O procedimento de
+            atualização do spec descrito no <code>AGENTS.md</code> — baixar, regravar o
+            <code>PROVENIENCIA.txt</code> com data e hash novos, rodar o codegen — não tem ferramenta
+            que o execute.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-secondary me-2">6</span><strong><code>zod</code> é dependência não usada</strong></span>
+          <span class="badge text-bg-light">baixo</span>
+        </div>
+        <div class="card-body">
+          <p class="mb-0">
+            Declarada em <code>dependencies</code> (não dev), e nenhum arquivo de <code>src/</code> a
+            importa. Ou entra para validar as respostas da API — que hoje são tipadas na fé — ou sai.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><span class="badge text-bg-secondary me-2">7</span><strong>O índice de docs não registrou o estúdio</strong></span>
+          <span class="badge text-bg-light">baixo</span>
+        </div>
+        <div class="card-body">
+          <p class="mb-0">
+            O <code>docs/README.md</code> fecha com <code>Última atualização: 2026-07-29</code> e o
+            Histórico não menciona o sprite studio, que entrou em 30/07. A tabela de ferramentas foi
+            atualizada; a linha de data e o histórico, não. É a convenção 7 do próprio
+            <code>AGENTS.md</code> — e a convenção 11 pela metade.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════ PRÓXIMOS -->
+    <div class="tab-pane fade" id="pane-proximos" role="tabpanel"
+         aria-labelledby="tab-proximos" tabindex="0" data-print-title="Próximos passos">
+
+      <h2 class="h4">Em ordem, e por quê</h2>
+      <p class="text-body-secondary">
+        O critério de ordenação é simples: <strong>primeiro o que, se estiver errado, custa dinheiro;
+        depois o que custa tempo.</strong>
+      </p>
+
+      <div class="accordion" id="acc-proximos">
+
+        <div class="accordion-item">
+          <h3 class="accordion-header">
+            <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#acc-1" aria-expanded="true" aria-controls="acc-1">
+              <span class="badge text-bg-danger me-2">1</span>
+              Escrever <code class="ms-1 me-1">catalog.test.ts</code> e <code class="ms-1">cost.test.ts</code>
+            </button>
+          </h3>
+          <div id="acc-1" class="accordion-collapse collapse show" data-bs-parent="#acc-proximos">
+            <div class="accordion-body">
+              <p>As propriedades a fixar, na ordem de importância:</p>
+              <ul>
+                <li><strong>Idempotência.</strong> Mesmo catálogo, mesmo lockfile &rarr; todo item sai como <code>cached</code>, <code>toGenerate</code> vazio, estimativa zero.</li>
+                <li><strong>Invalidação correta.</strong> Mudar o <code>prompt</code> invalida; reformatar o arquivo, renomear variável ou reordenar chave do objeto, não.</li>
+                <li><strong>Hash de pixel, não de byte.</strong> Reencodar o PNG de entrada mantém o <code>inputHash</code>.</li>
+                <li><strong>Drift de schema não invalida.</strong> Trocar o sha do snapshot mantém todos os itens em <code>cached</code>.</li>
+                <li><strong>Cada ramo do <code>checkBudget</code>:</strong> <code>allow</code>, <code>confirm</code>, <code>refuse</code> por asset, por execução e por teto mensal.</li>
+                <li><strong>Seed não pinado é recusado</strong> antes de submeter.</li>
+              </ul>
+              <p class="mb-0 text-body-secondary">
+                Nenhum desses toca a rede. São testes rápidos, e são a diferença entre a regra dura do
+                projeto ser uma garantia ou ser uma frase.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <h3 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#acc-2" aria-expanded="false" aria-controls="acc-2">
+              <span class="badge text-bg-danger me-2">2</span>
+              Ligar o <code class="ms-1">schema.d.ts</code> — ou apagar a promessa
+            </button>
+          </h3>
+          <div id="acc-2" class="accordion-collapse collapse" data-bs-parent="#acc-proximos">
+            <div class="accordion-body">
+              <p>Duas saídas legítimas, e é preciso escolher <em>uma</em>:</p>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <div class="card h-100"><div class="card-body">
+                    <h4 class="h6">Ligar de verdade</h4>
+                    <p class="small mb-0">
+                      Rodar <code>npm run codegen</code>, versionar o <code>schema.d.ts</code> e tipar os
+                      corpos de request/response de <code>api.ts</code> contra ele — nem que seja só nos
+                      6 ou 7 endpoints que o catálogo usa. Aí a promessa da ADR 0002 vira verdade.
+                    </p>
+                  </div></div>
+                </div>
+                <div class="col-md-6">
+                  <div class="card h-100"><div class="card-body">
+                    <h4 class="h6">Remover a promessa</h4>
+                    <p class="small mb-0">
+                      Editar o <code>AGENTS.md</code> e emitir uma ADR que substitua a 0002 dizendo que o
+                      detector de drift é o <code>doctor</code> comparando sha, não o compilador. ADR não
+                      se edita — se revisa com outra.
+                    </p>
+                  </div></div>
+                </div>
+              </div>
+              <p class="mt-3 mb-0 text-body-secondary">
+                O que não dá é manter as duas fontes de verdade afirmando um mecanismo que não roda.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <h3 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#acc-3" aria-expanded="false" aria-controls="acc-3">
+              <span class="badge text-bg-warning me-2">3</span>
+              Rodar <code class="ms-1">generate --limit 1</code> de verdade
+            </button>
+          </h3>
+          <div id="acc-3" class="accordion-collapse collapse" data-bs-parent="#acc-proximos">
+            <div class="accordion-body">
+              <p>
+                Custa alguns centavos e é a única forma de sair da teoria. Um asset real exercita, de
+                ponta a ponta: autenticação, submissão, o <code>202</code> com
+                <code>background_job_id</code>, o poll, o download, a escrita do lockfile, o
+                <code>inputHash</code> sobre pixel de verdade e o <code>atlas</code>.
+              </p>
+<pre><code class="language-bash">export PIXELLAB_SECRET="..."
+node src/cli.ts estimate          # veredicto do guard, sem gastar
+node src/cli.ts generate --limit 1
+node src/cli.ts plan              # tem que dizer: 1 cached, 16 generate
+node src/cli.ts verify
+node src/cli.ts atlas</code></pre>
+              <p class="mb-0">
+                O segundo <code>plan</code> é o teste de idempotência manual — e o resultado dele diz se
+                o problema&nbsp;1 é teórico ou já é real.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <h3 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#acc-4" aria-expanded="false" aria-controls="acc-4">
+              <span class="badge text-bg-secondary me-2">4</span>
+              A faxina de vinte minutos
+            </button>
+          </h3>
+          <div id="acc-4" class="accordion-collapse collapse" data-bs-parent="#acc-proximos">
+            <div class="accordion-body">
+              <ul class="mb-0">
+                <li>Corrigir os 2 links do README raiz e adicionar validação de link ao <code>check-docs.sh</code> — assim os outros 13 param de crescer.</li>
+                <li>Escrever o <code>scripts/refresh-openapi.mjs</code>, ou tirar o script do <code>package.json</code>.</li>
+                <li>Decidir o destino do <code>zod</code>.</li>
+                <li>Atualizar data e Histórico do <code>docs/README.md</code> com o sprite studio.</li>
+                <li>Trocar a coluna &ldquo;em construção&rdquo; do README raiz por estado que informe alguma coisa.</li>
+                <li>Fazer o estúdio consultar <code>cost.ts</code> e escrever no mesmo ledger do pipeline.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <h2 class="h4 mt-4" id="depois">Depois disso</h2>
+      <p>
+        A pergunta aberta é <strong>quando o jogo começa</strong>. A ferramentaria de arte está no ponto
+        de rendimento decrescente: cada melhoria nela agora rende menos que a primeira tela do cliente
+        renderizando um sprite de verdade. O <code>docs/02-design/combate-zonas-oscilantes.md</code> já
+        descreve a mecânica central e admite o risco de ela não ser divertida — e esse é exatamente o
+        tipo de risco que só um protótipo jogável responde.
+      </p>
+      <div class="alert alert-primary d-flex gap-2" role="alert">
+        <i class="bi bi-compass flex-shrink-0"></i>
+        <div>
+          Sugestão: depois dos itens 1 a 3, o próximo marco não é mais documentação — é
+          <strong>um personagem andando em 8 direções numa tela PixiJS</strong>, alimentado pelo atlas
+          que o pipeline gerou. Isso fecha o ciclo inteiro e transforma toda essa fundação em algo que
+          se pode olhar.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="text-body-secondary small border-top mt-5 pt-3">
+    Análise gerada a partir do estado real do repositório em <strong>2026-07-30</strong>, commit
+    <code>d371ce9</code>. Todos os números vêm de comandos executados, não de leitura de código:
+    <code>npm test</code>, <code>npm run typecheck</code>, <code>scripts/check-docs.sh</code>,
+    <code>cli.ts plan</code> e <code>cli.ts doctor</code>. Nenhuma geração de asset foi disparada —
+    nada foi gasto. Documento de arquivo único: salve, mande por anexo, abra offline.
+  </footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+        integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU"
+        crossorigin="anonymous"></script>
+
+<script>
+/* ── runtime do documento ────────────────────────────────────────────────────
+   Copie este bloco inteiro, sem editar. Ele faz três coisas:
+   1. guarda o código-fonte cru ANTES de qualquer transformação (para o copiar);
+   2. destaca a sintaxe e injeta o botão de copiar;
+   3. liga as abas ao #hash da URL, nos dois sentidos.
+   ────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  // 1. Fonte cru primeiro. Depois do highlight o DOM ganha <span>; textContent ainda
+  //    devolve o texto certo, mas plugins de numeração de linha o contaminam. Guardar
+  //    antes é a única versão que nunca mente.
+  var sources = new WeakMap();
+  document.querySelectorAll('pre > code').forEach(function (code) {
+    sources.set(code, code.textContent.replace(/\n$/, ''));
+  });
+
+  // 2. Highlight. Declare sempre a linguagem na classe: a auto-detecção erra em
+  //    trechos curtos (o mesmo snippet vira "ruby" numa aba e "perl" na outra).
+  if (window.hljs) hljs.highlightAll();
+
+  // Copiar. navigator.clipboard exige contexto seguro; em file:// o comportamento
+  // varia por navegador, então o fallback com execCommand não é opcional.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; },
+                                                      function () { return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    // position:fixed + opacity:0 evita que a página role até o textarea.
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length); // iOS ignora select() sozinho
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  document.querySelectorAll('pre > code').forEach(function (code) {
+    var pre = code.parentElement;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline-secondary copy-btn';
+    btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+    btn.setAttribute('aria-label', 'Copiar código');
+    btn.addEventListener('click', function () {
+      copyText(sources.get(code) || code.textContent).then(function (ok) {
+        btn.innerHTML = ok ? '<i class="bi bi-check-lg"></i>' : '<i class="bi bi-x-lg"></i>';
+        btn.classList.toggle('btn-outline-success', ok);
+        btn.classList.toggle('btn-outline-danger', !ok);
+        btn.classList.remove('btn-outline-secondary');
+        setTimeout(function () {
+          btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+          btn.className = 'btn btn-sm btn-outline-secondary copy-btn';
+        }, 1500);
+      });
+    });
+    pre.appendChild(btn);
+  });
+
+  // 3. Aba ↔ URL. Sem isto, mandar "olha a aba Problemas" exige explicar o clique.
+  var tabs = document.querySelectorAll('[data-bs-toggle="tab"]');
+  if (!tabs.length) return;
+
+  function activateFromHash() {
+    var hash = window.location.hash;
+    if (!hash || hash.length < 2) return;
+    var target = document.querySelector(hash);
+    if (!target) return;
+    // O #hash pode apontar para o painel OU para um título dentro dele.
+    var pane = target.closest('.tab-pane') || (target.classList.contains('tab-pane') ? target : null);
+    if (!pane) return;
+    var trigger = document.querySelector('[data-bs-target="#' + CSS.escape(pane.id) + '"]');
+    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+    // O navegador já tentou rolar até o alvo — e falhou, porque naquele instante o
+    // painel ainda era display:none. Agora que apareceu, role de novo: sem isto a
+    // página abre num scroll intermediário, com as abas escondidas atrás da navbar.
+    var scrollTo = target !== pane ? target : (trigger && trigger.closest('[role="tablist"]')) || pane;
+    requestAnimationFrame(function () { scrollTo.scrollIntoView({ block: 'start' }); });
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener('shown.bs.tab', function (e) {
+      var id = (e.target.getAttribute('data-bs-target') || '').slice(1);
+      // replaceState, não location.hash: mudar o hash direto faz a página pular.
+      if (id) history.replaceState(null, '', '#' + id);
+    });
+  });
+
+  window.addEventListener('hashchange', activateFromHash);
+  activateFromHash();
+})();
+</script>
+</body>
+</html>
