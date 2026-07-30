@@ -1,0 +1,17 @@
+{
+  "name": "@ferro-e-cinzas/sprite-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local authoring tool: base character model, 8 directions, poses, and wardrobe via the PixelLab API.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  },
+  "engines": { "node": ">=24" }
+}

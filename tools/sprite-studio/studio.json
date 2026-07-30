@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "palette": [
+    "#0d0b0e",
+    "#1c1a21",
+    "#302c35",
+    "#4a444e",
+    "#6b6470",
+    "#918a94",
+    "#c2bcc4",
+    "#eae6ea",
+    "#3b1f1c",
+    "#6b2f26",
+    "#9c4436",
+    "#c96f4a",
+    "#2a2f1c",
+    "#49512c",
+    "#6e7a3e",
+    "#9aa85a",
+    "#1a2430",
+    "#28394d",
+    "#3d5872",
+    "#5f83a3",
+    "#4a3520",
+    "#6f5030",
+    "#9c7345",
+    "#c79d63"
+  ],
+  "characters": [
+    {
+      "id": "base-humano",
+      "label": "Base — humano",
+      "description": "bald naked humanoid mannequin, neutral skin, no hair, no clothing, no equipment, plain body, medieval dark fantasy pixel art, top-down",
+      "size": 64,
+      "seed": 1,
+      "createdAt": "2026-07-30T09:13:04.227Z",
+      "silhouette": "humano-medio"
+    }
+  ],
+  "poses": [
+    {
+      "id": "parado",
+      "label": "Parado",
+      "kind": "template",
+      "templateId": "breathing-idle",
+      "frameCount": 8,
+      "fps": 6,
+      "builtin": true,
+      "notes": "Template nativo. 1 geração por direção — o caminho barato."
+    },
+    {
+      "id": "caminhando",
+      "label": "Caminhando",
+      "kind": "action",
+      "action": "walking forward at a steady pace",
+      "frameCount": 8,
+      "fps": 8,
+      "builtin": true,
+      "notes": "Não existe template de caminhada normal — só crouched-walking. Vai por texto livre."
+    },
+    {
+      "id": "correndo",
+      "label": "Correndo",
+      "kind": "action",
+      "action": "running forward, arms swinging",
+      "frameCount": 8,
+      "fps": 12,
+      "builtin": true,
+      "notes": "Sem template de corrida. Texto livre."
+    },
+    {
+      "id": "pulando",
+      "label": "Pulando",
+      "kind": "action",
+      "action": "jumping upward, legs tucked",
+      "frameCount": 8,
+      "fps": 10,
+      "builtin": true,
+      "notes": "O template mais próximo é backflip, que é outra coisa. Texto livre."
+    },
+    {
+      "id": "atacando",
+      "label": "Atacando",
+      "kind": "template",
+      "templateId": "attack",
+      "frameCount": 8,
+      "fps": 12,
+      "builtin": true,
+      "notes": "Template nativo. Existem também attack-back, attack-left e attack-right."
+    },
+    {
+      "label": "Bloqueando com escudo",
+      "kind": "action",
+      "action": "raising a shield to block",
+      "frameCount": 8,
+      "fps": 8,
+      "id": "bloqueando-com-escudo"
+    }
+  ],
+  "wardrobe": [
+    {
+      "label": "Cota de malha",
+      "slot": "torso",
+      "editDescription": "wearing a rusted chainmail hauberk",
+      "keepPalette": true,
+      "seed": 42,
+      "id": "cota-de-malha",
+      "createdAt": "2026-07-30T09:13:04.251Z",
+      "silhouette": "humano-medio"
+    }
+  ],
+  "cells": {}
+}
