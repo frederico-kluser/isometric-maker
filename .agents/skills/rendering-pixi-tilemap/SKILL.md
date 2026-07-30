@@ -1,6 +1,6 @@
 ---
 name: rendering-pixi-tilemap
-description: Carries what is actually known about drawing this game's ground at scale, which is less than it looks - the batching container that no longer accepts sprites, its empty bounds that break culling, and three open questions this project has not answered. Use whenever drawing terrain, laying out tiles, chunking the world, streaming a zone, or deciding how thousands of quads reach the GPU - including Portuguese phrasings like "desenhar o chao", "montar o mapa", "carregar o terreno", "dividir em pedacos", "muitos tiles", "o mapa esta pesado", "streaming de zona", "quantos sprites aguenta". Triggers on tilemap, terreno, chunk, tile, ParticleContainer, batching, quads, mundo aberto, zona.
+description: Carries what is actually known about drawing the editor's isometric ground - the geometry that is already fixed (64x32 diamond, 16px per level of Z, integer Z), the depth key that provably cannot be made correct for multi-cell art, the batching container that no longer accepts sprites and whose empty bounds silently delete the floor, and three open questions this project has not answered. Use whenever drawing terrain, laying out tiles, stacking blocks, sorting what covers what on the grid, chunking the world, streaming a zone, or deciding how thousands of quads reach the GPU - including Portuguese phrasings like "desenhar o chao", "montar o mapa", "carregar o terreno", "empilhar blocos", "a parede aparece na frente do chao", "dividir em pedacos", "muitos tiles", "o mapa esta pesado", "streaming de zona", "quantos sprites aguenta". Triggers on tilemap, terreno, chunk, tile, isometrico, altura, parede, ParticleContainer, batching, quads, zona.
 metadata:
   type: knowledge
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -27,11 +27,54 @@ have to be answered before terrain is built:
 1. Whether the community tilemap package supports v8, and from which version. It is not installed
    here and nothing about it has been verified.
 2. Whether `ParticleContainer` is safe to build on — see the contradiction below.
-3. How a chunked approach interacts with camera-driven culling at this game's scale.
+3. How a chunked approach interacts with camera-driven culling at the scale of a map this editor is
+   expected to author.
 
 Do not let a skill's confident tone paper over that. If a task requires choosing a tilemap
 architecture, that choice is a **decision to record in an ADR**, not an implementation detail to
 settle inline.
+
+What is *not* open is the geometry. Read the next two sections before proposing anything: they are
+the part of this surface that is already decided, and the part whose limits are provable.
+
+### The geometry is fixed, and it is the sort key
+
+Three numbers are settled by ADR and are not open to inline reinterpretation: the tile diamond is
+**64×32 px**, one level of Z is **16 px**, and **Z is an integer** — stacked blocks per cell, with no
+half heights (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24-26@4229af26`). Changing any of them
+later invalidates every project file already written and every tile already generated
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:16@4229af26`), so a tilemap that quietly assumes
+another diamond is not a style choice, it is a migration.
+
+Two consequences land directly on the renderer:
+
+- **The stage scale must be a whole number.** A 1.5× upscale destroys the seam of the 2:1 diamond,
+  and no amount of edge extrusion repairs it
+  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`). That is a renderer setting rather
+  than a tilemap one — the sharpness rules live in `choosing-pixi-renderer`.
+- **Draw order is `x + y + z`, but the sort key is not.** Walls sit on a half cell — the north edge
+  of cell `(x, y)` is at `(x, y-0.5)` — so the value that actually sorts is `2*(x+y+z)` plus an
+  integer bias per edge, which keeps the whole comparison in integer arithmetic
+  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`). Doubling first is what buys the
+  half cell without floats.
+
+### Two places where the sort key is provably wrong
+
+Both are limits of any single linear order on this grid, not defects waiting for a cleverer
+comparator:
+
+1. **A sprite taller than one level of Z.** It claims one cell in the model and occupies four on
+   screen, so it ties with walls that should draw behind it. Its footprint and its silhouette
+   disagree, and the key only knows the footprint.
+2. **An object occupying more than one cell.** It can produce **cyclic occlusion** — A over B, B over
+   C, C over A — and a cycle has *no* correct linear order at all. Sorting harder cannot fix a cycle;
+   only splitting the object can.
+
+The mitigation for the second one is a decision about the data model, not about rendering: **the
+project format forbids multi-cell sprites**, and anything larger is sliced at authoring time
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`). An editor can refuse the impossible
+combination at the moment it is authored; a shipped game inheriting arbitrary art could not. So when
+a task asks for a multi-cell sprite, the answer is the format, not a better sort.
 
 ### `ParticleContainer` is a different class than the one you remember
 
@@ -61,7 +104,7 @@ The consequences that decide whether it fits terrain at all:
 `ParticleContainer` returns **empty bounds**. The vendored declaration says so in as many words:
 
 > "@returns {Bounds} An empty bounds object (0,0,0,0)"
-> — `tools/pixi-reference/vendor/pixi-api.d.ts:34642@e58b8ac3`
+> — `tools/pixi-reference/vendor/pixi-api.d.ts:34640@e58b8ac3`
 
 With culling active — which a camera-scrolled world will have — an empty-bounds container is always
 outside the view and is therefore **always culled**. The ground simply never draws, with no error.
@@ -105,22 +148,27 @@ page or a plain container of sprites relying on ordinary batching.
 
 ### Sizing the problem before choosing
 
-Before proposing an architecture, get these numbers from the task, because they change the answer
-completely: tiles visible at maximum zoom, tile pixel size, how many distinct terrain textures a zone
-uses, and whether any tile animates. A design chosen without them is a guess wearing a diagram.
+Tile size is not one of the open numbers — it is 64×32, fixed. What is still missing from any
+proposal, and changes the answer completely, is: tiles visible at maximum zoom, how many levels of Z
+a map is expected to stack, how many distinct terrain and wall textures one map uses, and whether any
+tile animates. A design chosen without them is a guess wearing a diagram.
 
-The server is sharded by zone from the first commit
-(`docs/adr/0007-fase1-vm-unica.md:15@385b9c10`), so zone boundaries are a real thing the client will
-see. Terrain streaming should follow zone shape rather than inventing its own partition.
+Nothing outside the editor defines the partition. There is no server and no zone sharding
+(`docs/adr/0010-pivo-para-editor-isometrico.md:27@4cdee5b3`), so chunk shape is the editor's own
+choice and has to be earned by a measurement instead of inherited from someone else's boundary.
 
 ### What is not verified
 
 Everything in the honest-state section, plus: no terrain has ever been rendered in this repository,
-and no frame-rate measurement of any tilemap approach exists for this art style.
+and no frame-rate measurement of any tilemap approach exists for this art style. The geometry section
+is decided, not measured — nobody has drawn a 64×32 diamond here to confirm the seam behaves as the
+ADR expects, and no tile has been generated to sit in it.
 
 ## References
 
+- `docs/adr/0013-geometria-isometrica-64x32-z16.md` — the diamond, the Z level, the sort key and its two failure modes
 - `tools/pixi-reference/vendor/skills/pixijs-scene-particle-container/SKILL.md` — the batching container in full
 - `tools/pixi-reference/vendor/skills/pixijs-performance/SKILL.md` — what actually breaks batching
 - `.agents/skills/composing-pixi-scene/SKILL.md` — the local-space cull change that bites here first
+- `.agents/skills/choosing-pixi-renderer/SKILL.md` — why the stage scale has to be an integer
 - `tools/pixellab-pipeline/src/atlas.ts` — extrusion, page ceiling, and the missing multipack

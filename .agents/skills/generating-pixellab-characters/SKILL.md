@@ -36,14 +36,14 @@ node $S flow /create-character-v3
 | `/create-character-v3` | 32–256 | formula, see below | `outline`/`detail` **when a reference image is given** |
 
 `mode='standard'` on the 8-direction endpoint is the project's backbone: one generation for all
-eight rotations (`docs/01-pixellab/custos-e-limites.md:70@0c85bc2b`). Every other route costs more,
+eight rotations (`docs/01-pixellab/custos-e-limites.md:70@39059cac`). Every other route costs more,
 and `mode='pro'` costs more **and** discards the style parameters you passed — a silent downgrade,
 not an error.
 
 `/create-character-v3` is the only one whose cost is a published formula rather than a table:
 `ceil(w*h*8 / 65536)` generations with a reference image, and `1 + ceil(s*s*8 / 65536)` from scratch
 where `s = max(width, height)`. Treat every resulting number as a **preço estimado**
-(`docs/01-pixellab/custos-e-limites.md:59@0c85bc2b`).
+(`docs/01-pixellab/custos-e-limites.md:59@39059cac`).
 
 ### All four are asynchronous, and none of them says 202
 
@@ -63,18 +63,34 @@ poll: the money left at submit, and the id is the only way back to the artefact.
 Two different inflation rules coexist, and using the wrong one crops heads off:
 
 - `/create-character-with-4-directions` and `/create-character-with-8-directions` inflate by
-  **~40%** — ask 64×64, get roughly 90×90 (`tools/pixellab-pipeline/src/endpoints.ts:80@08e4ea43`).
+  **~40%** — ask 64×64, get roughly 90×90 (`tools/pixellab-pipeline/src/endpoints.ts:80@b6e61f99`).
 - `/create-character-pro` pads the persisted canvas to **~2x** the requested frame size.
 
 Crop against the returned metadata, never against the requested value.
 
-### Three direction orderings, and the request side is not the response side
+### This endpoint has no return *order* — it hands back a dictionary keyed by name
 
 The `directions` field on `/create-character-with-8-directions` accepts keys in the spec's own
-order — south, south-east, east, north-east, north, north-west, west, south-west — described as
-"clockwise order starting from south". The **return** order of the 8-rotation family is different:
-S, SW, W, NW, N, NE, E, SE (`tools/pixellab-pipeline/src/endpoints.ts:45@08e4ea43`). Naming frames
-in the request order produces sprites that walk sideways, with no error anywhere.
+order — south, south-east, east, north-east, north, north-west, west, south-west — described as a
+"Fixed 8-rotation layout in clockwise order starting from south". That is the *layout* it draws, and
+the request side is all it governs.
+
+There is no response order to match it against. The spec says this endpoint "creates 8 rotation
+images in a **dictionary format** for easy access by direction name" and "Returns dictionary of
+images by direction name" (`tools/pixellab-pipeline/openapi/openapi-v2.json`, printable with
+`node $S endpoint /create-character-with-8-directions`). The schemas agree: `CharacterRotationUrls`
+is an object with a property per direction, `south`/`west`/`east`/`north` required and the four
+diagonals nullable "(8-dir only)". So **index by direction name, never by position** — there is no
+array whose order you could be reading, only whatever order the JSON keys happened to arrive in, and
+being wrong about it raises nothing.
+
+Two related traps in the same neighbourhood. The 200 block still carries an old `images`-by-name
+example while its declared schema is the job response (`background_job_id` + `character_id`) — one
+more reason to read the schema and not the example. And `DIRECTIONS_8` in this repo — S, SW, W, NW,
+N, NE, E, SE (`tools/pixellab-pipeline/src/endpoints.ts:45@b6e61f99`) — is the frame-naming order
+plus the documented return order of a **different** endpoint, `/generate-8-rotations-v2`. Reusing it
+as a positional key into this one's output produces sprites that walk sideways, with no error
+anywhere.
 
 ### Reference images per direction have rules the spec states only in prose
 

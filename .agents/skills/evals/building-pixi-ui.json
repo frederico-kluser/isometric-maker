@@ -2,11 +2,13 @@
   "skill": "building-pixi-ui",
   "min_overlap": 2,
   "routing": [
-    { "query": "mostrar o nome do jogador na tela", "should_trigger": true },
-    { "query": "o numero de dano esta pesado", "should_trigger": true },
+    { "query": "mostrar o rotulo do botao na tela", "should_trigger": true },
+    { "query": "o texto esta pesado demais", "should_trigger": true },
     { "query": "a acentuacao sumiu da fonte", "should_trigger": true },
-    { "query": "montar o menu de inventario", "should_trigger": true },
-    { "query": "desenhar a barra de vida no HUD", "should_trigger": true },
+    { "query": "montar o painel de propriedades", "should_trigger": true },
+    { "query": "desenhar a barra de custo da sessao", "should_trigger": true },
+    { "query": "mostrar a mensagem de erro do editor", "should_trigger": true },
+    { "query": "gerar a arte do painel de UI com a PixelLab", "should_trigger": false },
     { "query": "retomar a fila de geracao interrompida", "should_trigger": false },
     { "query": "criar um registro de decisao arquitetural", "should_trigger": false }
   ],
@@ -17,7 +19,11 @@
     },
     {
       "must_contain": "glyph-atlas text for anything that updates",
-      "why": "the HUD updates every tick; canvas text re-rasterises on every string change"
+      "why": "the cost bar and any live readout change their string; canvas text re-rasterises on every change"
+    },
+    {
+      "must_contain": "src/i18n/pt-BR.ts",
+      "why": "ADR 0016 puts every visible string in one frozen module reached by property access, not t()"
     },
     {
       "must_contain": "not installed here",

@@ -62,7 +62,7 @@ Three endpoints, three different rules:
   32×32 and 64×64 return 16 frames, while 128, 170 and 256 return 4.
 - `/animate-with-text-v3` takes `frame_count` 4–16 and it **must be even**, under a pixel budget of
   `width × height × frame_count ≤ 524288`
-  (`tools/pixellab-pipeline/src/endpoints.ts:207@08e4ea43`). Ask for 128×128 with 16 frames and the
+  (`tools/pixellab-pipeline/src/endpoints.ts:207@b6e61f99`). Ask for 128×128 with 16 frames and the
   request is rejected after you have already built it.
 
 `/animate-with-skeleton` has a stricter, undocumented-looking rule that the spec does state:

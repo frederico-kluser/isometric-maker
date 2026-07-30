@@ -3,7 +3,7 @@
   "min_overlap": 2,
   "routing": [
     { "query": "caiu o fps e esta travando", "should_trigger": true },
-    { "query": "engasga quando entra na zona nova", "should_trigger": true },
+    { "query": "engasga quando abre um mapa maior", "should_trigger": true },
     { "query": "esta consumindo memoria sem parar", "should_trigger": true },
     { "query": "vale a pena otimizar o draw call", "should_trigger": true },
     { "query": "achar o gargalo de desempenho", "should_trigger": true },

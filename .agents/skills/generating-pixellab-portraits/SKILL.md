@@ -30,7 +30,7 @@ rewards getting the order right: one paid step, then unlimited free ones.
 Getting this backwards — regenerating visemes per line of dialogue — turns a one-off cost into a
 per-line one.
 
-None of this family is modelled in the pipeline: `tools/pixellab-pipeline/src/endpoints.ts:13@08e4ea43`
+None of this family is modelled in the pipeline: `tools/pixellab-pipeline/src/endpoints.ts:13@b6e61f99`
 lists the 22 endpoints it calls and no portrait route is among them. Everything here comes from the
 vendored spec (`tools/pixellab-pipeline/openapi/openapi-v2.json:1@8bc0acb9`), so treat it as **not
 yet exercised by this repository**.

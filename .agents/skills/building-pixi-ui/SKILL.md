@@ -1,6 +1,6 @@
 ---
 name: building-pixi-ui
-description: Carries how this game draws text and interface - every player-visible string is Brazilian Portuguese with accents that break naive bitmap fonts, glyph-atlas text is the default because the HUD updates every tick, and no UI toolkit has been verified against the pinned version. Use whenever adding a label, HUD element, damage number, inventory or menu, choosing a font, or diagnosing text that is blurry, missing accents or expensive - including Portuguese phrasings like "texto na tela", "mostrar o nome", "numero de dano", "barra de vida", "menu de inventario", "a acentuacao sumiu", "a fonte esta borrada", "o texto esta pesado". Triggers on texto, fonte, HUD, rotulo, interface, acentuacao, BitmapText, glifo, inventario, menu.
+description: Carries how this editor draws text and interface - every string the user reads is Brazilian Portuguese with accents that no built-in glyph set contains, those strings live in one frozen module reached by property access, glyph-atlas text is the default for anything whose string changes, and no UI toolkit has been verified against the pinned version. Use whenever adding a rotulo, a properties panel, the cost bar or an error message, choosing a font, or diagnosing text that is blurry, missing accents or expensive - including Portuguese phrasings like "texto na tela", "rotulo do botao", "painel de propriedades", "barra de custo", "mensagem de erro", "a acentuacao sumiu", "a fonte esta borrada", "o texto esta pesado". Triggers on texto, fonte, rotulo, interface, acentuacao, BitmapText, glifo, painel, propriedades, mensagem, custo, strings centralizadas.
 metadata:
   type: knowledge
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -12,48 +12,102 @@ metadata:
 
 Before adding any text, before choosing a font, and before proposing a UI toolkit.
 
-For the API read `tools/pixi-reference/vendor/skills/pixijs-scene-text/SKILL.md`, which has five
-reference documents covering the three text classes.
+For the API read `tools/pixi-reference/vendor/skills/pixijs-scene-text/SKILL.md`, which has one
+reference document per text class. This skill does not restate them.
 
 ## Injected knowledge
 
-### Every string the player reads is Brazilian Portuguese
+### Every string the user reads is Brazilian Portuguese
 
 This is a hard rule of the repository, not a localisation plan:
 
-> "Todo texto que o jogador lê (UI, itens, diálogo, mensagens de erro do jogo)" — português do Brasil
-> — `AGENTS.md:9@e451cfee`
+> "Todo texto que o usuário do editor lê (UI, mensagens de erro) e o texto do jogo exportado" —
+> português do Brasil — `AGENTS.md:10@7a66ff95`
 
 The rendering consequence is concrete and easy to miss until it ships: pt-BR needs
-`á à â ã é ê í ó ô õ ú ç` and their capitals. A glyph atlas built from an ASCII character set renders
-those as blanks or as the fallback box — and the failure is *content-dependent*, so it survives every
-test that happens to use unaccented words. Any bitmap font this project installs must declare the
-accented range explicitly, and the check for it belongs in whatever generates the font, not in review.
+`á à â ã é ê í ó ô õ ú ç` and their capitals, and no built-in preset contains them. The vendored
+types describe `BitmapFontManager.ASCII` as "all the ASCII table" and `BitmapFontManager.ALPHANUMERIC`
+as the union of ALPHA and NUMERIC (`tools/pixi-reference/vendor/pixi-api.d.ts:39897-39906@e58b8ac3`),
+and `chars` falls back to ALPHANUMERIC when nobody passes it
+(`tools/pixi-reference/vendor/pixi-api.d.ts:39713-39715@e58b8ac3`). The vendor states the consequence
+as a rule: `chars` is "Essential for non-ASCII, CJK, or restricted charsets"
+(`tools/pixi-reference/vendor/skills/pixijs-scene-text/references/bitmap-text.md:95@e0e7f7e1`).
 
-Identifiers, types and JSON keys stay English (`AGENTS.md:11@e451cfee`). A label's variable name is
+So any font this project installs spells the accented range into `chars` explicitly, and the check
+for it belongs in whatever installs the font, not in review. The bug it prevents is
+*content-dependent*, which is why this class of bug ships at all: it survives every test that happens
+to use unaccented words, and the first casualty is a word like "Configurações" that nobody wrote a
+test for.
+
+One inference to not make. Installing is described as *pre*-generation, not as a lock — "without
+install, the first `BitmapText` with a new `fontFamily` generates the atlas lazily"
+(`tools/pixi-reference/vendor/skills/pixijs-scene-text/SKILL.md:71@592cce05`) — and the vendored
+types show `DynamicBitmapFont.ensureCharacters`
+(`tools/pixi-reference/vendor/pixi-api.d.ts:40250@e58b8ac3`) next to a `getFont` that takes the text
+itself (`tools/pixi-reference/vendor/pixi-api.d.ts:39916@e58b8ac3`). Whether a generated font extends
+itself for a character outside `chars` is not settled by the vendor, so plan around neither answer.
+What *is* fixed by construction is a bitmap font loaded from a file: its glyphs are whatever its
+atlas contains, so a pixel font that shipped without `ç` never draws one. That regression arrives
+with the art, not with the text.
+
+Identifiers, types and JSON keys stay English (`AGENTS.md:11@7a66ff95`). A label's variable name is
 English; its value is Portuguese.
 
-### Glyph-atlas text is the default here, and the reason is the HUD
+### The strings do not live where they are drawn
 
-Pixi offers canvas-rendered text and glyph-atlas text. Canvas-rendered text re-rasterises when its
-string changes, which is fine for a title and wrong for anything that changes every tick — health,
-damage numbers, the oscillating hit chance, cooldowns. In this game that is most of the HUD.
+Every visible string lives in one frozen module, `src/i18n/pt-BR.ts`, reached by direct property
+access and **not** through a `t('chave')` function. The reason is the compiler: both tsconfigs enable
+`noUncheckedIndexedAccess`, so indexing an object by string yields `string | undefined` and invites
+a `!` that erases the check, while property access makes a missing key a compile error instead of an
+empty label (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:39@6018ff3d`).
+
+```ts
+import { S } from './i18n/pt-BR.ts';
+label.textContent = S.custoDaSessao;   // English identifier, Portuguese value
+```
+
+Error messages are inside the rule, not an exception to it — they are what the user reads at the
+worst moment, and the text that most often escapes centralisation
+(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:53@6018ff3d`). Nothing mechanical enforces this:
+there is no linter and no CI, so a literal typed straight into a component compiles and ships
+(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:56@6018ff3d`).
+
+### Glyph-atlas text is the default for anything whose string changes
+
+Canvas-rendered text re-rasterises and re-uploads whenever its string changes; glyph-atlas text only
+repositions quads. Moving, rotating or scaling either one is free — the cost is on the *string*, not
+on the transform, and that is the part that gets misremembered into "text is expensive, avoid it".
 
 So: **glyph-atlas text for anything that updates, canvas text only for static strings.** Confirm the
 class names and the font-installation call with `inspect-pixi.mjs grep Text` and
 `inspect-pixi.mjs exists BitmapFont` before writing either.
 
 The pixel-art constraint from `choosing-pixi-renderer` applies to fonts too: a pixel font must be
-sampled nearest and drawn at an integer scale, or it blurs exactly like the sprites do. A font
-designed at 8px displayed at 1.5× is unreadable in a way that reads as "the font is bad".
+sampled nearest and drawn at an integer scale, or it blurs exactly like the tiles do. A font designed
+at 8px displayed at 1.5× is unreadable in a way that reads as "the font is bad".
 
-### Damage numbers are the awkward case
+### What this editor's interface actually has to show
 
-They are anchored to a world position but must not scale with camera zoom, so they live in screen
-space with their position converted per frame — the world/screen split is in `composing-pixi-scene`.
-They are also numerous, short-lived and all the same size, which makes them the one HUD element worth
-pooling rather than allocating: creating and destroying text objects per hit is how a fight drops
-frames.
+Four kinds of text, and none of them is a game HUD:
+
+- **Rótulo** — a name on a control, a layer or a tool. Static string, so canvas text is the right
+  default. The exception worth care is a label anchored to a world position: it belongs in screen
+  space so it does not scale with the camera zoom, which is the world/screen split described in
+  `composing-pixi-scene`.
+- **Painel de propriedades** — the inspector for the current selection. Mostly static strings around
+  values that change only when the user edits them.
+- **Barra de custo** — the one element that is live, and the only one with money behind it. The
+  budget guard informs and never refuses, so a number on screen is the last thing standing between
+  the user and a surprise invoice
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:59@f2508118`). The report it renders carries the
+  session total, the month total and the balance — and the balance is typed `number | undefined`, so
+  the widget needs a state for "not known", not a zero
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:33-38@f2508118`); the confirmation that precedes
+  each generation adds the estimate for that action
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:46@f2508118`). Showing the accumulated totals is
+  the whole point — an estimate of US$ 0,02 displayed three hundred times is how an informative
+  guard becomes a surprise.
+- **Mensagem de erro** — pt-BR, from the strings module, and specific enough to say what to do next.
 
 ### No UI toolkit has been verified
 
@@ -64,42 +118,30 @@ repository has verified them.
 That leaves two honest options, and picking between them is a decision to record, not an
 implementation detail:
 
-1. **Hand-rolled containers plus glyph-atlas text.** No dependency, no compatibility risk, and full
-   control of the pixel grid — which a pixel-art HUD needs anyway. Costs more code.
+1. **Hand-rolled containers plus text.** No dependency, no compatibility risk, and full control of
+   the pixel grid — which anything drawn over the map needs anyway. Costs more code.
 2. **Adopt a toolkit**, after verifying its version against the pin and recording the result.
 
-Given that this game's UI is a pixel-art HUD on an integer grid, option 1 is the lower-risk default,
-and the burden of proof is on adopting a dependency rather than on avoiding one.
-
-### The HUD has to show things the combat design requires
-
-Not renderer detail, but it constrains the UI's shape, so it belongs here. Engagement is lock-on with
-four zones on keys `1`–`4`, and the per-zone chance oscillates as a deterministic function of the tick
-(`docs/adr/0004-combate-alvo-travado-zonas-oscilantes.md:15@baea0827`). The client computes that curve
-locally from a seed sent once (`docs/02-design/combate-zonas-oscilantes.md:44@793c7279`), so the HUD
-can display it live at frame rate without any network traffic.
-
-Two consequences: the zone display updates every frame, which is why glyph-atlas text is the default;
-and **zone switching has a cooldown and a cost** (`docs/02-design/combate-zonas-oscilantes.md:52@793c7279`)
-that the UI must show, or the player reads the delay as input lag.
-
-### Full loot raises the bar on confirmation
-
-Death drops everything and nothing is ever restored (`docs/adr/0003-permadeath-total.md:17@b24cc681`).
-Any UI that can destroy, drop or trade an item is operating on irreversible actions, so it needs
-confirmation proportionate to that — and the confirmation is a UI affordance only. The transaction
-itself is the server's, through the ledger, as `enforcing-server-authority` requires.
+Option 1 is the lower-risk default, and the burden of proof is on adopting a dependency rather than
+on avoiding one.
 
 ### What is not verified
 
 - No UI exists in this repository.
+- **Whether the panels are DOM or drawn on the canvas has not been decided.** The ADR's own example
+  assigns to `textContent`, which is a DOM property
+  (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:9@6018ff3d`). Everything above about glyph
+  atlases and nearest sampling applies to text Pixi draws; DOM chrome with a web font has neither
+  that problem nor that budget. The strings rule applies to both.
 - The community UI and layout packages are unverified against 8.19.0, as stated above.
-- No bitmap font has been generated for this project, so the accent-coverage failure described above
-  is predicted from the character set, not observed.
+- No bitmap font has been generated for this project. That the presets exclude the accented range is
+  documented; what an uncovered character actually draws — nothing, a blank, a fallback box — is
+  neither stated in the vendor nor observed here, so do not promise a symptom.
 
 ## References
 
-- `tools/pixi-reference/vendor/skills/pixijs-scene-text/SKILL.md` — the three text classes and when each fits
+- `tools/pixi-reference/vendor/skills/pixijs-scene-text/SKILL.md` — the text classes and when each fits
 - `tools/pixi-reference/vendor/skills/pixijs-assets/references/fonts.md` — loading and installing fonts
-- `.agents/skills/composing-pixi-scene/SKILL.md` — the world/screen split damage numbers depend on
+- `.agents/skills/guarding-generation-cost/SKILL.md` — where the numbers in the cost bar come from
+- `.agents/skills/composing-pixi-scene/SKILL.md` — the world/screen split a world-anchored label needs
 - `.agents/skills/choosing-pixi-renderer/SKILL.md` — why an integer scale matters for a pixel font

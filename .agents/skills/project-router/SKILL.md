@@ -76,16 +76,17 @@ The usual mappings:
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
-| client, server, netcode, combat, loot, economy, anti-cheat | `enforcing-server-authority` |
-| **anything the client draws** — renderer, scene, camera, sprite, atlas, tilemap, HUD, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate |
+| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate |
 | no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
 
-`routing-pixijs-work` owns eleven skills of its own plus the 26 official PixiJS skills vendored in
+`routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in
 `tools/pixi-reference/vendor/skills/`. Delegate the renderer half of a task to it rather than picking
-from that set here — it exists so this table does not have to grow by thirty-seven rows.
+from that set here — it exists so this table does not have to grow by thirty-six rows.
 
-Renderer work almost always pairs with `enforcing-server-authority`: the client draws, and it decides
-nothing.
+**There is no server, and no skill claims otherwise.** This repository is a local single-user
+isometric editor (`docs/adr/0010-pivo-para-editor-isometrico.md`); `enforcing-server-authority` was
+retired with the pivot and has no successor. A task about combat, loot, netcode or anti-cheat is out
+of scope — say so and ask, rather than routing it somewhere.
 
 ### 5. Assemble the chain
 

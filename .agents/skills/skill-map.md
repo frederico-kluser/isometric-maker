@@ -1,5 +1,11 @@
 # Skill Map
 
+> **HISTORICAL — describes the library as designed for the pre-pivot product.** The game it assumed
+> no longer exists: `docs/adr/0010-pivo-para-editor-isometrico.md` turned this repository into
+> **isometric-maker**, a local single-user isometric game editor. `enforcing-server-authority`, which
+> this map argues for in §2.7, has been retired with no successor. Kept because `project-router` names
+> it part of the audit trail. The live index is `catalog.md`.
+
 Phase 2 artifact. Proposes the library before any file is generated. Input: `project-analysis.md`.
 
 Nine skills: one router, three knowledge, three task, two meta.

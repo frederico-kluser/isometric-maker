@@ -1,6 +1,6 @@
 ---
 name: routing-pixijs-work
-description: Routes any task touching the PixiJS client renderer, choosing between the 26 official PixiJS skills vendored from the package and this repo's own bridge skills, and enforcing that no PixiJS API is ever written from memory. Use whenever a request involves the game client, rendering, scene, camera, sprite, animation, tilemap, atlas, HUD, input or frame rate - including Portuguese phrasings like "desenhar na tela", "renderizar o mapa", "montar a cena", "animar o personagem", "camera segue o jogador", "carregar o atlas", "clicar no inimigo", "esta com lag", "quantos quadros por segundo". Use it before writing any line that imports pixi.js. Triggers on PixiJS, pixi, renderizador, canvas, WebGPU, WebGL, sprite, spritesheet, tilemap, culling, ticker, HUD, draw call, cliente.
+description: Routes any task touching the PixiJS renderer of this isometric editor, choosing between the 26 official PixiJS skills vendored from the package and this repo's own bridge skills, and enforcing that no PixiJS API is ever written from memory. Use whenever a request involves drawing, rendering, scene, camera, sprite, animation, tilemap, atlas, editor chrome, input or frame rate - including Portuguese phrasings like "desenhar na tela", "renderizar o mapa", "montar a cena", "animar o personagem", "mover a camera", "carregar o atlas", "clicar na celula", "selecionar o bloco", "esta com lag", "quantos quadros por segundo". Use it before writing any line that imports pixi.js. Triggers on PixiJS, pixi, renderizador, cliente, canvas, WebGPU, WebGL, sprite, spritesheet, tilemap, isometrico, culling, ticker, draw call, editor.
 metadata:
   type: router
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -20,7 +20,7 @@ or cannot do. Before estimating whether something will hold its frame rate.
 ## The rule that comes before any routing
 
 **Never write the PixiJS API from memory.** This is the same rule the repo already applies to the
-PixelLab API (`AGENTS.md:22@e451cfee`), and PixiJS earns it for a different and nastier reason.
+PixelLab API (`AGENTS.md:22@7a66ff95`), and PixiJS earns it for a different and nastier reason.
 
 v8 did not extend v7, it replaced parts of it — and then **kept the v7 methods as deprecated shims**.
 There are 97 deprecated declarations in the vendored surface. `Graphics.beginFill` is still declared,
@@ -49,7 +49,7 @@ verified**. Adding one is a dependency decision, not an implementation detail.
 ### 2. Classify the surface
 
 Which of the ten areas the task touches, and for each: is the question **what the API does** or **how
-this game does it**? That single distinction decides the routing.
+this editor does it**? That single distinction decides the routing.
 
 ### 3. Route
 
@@ -58,17 +58,17 @@ this game does it**? That single distinction decides the routing.
 
 Most real tasks need one of each.
 
-| The task is about | Upstream, for the API | Here, for this game |
+| The task is about | Upstream, for the API | Here, for this editor |
 |---|---|---|
 | booting the app, the frame loop, teardown | `pixijs-application`, `pixijs-ticker` | `bootstrapping-pixi-app` |
 | WebGPU vs WebGL, resolution, pixel-art sharpness | `pixijs-core-concepts`, `pixijs-environments` | `choosing-pixi-renderer` |
 | containers, camera, draw order, culling | `pixijs-scene-core-concepts`, `pixijs-scene-container` | `composing-pixi-scene` |
-| sprites, atlas, animation, equipment layers | `pixijs-scene-sprite`, `pixijs-assets` | `animating-pixi-sprites` |
-| the ground, tiles, very many quads | `pixijs-scene-particle-container` | `rendering-pixi-tilemap` |
-| clicks, pointer, hit-testing, targeting | `pixijs-events`, `pixijs-math` | `handling-pixi-input` |
-| labels, HUD, fonts | `pixijs-scene-text` | `building-pixi-ui` |
+| sprites, atlas, animation, wardrobe layers | `pixijs-scene-sprite`, `pixijs-assets` | `animating-pixi-sprites` |
+| the ground, tiles, stacked blocks, very many quads | `pixijs-scene-particle-container` | `rendering-pixi-tilemap` |
+| clicks, pointer, hit-testing, picking a cell | `pixijs-events`, `pixijs-math` | `handling-pixi-input` |
+| labels, editor chrome, fonts | `pixijs-scene-text` | `building-pixi-ui` |
 | filters, masks, blend modes | `pixijs-filters`, `pixijs-blend-modes` | `applying-pixi-filters` |
-| drawing state that arrives from the server | `pixijs-ticker` | `interpolating-pixi-state` |
+| smoothing motion between grid cells, the jump | `pixijs-ticker` | `interpolating-pixi-state` |
 | frame rate, draw calls, GPU memory, leaks | `pixijs-performance` | `profiling-pixi-performance` |
 | shapes and vector drawing | `pixijs-scene-graphics` | — none; upstream is enough |
 | upgrading, or diagnosing v7-looking code | `pixijs-migration-v8` | — none; upstream is enough |

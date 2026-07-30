@@ -25,13 +25,13 @@ costs roughly ten to twenty times the other for a barrel that ends up looking th
 
 Object generation uses the Pro Tools and the spec states the 20–40 figure inline on both object
 endpoints. For map props — barrel, torch, chest, corpse — `/map-objects` is the right call and the
-repo says so explicitly (`docs/01-pixellab/custos-e-limites.md:31@0c85bc2b`). Reserve
+repo says so explicitly (`docs/01-pixellab/custos-e-limites.md:31@39059cac`). Reserve
 `/create-8-direction-object` for the handful of objects that genuinely need eight angles.
 
 Sizes differ and the ceilings are not arbitrary: `/create-1-direction-object` takes 32–256,
 `/create-8-direction-object` only **32–168** because the 8-rotation pipeline rejects anything larger,
 and `/map-objects` takes 32–400 — dropping to a 192×192 area when inpainting is used
-(`tools/pixellab-pipeline/src/endpoints.ts:160@08e4ea43`).
+(`tools/pixellab-pipeline/src/endpoints.ts:160@b6e61f99`).
 
 ### The review status is a trap you can leave money sitting in
 

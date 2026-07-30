@@ -60,7 +60,7 @@ other counts at `transition_size=1.0`.
 ### Sizes and modes, per family
 
 - Top-down and sidescroller `tile_size`: **16 or 32**. `64` exists in the enum but **requires
-  `mode='pro'`** (`tools/pixellab-pipeline/src/endpoints.ts:150@08e4ea43`).
+  `mode='pro'`** (`tools/pixellab-pipeline/src/endpoints.ts:150@b6e61f99`).
 - `spread_x`, `slope_size` and `raggedness` are **Pro only** and are silently inert in standard mode.
 - Isometric tile: 16–64, and the spec notes sizes above 24 usually look better. `isometric_tile_size`
   ∈ 16, 32; `isometric_tile_shape` ∈ thin tile, thick tile, block — thickness controls how much

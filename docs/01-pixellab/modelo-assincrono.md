@@ -5,7 +5,7 @@
 > **23 dos 56 endpoints POST** devolvem `202` + `background_job_id`. Você paga no submit e busca o resultado depois. Guarde o id em disco **antes** do primeiro poll.
 >
 > ```bash
-> node /home/ondokai/Projects/ferro-e-cinzas-skills/pixellab-assets/scripts/inspect-spec.mjs \
+> node /home/ondokai/Projects/power-abuse/.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs \
 >   /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json --list
 > ```
 

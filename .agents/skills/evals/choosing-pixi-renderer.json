@@ -7,7 +7,7 @@
     { "query": "qual backend usar, webgpu ou webgl", "should_trigger": true },
     { "query": "qual resolucao e qual fator de escala", "should_trigger": true },
     { "query": "o zoom da camera deixou tudo serrilhado", "should_trigger": true },
-    { "query": "criar um ADR novo sobre permadeath", "should_trigger": false },
+    { "query": "escrever a documentacao do projeto em portugues", "should_trigger": false },
     { "query": "qual o limite de tamanho desse parametro", "should_trigger": false }
   ],
   "invariants": [
@@ -17,7 +17,11 @@
     },
     {
       "must_contain": "integer nearest upscale",
-      "why": "the client half of pixel-perfect; losing it wastes everything the pipeline does"
+      "why": "the renderer half of pixel-perfect; losing it wastes everything the pipeline does"
+    },
+    {
+      "must_contain": "zoom control is not a continuous slider",
+      "why": "ADR 0013 fixed a 64x32 diamond, so a fractional stage scale breaks the seam and no extrusion repairs it"
     },
     {
       "must_contain": "Blurry",

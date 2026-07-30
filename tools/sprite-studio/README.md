@@ -90,7 +90,7 @@ Três decisões, e o porquê de cada uma:
 ## Limitações conhecidas
 
 - **Sem editor visual de esqueleto.** Pose `skeleton` se cadastra pela tela, mas os keypoints se editam à mão no JSON.
-- **Sem paper-doll em tempo de execução.** O guarda-roupa gera um personagem completo vestido, não uma camada separada — e isso é deliberado: **a API não tem primitiva de equipamento entre personagens**, e o `transfer-outfit-v2` é limitado a 3 frames por job acima de 80px. As três soluções que jogos reais usam estão em [`docs/03-arquitetura/paper-doll-e-equipamento.md`](../../docs/03-arquitetura/paper-doll-e-equipamento.md).
+- **Sem paper-doll em tempo de execução.** O guarda-roupa gera um personagem completo vestido, não uma camada separada — e isso é deliberado: **a API não tem primitiva de equipamento entre personagens**, e o `transfer-outfit-v2` é limitado a 3 frames por job acima de 80px. As três soluções que jogos reais usam estão em [`docs/02-personagem/guarda-roupa-e-silhueta.md`](../../docs/02-personagem/guarda-roupa-e-silhueta.md).
 - **Sem aprovar/reprovar na tela.** Regerar sobrescreve. O `rejectedHashes` do pipeline resolve isso do lado do lote, mas ainda não está ligado aqui.
 - **Sem guard de orçamento na tela.** O `cost.ts` do pipeline tem os tetos; o estúdio ainda não os consulta antes de submeter.
 

@@ -33,7 +33,7 @@ API that synchronicity is a property of the route, not of the work.
 
 `pixen` is the only one with a divisibility rule: width and height must be **multiples of 4**, and
 the per-axis maximum of 768 is a lie unless the *area* also fits 512×512
-(`tools/pixellab-pipeline/src/endpoints.ts:137@08e4ea43`). Validate locally — a 422 arrives after
+(`tools/pixellab-pipeline/src/endpoints.ts:137@b6e61f99`). Validate locally — a 422 arrives after
 submission.
 
 ### The v2 endpoints return a grid, and the count is decided by the size

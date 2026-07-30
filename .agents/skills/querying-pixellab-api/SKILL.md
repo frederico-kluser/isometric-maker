@@ -36,7 +36,7 @@ what is true of one family. Load this one first, then the family.
 ### The rule, and why it is unusually strict
 
 > "A API do PixelLab **muda sem versionar** — o `info.version` do spec é literalmente `"dev"`."
-> — `AGENTS.md:22@e451cfee`
+> — `AGENTS.md:22@7a66ff95`
 
 The vendored snapshot is the source of truth, not your memory and not any blog:
 `tools/pixellab-pipeline/openapi/openapi-v2.json`, captured 2026-07-29, sha256 `5b11c9a7afa1…`
@@ -99,12 +99,30 @@ catalog uses are inside the visible prefix and are safe: `breathing-idle`, `crou
 | Source | Order |
 |---|---|
 | Spec enum `Direction` | north, north-east, east, south-east, south, south-west, west, north-west |
-| `DIRECTIONS_8`, the **return** order of the 8-rotation endpoints | S, SW, W, NW, N, NE, E, SE |
+| `DIRECTIONS_8`, the return order of **`/generate-8-rotations-v2` only** | S, SW, W, NW, N, NE, E, SE |
 | Inline enum on `/create-character-with-8-directions` | south, south-east, east, … |
 
-The project's canonical order for naming frames is the return order — S, SW, W, NW, N, NE, E, SE
-(`tools/pixellab-pipeline/src/endpoints.ts:45@08e4ea43`,
-`docs/adr/0005-low-top-down-8-direcoes.md:25@0f447499`). Getting it wrong makes the sprite walk
+Do **not** widen that middle row into "the 8-rotation endpoints". The family's two members make
+opposite claims, and only one of them claims an order at all — both quotes are in
+`tools/pixellab-pipeline/openapi/openapi-v2.json`, printable with `node $S endpoint <path>`:
+
+- **`/generate-8-rotations-v2`** — "Returns 8 images **in order**: South, South-West, West,
+  North-West, North, North-East, East, South-East". A genuine positional contract, and it is exactly
+  `DIRECTIONS_8` (`tools/pixellab-pipeline/src/endpoints.ts:45@b6e61f99`).
+- **`/create-character-with-8-directions`** — no return order exists to get wrong: it "creates 8
+  rotation images in a **dictionary format** for easy access by direction name" and "Returns
+  dictionary of images by direction name". The one ordering it documents is a *layout* — "Fixed
+  8-rotation layout in **clockwise** order starting from south" — which is the **mirror** of
+  `DIRECTIONS_8` (S, SE, E, NE, N, NW, W, SW). Applying `DIRECTIONS_8` positionally here is a
+  category error, not a 422.
+
+The lesson generalises past these two: **read by key wherever a key exists, and trust position only
+where the spec says "in order".** Schemas make it checkable — `CharacterRotationUrls` is an object
+keyed by direction name whose four diagonals are nullable, not an array.
+
+The project's canonical order for *naming frames on disk* remains S, SW, W, NW, N, NE, E, SE
+(`docs/adr/0005-low-top-down-8-direcoes.md:25@0f447499`) — a repo convention that happens to match
+one endpoint, not a promise the API makes everywhere. Getting it wrong makes the sprite walk
 sideways and produces no error at all.
 
 ### Perspective must be passed explicitly
@@ -120,16 +138,16 @@ Verified enum values: `CameraView` = side, low top-down, high top-down.
 
 `/create-character-with-4-directions` and `/create-character-with-8-directions` inflate the canvas by
 about 40% — ask for 64×64 and roughly 90×90 comes back
-(`tools/pixellab-pipeline/src/endpoints.ts:90@08e4ea43`). Crop against the real returned metadata,
+(`tools/pixellab-pipeline/src/endpoints.ts:90@b6e61f99`). Crop against the real returned metadata,
 never against the requested value, or the atlas cuts the sprites' heads off.
 
 ### Prices are always estimates
 
 Write "preço estimado", never a flat price. PixelLab labels its own column `Estimated Price* (USD)`
-with the note that it varies with GPU time (`AGENTS.md:33@e451cfee`). One conflict is still
+with the note that it varies with GPU time (`AGENTS.md:33@7a66ff95`). One conflict is still
 unresolved and must stay marked as such: the spec's formula and the published table disagree on
 `/create-character-v3` at 64×64 (1 vs 2 generations); the repo's rule is to use the larger
-(`docs/01-pixellab/custos-e-limites.md:59@0c85bc2b`).
+(`docs/01-pixellab/custos-e-limites.md:59@39059cac`).
 
 ### The vendor's public pages are not a substitute for the spec
 

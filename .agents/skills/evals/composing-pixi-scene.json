@@ -2,8 +2,8 @@
   "skill": "composing-pixi-scene",
   "min_overlap": 2,
   "routing": [
-    { "query": "fazer a camera seguir o jogador", "should_trigger": true },
-    { "query": "o personagem aparece atras da arvore errada", "should_trigger": true },
+    { "query": "mover a camera pelo mapa", "should_trigger": true },
+    { "query": "a parede aparece na frente do personagem", "should_trigger": true },
     { "query": "qual a ordem de desenho das camadas", "should_trigger": true },
     { "query": "esconder o que esta fora da tela", "should_trigger": true },
     { "query": "montar a cena e agrupar as camadas", "should_trigger": true },
@@ -16,8 +16,12 @@
       "why": "the 8.16.0 cullArea coordinate-space change bites camera-scrolled worlds first"
     },
     {
-      "must_contain": "sorted by the sprite's ground position",
-      "why": "three-quarter perspective makes depth a function of feet position, not insertion order"
+      "must_contain": "2*(x+y+z)",
+      "why": "walls sit on a half cell, so the integer sort key is the doubled grid key plus a per-edge bias"
+    },
+    {
+      "must_contain": "correct linear order at all",
+      "why": "cyclic occlusion is a model problem; the fix is the project format forbidding multi-cell sprites, never a better comparator"
     },
     {
       "must_contain": "considered experimental at this stage",

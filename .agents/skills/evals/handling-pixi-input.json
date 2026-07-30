@@ -2,18 +2,27 @@
   "skill": "handling-pixi-input",
   "min_overlap": 2,
   "routing": [
-    { "query": "clicar no inimigo para selecionar o alvo", "should_trigger": true },
+    { "query": "clicar numa celula do mapa para selecionar o bloco", "should_trigger": true },
     { "query": "o clique nao esta funcionando no sprite", "should_trigger": true },
-    { "query": "arrastar item para outro slot", "should_trigger": true },
-    { "query": "travar no alvo e trocar de zona", "should_trigger": true },
+    { "query": "arrastar para pintar varias celulas", "should_trigger": true },
+    { "query": "o picking pega o bloco errado", "should_trigger": true },
+    { "query": "desfazer a ultima edicao do mapa", "should_trigger": true },
     { "query": "a tecla nao responde no teclado", "should_trigger": true },
     { "query": "empacotar o atlas das criaturas", "should_trigger": false },
     { "query": "revisar as convencoes de documentacao", "should_trigger": false }
   ],
   "invariants": [
     {
-      "must_contain": "A click is a request. It is never a decision.",
-      "why": "the authority rule stated where a handler is actually written, not in the abstract"
+      "must_contain": "The click is the edit, and undo is the safety net",
+      "why": "the premise of a local editor stated where a handler is actually written: there is no server to ask, so the gesture itself is the mutation"
+    },
+    {
+      "must_contain": "An input handler must not mutate the document",
+      "why": "the only thing protecting the user is the history, so a handler emits a command instead of writing into the map"
+    },
+    {
+      "must_contain": "One gesture is one undoable command",
+      "why": "undo granularity is decided in the input layer and cannot be fixed downstream"
     },
     {
       "must_contain": "the default is `'passive'`",
@@ -22,6 +31,10 @@
     {
       "must_contain": "no deprecation warning at all",
       "why": "the v7 interactive flag still works silently, so v7 input code reviews clean"
+    },
+    {
+      "must_contain": "diagonal `(+1,+1,+1)`",
+      "why": "picking on this geometry is an arithmetic walk from the top down, not a hit test over thousands of tiles"
     }
   ],
   "check_provenance": true

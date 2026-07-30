@@ -1,6 +1,6 @@
 ---
 name: applying-pixi-filters
-description: Carries this game's budget rule for visual effects - a filter or mask forces a render target and breaks the batch, which is affordable on one element and not on a crowd, and several effects a pixel-art game wants are cheaper as art than as shaders. Use whenever adding a glow, tint, shadow, blur, colour grade, damage flash, fog of war or clipping mask, or diagnosing a frame-rate drop that started with an effect - including Portuguese phrasings like "efeito de brilho", "piscar quando toma dano", "sombra embaixo", "escurecer a tela", "recortar a area", "nevoa de guerra", "ficou lento depois do efeito", "mudar a cor". Triggers on filtro, mascara, blend, glow, flash, sombra, recorte, shader, efeito, render target.
+description: Carries this project's budget rule for visual effects - a filter or mask forces a render target and breaks the batch, which is affordable on one element and not on a crowd, and several effects a pixel-art editor wants are cheaper as art than as shaders. Use whenever adding a glow, tint, shadow, blur, colour grade, cursor or selection highlight, dimmed Z level or clipping mask, or diagnosing a frame-rate drop that started with an effect - including Portuguese phrasings like "efeito de brilho", "destacar a celula sob o cursor", "realcar a selecao", "sombra embaixo", "esmaecer as camadas acima", "escurecer a tela", "recortar a area", "ficou lento depois do efeito", "mudar a cor". Triggers on filtro, mascara, blend, glow, realce, destaque, sombra, recorte, shader, efeito, render target.
 metadata:
   type: knowledge
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -28,26 +28,31 @@ The rule this project uses, in the absence of measurements:
 
 | Scale | Verdict |
 |---|---|
-| one element, occasionally — the targeted enemy, a full-screen grade | fine |
-| one element, every frame — a glow that pulses on the player | probably fine, measure it |
-| per entity in a crowd — every character with an outline | **no**; find an art-side answer |
+| one element, occasionally — the selected object, a full-screen grade | fine |
+| one element, every frame — a glow that pulses on the cell under the cursor | probably fine, measure it |
+| per entity in a crowd — every placed object with an outline | **no**; find an art-side answer |
 | per tile | **never** |
 
 The trap is that all four look identical in code. `container.filters = [...]` on one sprite and on two
-hundred sprites is the same line, and only the second one costs the frame.
+hundred sprites is the same line, and only the second one costs the frame. An editor reaches the bad
+rows by accident more easily than a game does: "highlight everything the selection covers" is one
+checkbox in the UI and a filter per tile underneath.
 
-### Prefer art to shaders, in a pixel-art game especially
+### Prefer art to shaders, in a pixel-art editor especially
 
-Several effects a game like this wants are cheaper, sharper and more controllable as authored pixels
-than as shaders:
+Several effects this editor wants are cheaper, sharper and more controllable as authored pixels or as
+batched per-sprite properties than as shaders:
 
-- **Outline / selection highlight** → a pre-authored outlined frame in the atlas, swapped on select.
-  A shader outline on a pixel sprite also tends to produce non-pixel-aligned edges, which fights
-  everything `choosing-pixi-renderer` sets up.
-- **Damage flash** → tint, which is a batched per-sprite property, not a filter.
+- **Selection outline** → a pre-authored outlined frame in the atlas, swapped while the object is
+  selected. A shader outline on a pixel sprite also tends to produce non-pixel-aligned edges, which
+  fights everything `choosing-pixi-renderer` sets up.
+- **Highlight of the cell under the cursor** → one sprite — a diamond the size of a tile — moved to
+  the picked cell, or a tint on the tile already there. Both stay in the batch. Finding the cell is
+  arithmetic, not a shader problem: picking is walking the `(+1,+1,+1)` diagonal from the top down
+  until the first solid block (`docs/adr/0013-geometria-isometrica-64x32-z16.md:39@4229af26`).
 - **Ground shadow** → a sprite. A blurred ellipse costs nothing as art and a lot as a blur pass.
-- **Team or faction colour** → tint, or a recoloured mask region the way the paper-doll research
-  describes (`docs/03-arquitetura/paper-doll-e-equipamento.md:45-49@1316896a`).
+- **Recolouring a region of a wardrobe piece** → tint, or a recoloured mask region the way the
+  wardrobe research describes (`docs/02-personagem/guarda-roupa-e-silhueta.md:49-53@54f21fed`).
 
 Reach for a filter when the effect genuinely needs neighbouring pixels — blur, displacement, a real
 colour grade over the whole screen. Those are the cases a shader is actually for.
@@ -56,13 +61,28 @@ colour grade over the whole screen. Those are the cases a shader is actually for
 
 A mask is the same detour with a different name. Before adding one, check whether the thing can
 simply not be drawn: culling, bounds, or an atlas frame that is already the right shape. Clipping a
-minimap with a mask is reasonable; clipping every inventory slot is a mask per slot.
+map preview panel with a mask is reasonable; clipping every thumbnail of the tile palette is a mask
+per thumbnail.
 
-Fog of war is the case where this decision is worth writing down rather than improvising: as a
-full-screen mask it is one detour, and as a per-tile mask it is thousands. If fog of war becomes a
-requirement, it deserves its own decision record, because it also interacts with what the server is
-willing to tell the client — and in a full-loot game, sending positions the player should not see is
-an information leak, not a rendering choice.
+### Dimming the Z levels above the one being edited
+
+This is the editor's version of the decision worth writing down rather than improvising, because the
+cheap version and the ruinous one are the same feature to the user. Z is integer and discrete in this
+project (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24@4229af26`), so "the levels above" is a
+set of whole levels rather than a continuous height field — which is what makes the cheap version
+available at all. Applied once per level it is a handful of operations; applied as a filter or mask
+per tile it is thousands of detours.
+
+Per-sprite tint on the dimmed levels stays in the batch, which is why it is the first thing to reach
+for. A full-screen darkening filter is only one detour, but it also darkens the level being edited,
+which is the one thing the feature exists to keep legible.
+
+**Not verified:** whether the scene groups sprites per Z level, which is what decides whether "once
+per level" is one call or a loop over every sprite. Check `composing-pixi-scene` before assuming it.
+No product doc names this feature and no decision record covers it — the paragraph above is the
+budget reasoning to apply *if* it becomes a requirement, not a decision already taken. If it does
+become one, it deserves its own record, the way any feature whose cheap and ruinous versions look
+identical to the user does.
 
 ### Blend modes are cheap, until they are not
 
@@ -90,8 +110,8 @@ node $S prop filters         # where the property lives
 ### What is not verified
 
 - **Nothing here has been measured.** The budget table is reasoning from how render targets work, not
-  from a profile of this game, which does not exist. Treat it as a default to challenge with numbers,
-  and update this skill when numbers exist.
+  from a profile of this editor, which does not exist. Treat it as a default to challenge with
+  numbers, and update this skill when numbers exist.
 - Research did not establish the cost ranking of the mask kinds, nor exactly which blend modes require
   the extension import. Read `pixijs-blend-modes` and `pixijs-filters` rather than trusting a recalled
   list.
@@ -102,3 +122,4 @@ node $S prop filters         # where the property lives
 - `tools/pixi-reference/vendor/skills/pixijs-blend-modes/SKILL.md` — which modes need the extension import
 - `tools/pixi-reference/vendor/skills/pixijs-scene-core-concepts/references/masking.md` — mask kinds
 - `.agents/skills/profiling-pixi-performance/SKILL.md` — how to turn the guesses above into measurements
+- `docs/02-personagem/guarda-roupa-e-silhueta.md` — the recolour-by-region mechanism, and why silhouette is an authoring constraint

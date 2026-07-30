@@ -2,11 +2,12 @@
   "skill": "bootstrapping-pixi-app",
   "min_overlap": 2,
   "routing": [
-    { "query": "criar a aplicacao e subir o cliente", "should_trigger": true },
+    { "query": "criar a aplicacao e subir o editor", "should_trigger": true },
     { "query": "onde ponho o update do loop de quadro", "should_trigger": true },
-    { "query": "limpar tudo ao desconectar", "should_trigger": true },
-    { "query": "o jogo trava ao redimensionar a janela", "should_trigger": true },
+    { "query": "limpar tudo ao fechar o projeto", "should_trigger": true },
+    { "query": "o editor trava ao redimensionar a janela", "should_trigger": true },
     { "query": "configurar o ticker no init", "should_trigger": true },
+    { "query": "qual escala de zoom usar no stage", "should_trigger": true },
     { "query": "quanto custa gerar esses assets", "should_trigger": false },
     { "query": "atualizar o indice da documentacao", "should_trigger": false }
   ],
@@ -17,7 +18,7 @@
     },
     {
       "must_contain": "The loop draws. It does not decide.",
-      "why": "the authority rule, stated where the frame loop is actually written"
+      "why": "in an editor the document changes only by user command, so a mutation from the frame loop is one undo cannot reverse"
     },
     {
       "must_contain": "has a literally empty body",

@@ -34,7 +34,7 @@ required. Use it unless the layout is the point.
 ### The size floor is the first thing that will reject you
 
 `/create-ui-asset` accepts **192–688** per axis, with the real ceiling depending on aspect: 512 for
-square, 688 for 16:9 or 9:16 (`tools/pixellab-pipeline/src/endpoints.ts:169@08e4ea43`). A 128×128
+square, 688 for 16:9 or 9:16 (`tools/pixellab-pipeline/src/endpoints.ts:169@b6e61f99`). A 128×128
 panel is not a small panel, it is a `422`.
 
 `/generate-ui-v2` is looser — 16–792 wide by 16–688 tall, default 256×256 — and the same

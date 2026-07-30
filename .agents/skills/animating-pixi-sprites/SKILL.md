@@ -1,12 +1,12 @@
 ---
 name: animating-pixi-sprites
-description: Carries how this game turns PixelLab output into drawn characters - the two-file atlas contract, the canonical eight-direction frame order, the feet-centred anchor, the frame rate that lives outside the Pixi JSON, and why equipment layering is a silhouette problem before it is a rendering one. Use whenever loading an atlas, playing a character or creature animation, picking an anchor, setting frame rate, or drawing equipment on a body - including Portuguese phrasings like "carregar o atlas", "animar o personagem", "trocar de direcao", "o sprite anda de lado", "quantos quadros por segundo", "vestir o equipamento", "camada de roupa", "a ancora esta errada", "o sprite treme". Triggers on atlas, spritesheet, frame, direcao, paper-doll, silhueta, ancora, extrusao, sidecar, template.
+description: Carries how this editor turns PixelLab output into drawn characters - the two-file atlas contract, the canonical eight-direction frame order, the anchor that has to be measured rather than assumed, the frame rate that lives outside the Pixi JSON, and why equipment layering is a silhouette problem before it is a rendering one. Use whenever loading an atlas, playing a character or creature animation, picking an anchor, setting frame rate, or drawing equipment on a body - including Portuguese phrasings like "carregar o atlas", "animar o personagem", "trocar de direcao", "o sprite anda de lado", "quantos quadros por segundo", "vestir o equipamento", "camada de roupa", "a ancora esta errada", "o sprite treme". Triggers on atlas, spritesheet, frame, direcao, paper-doll, silhueta, ancora, extrusao, sidecar, template.
 metadata:
   type: knowledge
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
 ---
 
-# Animating sprites in this game
+# Animating sprites in this editor
 
 ## When to use
 
@@ -29,7 +29,7 @@ The pipeline emits, per family (`tools/pixellab-pipeline/src/atlas.ts:4-9@e9504d
 | `<name>.pixellab.json` | our sidecar: frame rate, logical anchor, provenance |
 
 > "Never extend the Pixi JSON with game semantics. The parser owns that shape and a future major
-> version will fight you for it." — `tools/pixellab-pipeline/src/atlas.ts:8@e9504d6c`
+> version will fight you for it." — `tools/pixellab-pipeline/src/atlas.ts:8-9@e9504d6c`
 
 So **frame rate is not in the atlas Pixi reads**. It is in the sidecar, and the client must load both.
 Getting the animation speed from anywhere else means guessing.
@@ -39,27 +39,46 @@ Getting the animation speed from anywhere else means guessing.
 Canonical name: `<family>_<action>_<DIR>_<NN>`, direction as the short uppercase code
 (`tools/pixellab-pipeline/src/atlas.ts:81-90@e9504d6c`).
 
-The project's canonical direction order is the order the 8-rotation endpoint **returns**:
+The project's canonical direction order is the one `DIRECTIONS_8` fixes
+(`tools/pixellab-pipeline/src/endpoints.ts:45-48@b6e61f99`):
 
 ```
 S, SW, W, NW, N, NE, E, SE
 ```
 
-This differs from the PixelLab spec's own direction enum, which starts at north — a distinction that
-belongs to `querying-pixellab-api`, not here (`docs/adr/0005-low-top-down-8-direcoes.md:25@0f447499`).
-Getting it wrong produces **no error at all** — the character simply walks sideways. If a sprite faces
-the wrong way, suspect the frame naming before suspecting the input code.
+Three orderings coexist inside the PixelLab spec: the shared direction enum starts at north, and the
+8-direction character endpoint documents itself as clockwise from south, which is the **mirror** of
+the order above. So frames must be read **by direction name, never by index** — get it wrong and
+there is no error at all, east and west simply swap and the character walks sideways
+(`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:46-52@160d3199`). The spec-side detail belongs
+to `querying-pixellab-api`; here it matters because the packer's frame names are what carry it. If a
+sprite faces the wrong way, suspect the frame naming before suspecting the input code.
 
 Frames are packed direction-major, frame-minor, so the PNG stays byte-stable and regeneration
 produces an empty git diff (`tools/pixellab-pipeline/src/atlas.ts:100-101@e9504d6c`).
 
-### The anchor is at the feet, not the centre
+### The anchor is at the feet — and the constant that puts it there is now wrong
 
-Default anchor is `{ x: 0.5, y: 0.875 }` (`tools/pixellab-pipeline/src/atlas.ts:216@e9504d6c`), and
-it is written into every frame of the atlas JSON. Feet-centred is what makes a character's position
-mean "where it stands on the ground" — which is what the tile grid, the depth sort and the server's
-coordinate all mean too. Centring a sprite instead makes everything drift by half a body as sprite
-heights vary.
+The origin has to be the feet. A character's position means "which cell it stands on", and that is
+what the isometric grid and the depth sort mean too — `sx = (x-y)*32`, `sy = (x+y)*16 - z*16`
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:8@4229af26`). Centring a sprite instead makes
+everything drift by half a body as sprite heights vary.
+
+**What the packer does today:** a fixed `{ x: 0.5, y: 0.875 }`, written into every frame of the atlas
+JSON (`tools/pixellab-pipeline/src/atlas.ts:216@e9504d6c`).
+
+**Pending change, not yet implemented.** A fixed fraction lands on the feet only if the sprite fills
+the canvas the same way in every frame, and it does not: the 8-direction endpoint warns that the
+canvas comes back roughly 40% larger to make room for animations, so asking for 64 px yields about
+90 (`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:58@160d3199`). On an inflated canvas
+`y: 0.875` misses by around 11 px, and one level of Z is 16 px — nearly a whole level of vertical
+displacement. The anchor therefore becomes **measured on the opaque bounding box of the union of all
+frames in the family** rather than assumed
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:42@4229af26`). The union, not per frame: measuring
+each frame separately would make the sprite bob as the silhouette changes.
+
+Until the packer implements that, treat the anchor in the atlas as an approximation. A character that
+sits one step too high or too low on a stacked block is this constant, not the map data.
 
 ### Pixel-perfect is five things, and two of them are the client's
 
@@ -122,26 +141,33 @@ exceptional one.
 
 ### Equipment: a silhouette problem before a rendering problem
 
-Build is equipment, so other players must be able to read what you wear — that is what forced the
-`low top-down` perspective (`docs/adr/0005-low-top-down-8-direcoes.md:13@0f447499`). Three facts
-constrain any renderer-side design:
+`low top-down` outlived its original justification. It used to be that another player had to read
+what you were wearing; there are no other players now
+(`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:17@160d3199`). Both halves survive on new
+grounds: eight directions are the cardinality of movement on a grid with four diagonal axes and four
+orthogonals, and `low top-down` is the perspective that matches the 2:1 dimetric projection — high
+enough for the ground to have depth, low enough for a wall to have a face
+(`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:29@160d3199`). Silhouette survived the pivot as
+an **authoring** constraint instead: the tool must refuse the impossible combination rather than
+render it legibly. Three facts constrain any renderer-side design:
 
 **There is no equipment primitive in the generator.** "A API do PixelLab não resolve isso"
-(`docs/03-arquitetura/paper-doll-e-equipamento.md:5@1316896a`). Layering is ours to build or avoid.
+(`docs/02-personagem/guarda-roupa-e-silhueta.md:5@54f21fed`). Layering is ours to build or avoid.
 
-**A piece is reusable only across the same base silhouette**, and the authoring tool refuses a
-cross-silhouette application before spending (`docs/03-arquitetura/paper-doll-e-equipamento.md:53-55@1316896a`).
+**A piece is reusable only across the same base silhouette**, and the editor refuses a
+cross-silhouette application **before spending** — once generated, the money is gone on a piece that
+will never fit anyone (`docs/02-personagem/guarda-roupa-e-silhueta.md:57-61@54f21fed`).
 This is not our tooling being strict; the largest open paper-doll project shows 87% of its item
 definitions pointing at shared per-body folders, and an item omitting a body type is unrenderable on
-it (`docs/03-arquitetura/paper-doll-e-equipamento.md:43@1316896a`).
+it (`docs/02-personagem/guarda-roupa-e-silhueta.md:47@54f21fed`).
 
 **Per-direction draw order is a much smaller problem than it looks.** ClassicUO reorders exactly one
 slot by direction — the cloak: above everything when facing away, behind the body when facing the
 viewer, just under the helm otherwise. Everything else has fixed z
-(`docs/03-arquitetura/paper-doll-e-equipamento.md:27-35@1316896a`).
+(`docs/02-personagem/guarda-roupa-e-silhueta.md:31-39@54f21fed`).
 
 The recommended order, and the renderer consequence of each step
-(`docs/03-arquitetura/paper-doll-e-equipamento.md:57-61@1316896a`):
+(`docs/02-personagem/guarda-roupa-e-silhueta.md:63-67@54f21fed`):
 
 1. **Few silhouettes.** Two or three human is the reasonable ceiling.
 2. **Full baked variants first.** One `Sprite` per character, no layer renderer at all.
@@ -154,7 +180,13 @@ answer to a problem the project may never have.
 ### What is not verified
 
 - Whether any layered-spritesheet convention exists outside LPC
-  (`docs/03-arquitetura/paper-doll-e-equipamento.md:65@1316896a`).
+  (`docs/02-personagem/guarda-roupa-e-silhueta.md:71@54f21fed`).
+- How per-direction occlusion behaves under an isometric perspective with height, where a character
+  can be partly behind a wall as well as partly behind its own cloak
+  (`docs/02-personagem/guarda-roupa-e-silhueta.md:74@54f21fed`).
+- **The measured anchor is a decision, not code.** The packer still writes the fixed constant;
+  nothing here has measured a bounding box yet, and the ~11 px figure is the ADR's estimate rather
+  than something observed on a generated sprite.
 - Nothing in this repository has ever rendered a PixiJS sprite. Every claim above about the atlas
   format is verified against the packer's code and every API claim against the vendored types, but
   the **combination** has not been run.
@@ -164,4 +196,5 @@ answer to a problem the project may never have.
 - `tools/pixi-reference/vendor/skills/pixijs-scene-sprite/SKILL.md` — the Sprite/AnimatedSprite API
 - `tools/pixi-reference/vendor/skills/pixijs-assets/references/spritesheet.md` — how Pixi parses an atlas
 - `tools/pixellab-pipeline/src/atlas.ts` — the packer, and the only authority on the emitted format
-- `docs/03-arquitetura/paper-doll-e-equipamento.md` — the three approaches real games use
+- `docs/02-personagem/guarda-roupa-e-silhueta.md` — the three approaches real games use
+- `docs/adr/0013-geometria-isometrica-64x32-z16.md` — the grid the anchor has to land on

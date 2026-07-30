@@ -198,37 +198,37 @@ Há desconto por fidelidade que reduz Tier 1 para ~US$ 9 e Tier 2 para ~US$ 22 a
 
 Quantas `generations` cada tier concede por mês **não foi verificado**. Antes de dimensionar a produção por assinatura, meça.
 
-## Orçamento de Power Abuse
+## Orçamento de um projeto no editor
 
-Alvo: 60 criaturas com 8 direções e 4 animações, 400 itens, ~60 variantes de armadura vestida, 30 tilesets, 200 props de mapa, 40 elementos de UI.
+A unidade deixou de ser "o catálogo de um jogo" e passou a ser **um projeto**: alguns personagens, um mapa, alguns props. O que segue é um projeto de demonstração, com preço estimado.
 
 | Bloco | Endpoint / modo | Chamadas | Jobs | Cálculo | USD |
 |---|---|---|---|---|---|
-| 60 criaturas, base 8 direções | `create-character-with-8-directions` `standard` 64px | 60 | 60 | 60 × 0,0173 | **1,04** |
-| 4 animações × 8 direções × 60 | `animate-character` `template` | 240 | **1.920** | 1.920 × 0,01433 | **27,51** |
-| 400 ícones de item | `create-image-bitforge` 32px | 400 | 400 | 400 × 0,0071 | **2,84** |
-| 60 variantes vestidas | `create-character-state` ≤85px | 60 | 60 | 60 × 0,095 | **5,70** |
-| 30 tilesets Wang | `create-tileset` tiles 32px | 30 | 30 | 30 × 0,0099 | **0,30** |
-| 200 props | `map-objects` | 200 | 200 | 200 × 0,0099 | **1,98** |
-| 40 elementos de UI | `create-ui-asset` / `generate-ui-v2` | 40 | 40 | 40 × ~0,02 | **0,80** |
-| **Primeira passada** | | **1.030** | **2.710** | | **~US$ 40** |
-| Com 3× de re-roll nos blocos caros | | | ~8.000 | | **~US$ 120** |
+| 3 cardeais a partir da arte base | `rotate` 64px | 3 | 3 | 3 × 0,0107 | **0,032** |
+| 1 personagem, 8 direções | `create-character-with-8-directions` `standard` 64px | 1 | 1 | 1 × 0,0173 | **0,017** |
+| esqueleto, 1 direção | `estimate-skeleton` | 1 | 1 | 1 × 0,005 | **0,005** |
+| andar, correr, pular × 8 direções | `animate-character` `template` | 3 | 24 | 24 × 0,01433 | **0,344** |
+| chão, transição e kit de parede | `create-tiles-pro` | 3 | 3 | **não medido** | **?** |
+| 20 props de cenário | `map-objects` | 20 | 20 | 20 × 0,0099 | **0,198** |
+| 8 elementos de UI | `create-ui-asset` | 8 | 8 | 8 × ~0,02 | **0,16** |
+| **Um projeto de demonstração** | | **39** | **60** | | **~US$ 0,76 + tiles** |
+| Com 3× de re-roll no personagem | | | ~110 | | **~US$ 1,90 + tiles** |
 
-**Tempo de parede** — 2.710 jobs a ~3,5 min de média:
+**Tempo de parede** — 60 jobs a ~3,5 min de média:
 
 | Concorrência | Tempo |
 |---|---|
-| 20 simultâneos (Tier 3) | **~8 horas** |
-| 8 simultâneos | ~20 horas |
-| 4 simultâneos | **~40 horas** |
+| 4 simultâneos (Tier 2) | **~50 min** |
+| 2 simultâneos (Tier 1, o default) | ~1h45 |
+| 1 simultâneo (Free) | **~3h30** |
 
-É uma corrida de uma noite no melhor caso e de dois dias no pior. **É por isso que o catálogo idempotente e retomável não é enfeite** — perder o progresso no meio significa pagar tudo de novo.
+A ordem de grandeza mudou: o catálogo do produto anterior custava ~US$ 40 em 2.710 jobs; um projeto no editor custa centavos em dezenas de jobs. **O catálogo idempotente e retomável continua valendo** — não pelo total, e sim porque perder o progresso no meio significa pagar tudo de novo.
 
-Uma nota de honestidade: o dinheiro não é o problema deste projeto. US$ 40 gera 2.710 imagens. Fazer 2.710 imagens parecerem do **mesmo jogo** é o trabalho difícil, e nenhum orçamento resolve isso. Ver [`consistencia-estilo.md`](consistencia-estilo.md).
+Uma nota de honestidade: o dinheiro deixou de ser o eixo do risco. O que custa agora é **descobrir o que a API faz** — três perguntas do construtor de personagem só se respondem gerando, e estão listadas na [ADR 0015](../adr/0015-low-top-down-8-direcoes-isometrico.md).
 
 ## Referências
 
-- `ferramentas/pixellab-pipeline/openapi/openapi-v2.json` — spec vendorizado, capturado 2026-07-29, sha256 em `PROVENIENCIA.txt` (**fonte autoritativa dos limites de tamanho**)
+- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — spec vendorizado, capturado 2026-07-29, sha256 em `PROVENIENCIA.txt` (**fonte autoritativa dos limites de tamanho**)
 - [`https://www.pixellab.ai/pixellab-api`](https://www.pixellab.ai/pixellab-api) — tabela de preço estimado; conferida em 2026-07-29 no HTML e no bundle JS
 - [`https://api.pixellab.ai/mcp/docs`](https://api.pixellab.ai/mcp/docs) — latências e bandas de `generations`, verificado 2026-07-29
 - [`https://www.pixellab.ai/docs/tools/create-8-rotations-pro`](https://www.pixellab.ai/docs/tools/create-8-rotations-pro) — corrobora a banda Pro (20 gen até 85px, 40 até 168px)

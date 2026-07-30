@@ -22,11 +22,11 @@ in the stack.
 |---|---|
 | Spec enum `Direction` | north, north-east, east, south-east, south, south-west, west, north-west |
 | Inline `directions` keys on the 8-direction character endpoint | south, south-east, east, north-east, north, north-west, west, south-west |
-| **Return order of the 8-rotation endpoints** | **S, SW, W, NW, N, NE, E, SE** |
+| **Return order of `/generate-8-rotations-v2`** (the only one that declares one) | **S, SW, W, NW, N, NE, E, SE** |
 
 `/generate-8-rotations-v2` states its output order explicitly: "Returns 8 images in order: South,
 South-West, West, North-West, North, North-East, East, South-East". That is the project's canonical
-frame-naming order (`tools/pixellab-pipeline/src/endpoints.ts:45@08e4ea43`,
+frame-naming order (`tools/pixellab-pipeline/src/endpoints.ts:45@b6e61f99`,
 `docs/adr/0005-low-top-down-8-direcoes.md:25@0f447499`).
 
 The named `Direction` enum starts at north and runs clockwise; the request-side map on the character

@@ -7,12 +7,17 @@ Source of truth: `.agents/skills/`. `.claude/skills` is a symlink to it, so any 
 `.claude/skills` sees the same files. Frontmatter carries only `name`, `description` and `metadata`,
 which keeps the skills portable to Cursor, Codex and others.
 
+**This repository is an isometric game EDITOR** — local, single-user, no server, no multiplayer, no
+netcode (`docs/adr/0010-pivo-para-editor-isometrico.md`). It used to be a permadeath MMORPG. If a
+skill still reads as if a server decided anything, that is a leftover and a defect, not a rule.
+`enforcing-server-authority` was retired with the pivot and has **no successor**.
+
 ## Entry point
 
 | Skill | Type | Fires on |
 |---|---|---|
 | [`project-router`](project-router/SKILL.md) | router | **every** request that touches this repo — it asks clarifying questions in pt-BR, writes `TASK_PLAN.md`, selects the chain, and deletes the plan at the end |
-| [`routing-pixijs-work`](routing-pixijs-work/SKILL.md) | router | sub-router, entered from `project-router` for anything the client draws — splits every question into "what the API does" (vendored upstream) and "how this game does it" (the eleven bridge skills below) |
+| [`routing-pixijs-work`](routing-pixijs-work/SKILL.md) | router | sub-router, entered from `project-router` for anything drawn on screen — splits every question into "what the API does" (vendored upstream) and "how this editor does it" (the ten bridge skills below) |
 
 Nothing else should be planned or edited before the router runs.
 
@@ -22,7 +27,6 @@ Nothing else should be planned or edited before the router runs.
 |---|---|---|
 | [`querying-pixellab-api`](querying-pixellab-api/SKILL.md) | **hub.** The vendored spec as the only source of API truth: how to query it, the three structural traps, the direction orderings, why the vendor's public pages fail checking | `node .agents/skills/scripts/check-spec-claims.mjs` |
 | [`writing-repo-typescript`](writing-repo-typescript/SKILL.md) | Node 24 running `.ts` with no build step; why `.ts` extensions and `node:` prefixes are load-bearing; what the tsconfigs already enforce | `npm run typecheck` in both tools |
-| [`enforcing-server-authority`](enforcing-server-authority/SKILL.md) | the non-negotiables for game code that does not exist yet: client decides nothing, failure favours the player, nothing is ever restored, the combat and anti-cheat design | explicit user confirmation — **the weakest signal in the library, and labelled as such** |
 
 ### PixelLab domain skills — one per spec group
 
@@ -54,23 +58,24 @@ shims and v7 code therefore typechecks clean.
 
 | Skill | Owns |
 |---|---|
-| [`bootstrapping-pixi-app`](bootstrapping-pixi-app/SKILL.md) | async init, the ticker callback that is not a number, teardown that must be complete because nothing is restored |
-| [`choosing-pixi-renderer`](choosing-pixi-renderer/SKILL.md) | the pixel-art policy, the three sharpness bugs and their three different causes, backend selection as a reach decision |
-| [`composing-pixi-scene`](composing-pixi-scene/SKILL.md) | world/screen split, depth by feet position, the cull-area coordinate space that changed in 8.16.0 |
-| [`animating-pixi-sprites`](animating-pixi-sprites/SKILL.md) | the two-file atlas contract, the canonical direction order, the feet anchor, paper-doll as a silhouette problem |
+| [`bootstrapping-pixi-app`](bootstrapping-pixi-app/SKILL.md) | async init, the ticker callback that is not a number, the integer-only upscale the 2:1 diamond needs, complete teardown |
+| [`choosing-pixi-renderer`](choosing-pixi-renderer/SKILL.md) | the pixel-art policy, the three sharpness bugs and their three different causes, the whole-number stage scale the 2:1 diamond needs |
+| [`composing-pixi-scene`](composing-pixi-scene/SKILL.md) | world/screen split, depth by isometric cell plus Z, the cull-area coordinate space that changed in 8.16.0 |
+| [`animating-pixi-sprites`](animating-pixi-sprites/SKILL.md) | the two-file atlas contract, the canonical direction order, the measured anchor, wardrobe as a silhouette problem |
 | [`rendering-pixi-tilemap`](rendering-pixi-tilemap/SKILL.md) | the batching container that no longer takes sprites, its empty bounds, and three questions this project has not answered |
-| [`handling-pixi-input`](handling-pixi-input/SKILL.md) | a click is a request not a decision, the interactivity default that emits nothing, hit-test cost as scene shape |
-| [`building-pixi-ui`](building-pixi-ui/SKILL.md) | pt-BR accents that break naive glyph atlases, why the HUD needs glyph text, no verified UI toolkit |
+| [`handling-pixi-input`](handling-pixi-input/SKILL.md) | in an editor the click **is** the edit, the interactivity default that emits nothing, picking as arithmetic instead of hit-testing |
+| [`building-pixi-ui`](building-pixi-ui/SKILL.md) | pt-BR accents that break naive glyph atlases, why editor chrome needs glyph text, no verified UI toolkit |
 | [`applying-pixi-filters`](applying-pixi-filters/SKILL.md) | the render-target budget, and which effects are cheaper as art than as shaders |
-| [`interpolating-pixi-state`](interpolating-pixi-state/SKILL.md) | drawing behind the newest snapshot, never extrapolating others, never letting a visual guess become state |
+| [`interpolating-pixi-state`](interpolating-pixi-state/SKILL.md) | render clock apart from logic clock, smoothing motion between grid cells, the jump whose parabola exists only on screen |
 | [`profiling-pixi-performance`](profiling-pixi-performance/SKILL.md) | there is no baseline yet, draw calls over sprite counts, the GC options that are now silently ignored |
+
 ## Task — procedures with a pass/fail signal
 
 | Skill | Owns | Verification signal |
 |---|---|---|
-| [`guarding-generation-cost`](guarding-generation-cost/SKILL.md) | the hash contract, the four guard branches, plan→estimate→generate ordering, and the traps that cost real money | `npm test && node src/cli.ts plan` in `tools/pixellab-pipeline` |
+| [`guarding-generation-cost`](guarding-generation-cost/SKILL.md) | the hash contract, the guard that **informs and never refuses**, plan→estimate→generate ordering, and the traps that cost real money | `npm test && node src/cli.ts plan` in `tools/pixellab-pipeline` |
 | [`testing-repo-code`](testing-repo-code/SKILL.md) | the Node test runner, what good tests look like here, and exactly which money-critical modules have **no** coverage | `npm test` in `tools/pixellab-pipeline` |
-| [`writing-project-docs`](writing-project-docs/SKILL.md) | the twelve doc conventions — five checked, seven not — plus ADR authoring and the never-edit-an-accepted-ADR rule | `bash scripts/check-docs.sh` |
+| [`writing-project-docs`](writing-project-docs/SKILL.md) | the twelve doc conventions — four checked, eight not — ADR authoring, and the `**Substitui:**` supersession mechanism | `bash scripts/check-docs.sh` |
 
 Every task skill ends with an `<evolution>` section. It runs at task completion and usually writes
 nothing; that is the intended outcome.

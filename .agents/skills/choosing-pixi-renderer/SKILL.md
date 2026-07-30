@@ -1,6 +1,6 @@
 ---
 name: choosing-pixi-renderer
-description: Carries this game's rendering policy - pixel art is sharp only if nearest sampling, disabled mipmaps and a single integer upscale all hold, and the backend choice is a reach decision for a browser MMO rather than a performance one. Use whenever picking WebGPU or WebGL, setting resolution or device pixel ratio, deciding scale factors, or diagnosing art that came out blurry, shimmering or seamed - including Portuguese phrasings like "a arte esta borrada", "esta borrado", "esta serrilhado", "aparece uma linha entre os tiles", "qual backend", "roda no celular", "tela cheia", "zoom da camera", "qual resolucao". Triggers on nearest, mipmap, resolucao, upscale, borrado, serrilhado, backend, devicePixelRatio, antialias, fallback.
+description: Carries this editor's rendering policy - pixel art is sharp only if nearest sampling, disabled mipmaps and a single integer upscale all hold, and the backend choice decides whether the editor opens at all on the one machine that runs it, not how fast it draws. Use whenever picking WebGPU or WebGL, setting resolution or device pixel ratio, deciding scale factors, or diagnosing art that came out blurry, shimmering or seamed - including Portuguese phrasings like "a arte esta borrada", "esta borrado", "esta serrilhado", "aparece uma linha entre os tiles", "qual backend", "tela cheia", "zoom da camera", "qual resolucao", "qual fator de escala". Triggers on nearest, mipmap, resolucao, upscale, borrado, serrilhado, backend, devicePixelRatio, antialias, fallback, escala inteira.
 metadata:
   type: knowledge
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -18,11 +18,16 @@ For the backend machinery itself read
 
 ## Injected knowledge
 
-### The backend choice is about reach, not speed
+### The backend choice is about booting at all, not about speed
 
-The client runs in the browser and the player enters by a link, installing nothing
-(`docs/adr/0001-pixijs-em-vez-de-cocos.md:26@a1022690`). That makes backend selection a question of
-who can play, not of frames per second.
+This is a local, single-user tool: the user starts it themselves and everything runs on their own
+machine (`docs/00-produto/visao.md:15@41a4855a`). The editor is a local process and what it produces
+is a file on disk (`docs/00-produto/visao.md:21@41a4855a`).
+
+So there is no audience to reach — there is one browser, on one machine, and no telemetry and no
+second user to route around it. That does not make the backend choice free; it inverts it. A backend
+that fails to acquire a context does not cost frames per second here, it means **the editor does not
+open**, and the person it fails for is the only person there is.
 
 Pixi 8 **requires WebGL2 or WebGPU** for its accelerated paths — there is no WebGL1 renderer, which
 is why the atlas packer can use tight non-power-of-two sizing at all
@@ -43,8 +48,9 @@ wrong, and two of them are recent enough to sit outside most training data:
   vendor is pinned at 8.19.0, so both are available here, but neither is safe to emit for a target on
   an older minor.
 
-Do not pin the client to a single backend without a recorded decision. That is a reach cut, and reach
-is the reason this project is in a browser at all.
+Do not pin the editor to a single backend without a recorded decision. A one-element array is exactly
+that pin, and it converts a recoverable "this GPU prefers the other backend" into a blank window with
+nothing to fall back to.
 
 ### Three sharpness bugs, three causes
 
@@ -75,8 +81,8 @@ almost always a non-integer zoom, not the atlas.
 
 ### One integer upscale, and only one
 
-The pipeline does three things for pixel-perfect output; the client must do two, and the second is
-the one most easily lost (`tools/pixellab-pipeline/src/atlas.ts:11-16@e9504d6c`):
+The pipeline does three things for pixel-perfect output; whatever draws the result must do two, and
+the second is the one most easily lost (`tools/pixellab-pipeline/src/atlas.ts:11-16@e9504d6c`):
 
 > render at logical resolution, then **ONE** integer nearest upscale
 
@@ -84,6 +90,13 @@ That forbids the common approach of resizing the renderer to the window and lett
 scale. Pick a logical resolution, choose the largest integer factor that fits the viewport, and
 letterbox the remainder. A camera zoom that is not an integer multiple of that factor reintroduces
 every artefact the pipeline spent effort removing.
+
+The geometry raised the stakes on this. The tile is a 64×32 diamond and one level of Z is 16 px, and
+a non-integer upscale destroys the seam of that 2:1 diamond — **no amount of edge extrusion repairs
+it** (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`). The recorded consequence is
+`resolution: 1`, `autoDensity: false`, and one whole-number factor on the stage. So the editor's
+zoom control is not a continuous slider: it steps through integers. Offering 1.5× is offering a
+broken picture, and it will be reported as a tileset bug.
 
 Antialiasing is off for the same reason: there are no diagonal edges to smooth in pixel art, only
 pixels to blur.
@@ -98,19 +111,24 @@ symptom and breaks blending everywhere else.
 
 ### Device pixel ratio is a budget decision
 
-Rendering at the device ratio on a phone can quadruple the fill cost for art that is deliberately
-low-resolution. For this game the logical resolution is the art's resolution; the display ratio
-belongs in the integer upscale factor, not in the renderer resolution. Deviating from that is a
-performance decision and belongs in `profiling-pixi-performance` with a measurement attached.
+Rendering at the device ratio on a high-density display can quadruple the fill cost for art that is
+deliberately low-resolution. For this editor the logical resolution is the art's resolution; the
+display ratio belongs in the integer upscale factor, not in the renderer resolution. Deviating from
+that is a performance decision and belongs in `profiling-pixi-performance` with a measurement
+attached.
 
 ### What is not verified
 
-- Which backends the target audience's browsers actually report. No telemetry exists.
+- Which backend the machine this runs on actually reports. Nothing here has ever rendered a frame
+  (`docs/00-produto/visao.md:58@41a4855a`), and there is no telemetry and nobody to collect it from.
 - Whether WebGPU on this art style measurably beats WebGL2 here. Untested, and the honest default is
   to prefer WebGPU with a WebGL2 fallback and revisit with numbers.
+- Which integer factors a real editing session actually wants. That the factor must be an integer is
+  decided; that 1×, 2×, 3× is the right set is a guess until someone edits a map.
 
 ## References
 
 - `tools/pixi-reference/vendor/skills/pixijs-core-concepts/SKILL.md` — backend selection and the render pipeline
 - `tools/pixi-reference/vendor/skills/pixijs-environments/SKILL.md` — workers, SSR and restricted contexts
+- `docs/adr/0013-geometria-isometrica-64x32-z16.md` — the 64×32 diamond and why the stage scale must be whole
 - `tools/pixellab-pipeline/src/atlas.ts` — the pipeline half of pixel-perfect, and why each step exists

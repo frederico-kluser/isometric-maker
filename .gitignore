@@ -1,4 +1,6 @@
-node_modules/
+# sem barra final de propósito: em worktree o node_modules costuma ser um SYMLINK
+# para o do repositório principal, e `node_modules/` só casaria diretório de verdade.
+node_modules
 dist/
 *.log
 .env

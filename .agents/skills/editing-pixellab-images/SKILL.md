@@ -43,11 +43,11 @@ bleeding past the mask boundary. Turning it off is how you get soft edges in pix
 | `/image-to-pixelart-pro` | any PNG/JPEG, >2048px scaled down first | async, `202` |
 
 `/edit-image` has a documented **free-tier ceiling of 200×200** on the target canvas that the schema
-range (16–400) does not express (`docs/01-pixellab/custos-e-limites.md:142@0c85bc2b`). The 422 only
+range (16–400) does not express (`docs/01-pixellab/custos-e-limites.md:142@39059cac`). The 422 only
 shows up after submission.
 
 The repo's endpoint table models `/image-to-pixelart` at 16–1280
-(`tools/pixellab-pipeline/src/endpoints.ts:139@08e4ea43`) — that is the **input** range. The output
+(`tools/pixellab-pipeline/src/endpoints.ts:139@b6e61f99`) — that is the **input** range. The output
 is capped at 320 and is a separate field.
 
 ### `/edit-image` takes the size twice, and they mean different things
