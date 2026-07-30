@@ -1,0 +1,32 @@
+{
+  "skill": "rendering-pixi-tilemap",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "desenhar o chao do mapa", "should_trigger": true },
+    { "query": "dividir o terreno em pedacos", "should_trigger": true },
+    { "query": "muitos tiles deixaram o mapa pesado", "should_trigger": true },
+    { "query": "fazer streaming da zona ao caminhar", "should_trigger": true },
+    { "query": "quantos sprites o tilemap aguenta", "should_trigger": true },
+    { "query": "escrever um teste para o ledger", "should_trigger": false },
+    { "query": "atualizar o spec do openapi", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "An empty bounds object (0,0,0,0)",
+      "why": "with culling on, empty bounds mean the ground is always culled and never draws, silently"
+    },
+    {
+      "must_contain": "does not work",
+      "why": "the v7 habit of filling a ParticleContainer with Sprites is the first thing anyone tries"
+    },
+    {
+      "must_contain": "decision to record in an ADR",
+      "why": "three sub-questions are genuinely open; a confident inline answer would be invented"
+    },
+    {
+      "must_contain": "Three first-party sources disagree",
+      "why": "stability cannot be settled by quoting one of them, and pretending otherwise is dishonest"
+    }
+  ],
+  "check_provenance": true
+}

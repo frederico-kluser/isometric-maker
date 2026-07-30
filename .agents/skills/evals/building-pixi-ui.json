@@ -1,0 +1,28 @@
+{
+  "skill": "building-pixi-ui",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "mostrar o nome do jogador na tela", "should_trigger": true },
+    { "query": "o numero de dano esta pesado", "should_trigger": true },
+    { "query": "a acentuacao sumiu da fonte", "should_trigger": true },
+    { "query": "montar o menu de inventario", "should_trigger": true },
+    { "query": "desenhar a barra de vida no HUD", "should_trigger": true },
+    { "query": "retomar a fila de geracao interrompida", "should_trigger": false },
+    { "query": "criar um registro de decisao arquitetural", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "á à â ã é ê í ó ô õ ú ç",
+      "why": "an ASCII glyph atlas fails only on accented words, so it survives every unaccented test"
+    },
+    {
+      "must_contain": "glyph-atlas text for anything that updates",
+      "why": "the HUD updates every tick; canvas text re-rasterises on every string change"
+    },
+    {
+      "must_contain": "not installed here",
+      "why": "the UI toolkits are unverified against the pin and must not be assumed compatible"
+    }
+  ],
+  "check_provenance": true
+}

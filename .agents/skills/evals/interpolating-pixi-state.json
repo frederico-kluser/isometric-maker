@@ -1,0 +1,28 @@
+{
+  "skill": "interpolating-pixi-state",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o personagem anda tremendo na tela", "should_trigger": true },
+    { "query": "esta dando teleporte e voltou para tras", "should_trigger": true },
+    { "query": "suavizar o movimento entre pacotes", "should_trigger": true },
+    { "query": "fazer predicao local do jogador", "should_trigger": true },
+    { "query": "chegou um snapshot atrasado do servidor", "should_trigger": true },
+    { "query": "gerar as animacoes das criaturas", "should_trigger": false },
+    { "query": "adicionar uma linha no indice das docs", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "Interpolation is a **display** technique",
+      "why": "an interpolated position becoming state is precisely the authority violation this prevents"
+    },
+    {
+      "must_contain": "Extrapolate only for the local player",
+      "why": "extrapolating other entities produces rubber-banding, which in full loot is a fairness issue"
+    },
+    {
+      "must_contain": "the weakest-evidence member",
+      "why": "upstream has zero coverage here; the skill must say so rather than sound authoritative"
+    }
+  ],
+  "check_provenance": true
+}

@@ -1,0 +1,28 @@
+{
+  "skill": "bootstrapping-pixi-app",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "criar a aplicacao e subir o cliente", "should_trigger": true },
+    { "query": "onde ponho o update do loop de quadro", "should_trigger": true },
+    { "query": "limpar tudo ao desconectar", "should_trigger": true },
+    { "query": "o jogo trava ao redimensionar a janela", "should_trigger": true },
+    { "query": "configurar o ticker no init", "should_trigger": true },
+    { "query": "quanto custa gerar esses assets", "should_trigger": false },
+    { "query": "atualizar o indice da documentacao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "receives a Ticker, not a number",
+      "why": "the v7 callback shape produces NaN positions and vanished sprites with no error at all"
+    },
+    {
+      "must_contain": "The loop draws. It does not decide.",
+      "why": "the authority rule, stated where the frame loop is actually written"
+    },
+    {
+      "must_contain": "has a literally empty body",
+      "why": "without it, reading ApplicationOptions leads to concluding the options do not exist"
+    }
+  ],
+  "check_provenance": true
+}

@@ -1,0 +1,28 @@
+{
+  "skill": "composing-pixi-scene",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "fazer a camera seguir o jogador", "should_trigger": true },
+    { "query": "o personagem aparece atras da arvore errada", "should_trigger": true },
+    { "query": "qual a ordem de desenho das camadas", "should_trigger": true },
+    { "query": "esconder o que esta fora da tela", "should_trigger": true },
+    { "query": "montar a cena e agrupar as camadas", "should_trigger": true },
+    { "query": "rodar os testes de idempotencia", "should_trigger": false },
+    { "query": "quanto custa cada geracao no pixellab", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "This changed in 8.16.0",
+      "why": "the 8.16.0 cullArea coordinate-space change bites camera-scrolled worlds first"
+    },
+    {
+      "must_contain": "sorted by the sprite's ground position",
+      "why": "three-quarter perspective makes depth a function of feet position, not insertion order"
+    },
+    {
+      "must_contain": "considered experimental at this stage",
+      "why": "RenderLayer is the obvious tool for draw order and upstream labels it experimental"
+    }
+  ],
+  "check_provenance": true
+}

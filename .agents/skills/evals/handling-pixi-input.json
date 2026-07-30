@@ -1,0 +1,28 @@
+{
+  "skill": "handling-pixi-input",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "clicar no inimigo para selecionar o alvo", "should_trigger": true },
+    { "query": "o clique nao esta funcionando no sprite", "should_trigger": true },
+    { "query": "arrastar item para outro slot", "should_trigger": true },
+    { "query": "travar no alvo e trocar de zona", "should_trigger": true },
+    { "query": "a tecla nao responde no teclado", "should_trigger": true },
+    { "query": "empacotar o atlas das criaturas", "should_trigger": false },
+    { "query": "revisar as convencoes de documentacao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "A click is a request. It is never a decision.",
+      "why": "the authority rule stated where a handler is actually written, not in the abstract"
+    },
+    {
+      "must_contain": "the default is `'passive'`",
+      "why": "the single most common v8 input bug: nothing is interactive until it is said to be"
+    },
+    {
+      "must_contain": "no deprecation warning at all",
+      "why": "the v7 interactive flag still works silently, so v7 input code reviews clean"
+    }
+  ],
+  "check_provenance": true
+}

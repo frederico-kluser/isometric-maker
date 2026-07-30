@@ -1,0 +1,28 @@
+{
+  "skill": "choosing-pixi-renderer",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "a arte esta borrada na tela", "should_trigger": true },
+    { "query": "aparece uma linha entre os tiles", "should_trigger": true },
+    { "query": "qual backend usar, webgpu ou webgl", "should_trigger": true },
+    { "query": "qual resolucao e qual fator de escala", "should_trigger": true },
+    { "query": "o zoom da camera deixou tudo serrilhado", "should_trigger": true },
+    { "query": "criar um ADR novo sobre permadeath", "should_trigger": false },
+    { "query": "qual o limite de tamanho desse parametro", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "default is WebGL first, not WebGPU",
+      "why": "the assumption that WebGPU is the default silently produces the opposite of what was intended"
+    },
+    {
+      "must_contain": "integer nearest upscale",
+      "why": "the client half of pixel-perfect; losing it wastes everything the pipeline does"
+    },
+    {
+      "must_contain": "Blurry",
+      "why": "the three-symptom split is what stops a seam being debugged as a sampling problem"
+    }
+  ],
+  "check_provenance": true
+}
