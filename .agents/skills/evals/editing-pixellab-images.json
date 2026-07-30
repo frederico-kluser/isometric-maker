@@ -1,0 +1,36 @@
+{
+  "skill": "editing-pixellab-images",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "editar so uma parte da imagem com mascara", "should_trigger": true },
+    { "query": "aumentar o sprite de 32 pra 128", "should_trigger": true },
+    { "query": "tirar o fundo da imagem", "should_trigger": true },
+    { "query": "transformar essa foto em pixel art", "should_trigger": true },
+    { "query": "redimensionar o sprite sem perder o estilo", "should_trigger": true },
+    { "query": "prevenir dupe na transferencia de item", "should_trigger": false },
+    { "query": "escrever um teste pro modulo de custo", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "white generates, black preserves",
+      "why": "inverting the mask does not error; it regenerates what you wanted to keep"
+    },
+    {
+      "must_contain": "at most a 50% decrease or a 2",
+      "why": "resize degrades if done in one jump; the spec's own iterative guidance"
+    },
+    {
+      "must_contain": "no `output_size` field at all",
+      "why": "image-to-pixelart-pro decides the output size itself; looking for the field is the usual first mistake"
+    },
+    {
+      "must_contain": "defaults to **150**",
+      "why": "init_image_strength on resize differs from the 300 used elsewhere; copying a call halves the influence"
+    },
+    {
+      "must_contain": "not redundant and they are not\ninterchangeable",
+      "why": "edit-image takes the reference size and the target canvas as separate fields"
+    }
+  ],
+  "check_provenance": true
+}

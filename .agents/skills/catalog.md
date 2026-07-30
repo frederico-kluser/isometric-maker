@@ -19,9 +19,28 @@ Nothing else should be planned or edited before the router runs.
 
 | Skill | Owns | Verification signal |
 |---|---|---|
-| [`querying-pixellab-api`](querying-pixellab-api/SKILL.md) | the vendored OpenAPI spec as the only source of API truth: how to query it, the two structural traps, the three direction orderings, what the spec cannot tell you | `node .agents/skills/scripts/check-spec-claims.mjs` |
+| [`querying-pixellab-api`](querying-pixellab-api/SKILL.md) | **hub.** The vendored spec as the only source of API truth: how to query it, the three structural traps, the direction orderings, why the vendor's public pages fail checking | `node .agents/skills/scripts/check-spec-claims.mjs` |
 | [`writing-repo-typescript`](writing-repo-typescript/SKILL.md) | Node 24 running `.ts` with no build step; why `.ts` extensions and `node:` prefixes are load-bearing; what the tsconfigs already enforce | `npm run typecheck` in both tools |
 | [`enforcing-server-authority`](enforcing-server-authority/SKILL.md) | the non-negotiables for game code that does not exist yet: client decides nothing, failure favours the player, nothing is ever restored, the combat and anti-cheat design | explicit user confirmation — **the weakest signal in the library, and labelled as such** |
+
+### PixelLab domain skills — one per spec group
+
+All ten cover the 79 endpoints of the vendored snapshot with no orphan and no overlap. Each declares
+`check-spec-claims.mjs` as its signal, so every endpoint and enum they name is checked against the
+spec on every run. Load the hub first, then the family.
+
+| Skill | Spec groups | Endpoints | The trap it exists for |
+|---|---|---|---|
+| [`generating-pixellab-characters`](generating-pixellab-characters/SKILL.md) | Character from template · Characters · Character Management | 12 | four endpoints for "a character with 8 directions", costing 1 to 40 generations |
+| [`rotating-pixellab-sprites`](rotating-pixellab-sprites/SKILL.md) | Rotate | 3 | three direction orderings coexist; only one is the return order |
+| [`animating-pixellab-sprites`](animating-pixellab-sprites/SKILL.md) | Animate · Animation Management | 12 | `mode='pro'` costs 160–320 for eight directions **and is worse** |
+| [`composing-pixellab-objects`](composing-pixellab-objects/SKILL.md) | Objects · Object Management · Map Objects | 12 | the `review` status parks paid candidates until frames are selected |
+| [`generating-pixellab-tilesets`](generating-pixellab-tilesets/SKILL.md) | Create map | 18 | Wang matching is on the vertex grid, via `pattern_4x4`, not `connections` |
+| [`creating-pixellab-images`](creating-pixellab-images/SKILL.md) | Create Image · Enhance Prompt | 10 | the image **count** is decided by the size, not by a parameter |
+| [`editing-pixellab-images`](editing-pixellab-images/SKILL.md) | Edit · Inpaint · Image Operations | 8 | mask polarity: white generates, black preserves |
+| [`generating-pixellab-portraits`](generating-pixellab-portraits/SKILL.md) | Generate | 7 | pay once per expression, then every line of dialogue is free |
+| [`designing-pixellab-interfaces`](designing-pixellab-interfaces/SKILL.md) | UI Creator · font-pro | 6 | a size **floor** of 192px, and `image_size` is a pricing tier, not a size |
+| [`orchestrating-pixellab-jobs`](orchestrating-pixellab-jobs/SKILL.md) | Background Jobs · Account · Documentation | 3 + cross-cutting | 36 endpoints are async; only 23 say `202` |
 
 ## Task — procedures with a pass/fail signal
 
@@ -49,7 +68,7 @@ nothing; that is the intended outcome.
 | `node .agents/skills/scripts/run-skill-evals.mjs [--skill N] [--write-token]` | routing evals, body invariants, citation resolution — and the **only** way to mint the token the write gate requires |
 | `node .agents/skills/scripts/check-spec-claims.mjs` | every endpoint and enum a skill asserts exists in the vendored spec |
 | `node .agents/skills/scripts/validate-bootstrap.mjs [--phase N]` | the phase gates |
-| `node .agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs <cmd>` | query the spec without loading it |
+| `node .agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs <cmd>` | query the spec without loading it — `summary`, `list`, `endpoint`, `response`, `flow`, `tag`, `grep`, `enums`, `limits` |
 
 ## Enforcement, not advice
 

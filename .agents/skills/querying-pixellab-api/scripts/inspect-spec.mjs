@@ -30,8 +30,13 @@ const USAGE = `
 inspect-spec — consulta o spec vendorizado do PixelLab
 
   summary              contagens e proveniência do snapshot
-  list [--async]       todos os paths (ou só os que devolvem 202)
+  list [--async|--sync|--202]
+                       todos os paths, ou filtrados. --async = devolve job id
+                       (o contrato real); --202 = declara 202 (só 23 dos 34)
   endpoint <path>      operação, schema de request, required, props e limites
+  response <path>      o que cada status devolve, campo a campo
+  flow <path>          a cadeia submit -> poll -> fetch, derivada do spec
+  tag [nome]           endpoints por grupo do spec (sem nome: lista os grupos)
   grep <termo>         procura em paths e nomes de schema
   enums [Nome]         enums nomeados do spec
   limits               limites de tamanho por endpoint
@@ -51,7 +56,38 @@ if (!cmd || cmd === '--help' || cmd === '-h') { console.log(USAGE); process.exit
 
 const schemaOf = (ref) => (ref ? spec.components.schemas[ref.split('/').pop()] : null);
 const reqRef = (op) => op.requestBody?.content?.['application/json']?.schema?.$ref;
-const isAsync = (op) => Object.keys(op.responses ?? {}).includes('202');
+
+const respRef = (op, code) =>
+  op.responses?.[code]?.content?.['application/json']?.schema?.$ref;
+const okCodes = (op) => Object.keys(op.responses ?? {}).filter((c) => /^2/.test(c));
+
+/**
+ * The success code whose body is actually described.
+ *
+ * `/create-tileset` and `/create-isometric-tile` declare BOTH 200 and 202, and
+ * only the 202 carries a schema. Taking the first 2xx would read those two as
+ * having no response body at all, and therefore as synchronous — the opposite
+ * of the truth.
+ */
+const okCode = (op) => okCodes(op).find((c) => respRef(op, c)) ?? okCodes(op)[0];
+const declares202 = (op) => Object.keys(op.responses ?? {}).includes('202');
+
+/**
+ * Whether the endpoint hands back a job instead of the artefact.
+ *
+ * Deliberately NOT `responses['202'] !== undefined`. That test was wrong and
+ * wrong in the expensive direction: 34 POSTs return a job id, but only 23
+ * declare 202 — the other 13, including every character-creation endpoint,
+ * answer 200 with a `background_job_id` in the body. Treating those as
+ * synchronous means reading `image` off a body that only carries a job id, so
+ * the generation is paid for and then dropped on the floor.
+ */
+function isAsync(op) {
+  return okCodes(op).some((code) => {
+    const sc = schemaOf(respRef(op, code));
+    return Object.keys(sc?.properties ?? {}).some((k) => /^background_job_ids?$/.test(k));
+  });
+}
 
 /** Walk every nested object so `anyOf`-wrapped constraints are not missed. */
 function constraintsOf(node) {
@@ -78,6 +114,18 @@ function constraintsOf(node) {
   });
 }
 
+/**
+ * Resolve a path written in prose to the real spec path.
+ *
+ * Descriptions name the same route with different placeholders —
+ * `/background-jobs/{background_job_id}` in one endpoint's text,
+ * `/background-jobs/{job_id}` in the spec itself. Comparing with the parameter
+ * names blanked out is what makes those the same route.
+ */
+const BLANK = (p) => p.replace(/\{[^}]*\}/g, '{}');
+const SPEC_BY_SHAPE = new Map(Object.keys(spec.paths).map((p) => [BLANK(p), p]));
+const normalisePath = (p) => SPEC_BY_SHAPE.get(BLANK(p)) ?? p;
+
 function fmt(c) {
   const bits = [];
   if (c.enum) bits.push(`enum[${c.enum.join('|')}]`);
@@ -95,21 +143,111 @@ switch (cmd) {
     const post = ops.filter(([m]) => m === 'post');
     console.log(`openapi ${spec.openapi} · info.version "${spec.info.version}"`);
     console.log(`${Object.keys(spec.paths).length} paths · ${ops.length} operações · ${post.length} POST`);
-    console.log(`${post.filter(([, o]) => isAsync(o)).length} POST assíncronos (202 + background_job_id)`);
+    const jobbed = post.filter(([, o]) => isAsync(o)).length;
+    const coded = post.filter(([, o]) => declares202(o)).length;
+    console.log(`${jobbed} POST assíncronos (devolvem background_job_id)`);
+    console.log(`${coded} POST declaram 202 — os outros ${jobbed - coded} devolvem 200 com job id`);
     console.log(`${Object.keys(spec.components.schemas).length} schemas`);
+    const tags = new Set(ops.flatMap(([, o]) => o.tags ?? []));
+    console.log(`${tags.size} grupos (tags)`);
     const prov = join(dirname(SPEC_PATH), 'PROVENIENCIA.txt');
     if (existsSync(prov)) console.log(`\n${readFileSync(prov, 'utf8').trim()}`);
     break;
   }
 
   case 'list': {
-    const asyncOnly = arg === '--async';
     for (const [p, item] of Object.entries(spec.paths)) {
       for (const [m, op] of Object.entries(item)) {
-        if (asyncOnly && !isAsync(op)) continue;
-        console.log(`${m.toUpperCase().padEnd(6)} ${p.padEnd(42)} ${isAsync(op) ? '202' : '   '} ${op.operationId ?? ''}`);
+        const a = isAsync(op);
+        if (arg === '--async' && !a) continue;
+        if (arg === '--sync' && (a || m !== 'post')) continue;
+        if (arg === '--202' && !declares202(op)) continue;
+        const mark = a ? (declares202(op) ? '202' : '200*') : '   ';
+        console.log(`${m.toUpperCase().padEnd(6)} ${p.padEnd(42)} ${mark.padEnd(5)} ${op.operationId ?? ''}`);
       }
     }
+    if (arg === '--async') console.log('\n200* = assíncrono mas responde 200, não 202.');
+    break;
+  }
+
+  case 'tag': {
+    const groups = new Map();
+    for (const [p, item] of Object.entries(spec.paths)) {
+      for (const [m, op] of Object.entries(item)) {
+        for (const t of op.tags ?? ['(sem tag)']) {
+          if (!groups.has(t)) groups.set(t, []);
+          groups.get(t).push(`${m.toUpperCase().padEnd(6)} ${p.padEnd(44)}${isAsync(op) ? ' async' : ''}`);
+        }
+      }
+    }
+    if (!arg) {
+      for (const [t, eps] of groups) console.log(`${String(eps.length).padStart(3)}  ${t}`);
+      break;
+    }
+    const hit = [...groups.keys()].find((t) => t.toLowerCase().includes(arg.toLowerCase()));
+    if (!hit) {
+      console.error(`nenhum grupo casa com "${arg}". Grupos: ${[...groups.keys()].join(', ')}`);
+      process.exit(1);
+    }
+    console.log(`# ${hit} (${groups.get(hit).length})`);
+    for (const line of groups.get(hit)) console.log(`  ${line}`);
+    break;
+  }
+
+  case 'response': {
+    if (!arg) { console.error('uso: response <path>'); process.exit(1); }
+    const item = spec.paths[arg];
+    if (!item) { console.error(`AUSENTE ${arg}`); process.exit(1); }
+    for (const [m, op] of Object.entries(item)) {
+      console.log(`${m.toUpperCase()} ${arg}`);
+      for (const [code, r] of Object.entries(op.responses ?? {})) {
+        const ref = respRef(op, code);
+        const sc = schemaOf(ref);
+        console.log(`  ${code} ${ref ? ref.split('/').pop() : (r.description ?? '')}`);
+        if (!sc?.properties) continue;
+        const required = new Set(sc.required ?? []);
+        for (const [k, v] of Object.entries(sc.properties)) {
+          const c = constraintsOf(v).map(fmt).filter(Boolean).join(' ');
+          console.log(`      ${required.has(k) ? '*' : ' '}${k.padEnd(24)} ${c}`);
+        }
+      }
+    }
+    break;
+  }
+
+  /**
+   * The submit -> poll -> fetch chain.
+   *
+   * Derived, not hand-maintained: the poll endpoint is read out of the
+   * operation's own prose, because the spec has no machine-readable link
+   * between a submit endpoint and the GET that retrieves its result. A hand
+   * table would be a second source of truth and would rot on the next capture.
+   */
+  case 'flow': {
+    if (!arg) { console.error('uso: flow <path>'); process.exit(1); }
+    const op = spec.paths[arg]?.post;
+    if (!op) { console.error(`AUSENTE POST ${arg}`); process.exit(1); }
+    const code = okCode(op);
+    const sc = schemaOf(respRef(op, code));
+    const props = Object.keys(sc?.properties ?? {});
+    console.log(`1. POST ${arg}  ->  ${code} { ${props.join(', ')} }`);
+    if (!isAsync(op)) {
+      console.log('   SÍNCRONO — o artefato vem nesta resposta. Não há poll.');
+      break;
+    }
+    const mentioned = [...new Set(
+      [...(op.description ?? '').matchAll(/GET\s+(?:\/v2)?(\/[a-z0-9\-{}_]+(?:\/[a-z0-9\-{}_]+)*)/gi),
+      ].map((m) => m[1]),
+    )];
+    const known = [...new Set(
+      mentioned.map(normalisePath).filter((p) => spec.paths[p]),
+    )];
+    console.log(`2. poll ${known.length ? known.join(' ou ') : '/background-jobs/{job_id}'}`);
+    const ids = props.filter((k) => /_id$/.test(k) && !/^background_job/.test(k));
+    if (ids.length) {
+      console.log(`3. o recurso já existe em ${ids.join(', ')} — guarde antes do primeiro poll`);
+    }
+    console.log('\nAviso: o dinheiro sai no passo 1. Perder o id não devolve nada.');
     break;
   }
 

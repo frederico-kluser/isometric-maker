@@ -252,3 +252,37 @@ deterministic:
 
 Phase 4 adds the hooks wiring, the eval suites, and the `<evolution>` sections; Phase 5 proves the
 whole loop with an accepted case, a blocked case, and a discarded regression.
+
+---
+
+## 6. Amendment: the PixelLab knowledge split
+
+Sections 1–5 record the library as first designed and are left intact as the audit trail. This
+section records a later, deliberate departure from section 1's granularity argument.
+
+**What changed.** `querying-pixellab-api` was one 123-line skill standing in for 79 endpoints across
+20 spec groups. Section 1 argued against splitting on the grounds that routing degrades as the
+catalog grows. That argument was right about the *cost* and wrong about the *balance*: the single
+skill was not mis-routed, it was **under-informed**. It could tell an agent where to look and almost
+nothing about what it would find there, so every non-trivial question fell back to reading a 387 KB
+JSON — or, worse, to memory, which is exactly what `AGENTS.md:22@e451cfee` forbids.
+
+**The new shape.** One hub plus nine domain skills, sliced along the spec's own tag groups:
+
+| Hub | Families |
+|---|---|
+| `querying-pixellab-api` — spec discipline, the three structural traps, provenance, refresh | characters · rotation · animation · objects · tilesets · image creation · image editing · portraits · interfaces · jobs |
+
+**Why tag groups and not some other axis.** The spec already partitions itself, the partition matches
+how work actually arrives ("gerar o tileset" is not "animar o personagem"), and it is mechanically
+checkable: `inspect-spec.mjs tag` enumerates the groups, so drift between the library and the snapshot
+is visible rather than inferred. Coverage is 79/79 with no endpoint in two skills.
+
+**The routing risk section 1 warned about is real and is handled by measurement, not by assertion.**
+Ten sibling descriptions share heavy vocabulary. Every one carries a routing eval with negative cases
+drawn from its closest siblings, and three descriptions were rewritten during Phase 3 because the eval
+proved they lacked the words a real request uses. Descriptions are a measured surface here, not prose.
+
+**What this cost.** Nine more `SKILL.md` and nine more eval suites to keep green, and a real risk of
+duplicated passages across siblings — which is `meta-skill-consolidate`'s job to catch on its next
+sweep. The hub deliberately keeps the cross-cutting rules so the families do not each restate them.
