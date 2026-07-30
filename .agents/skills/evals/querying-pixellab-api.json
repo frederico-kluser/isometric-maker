@@ -1,0 +1,32 @@
+{
+  "skill": "querying-pixellab-api",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "qual endpoint do pixellab cria um tileset", "should_trigger": true },
+    { "query": "esse enum aceita low top-down ou so high top-down", "should_trigger": true },
+    { "query": "quantas direcoes o create-character devolve", "should_trigger": true },
+    { "query": "preciso atualizar o spec do openapi", "should_trigger": true },
+    { "query": "qual o limite de tamanho desse parametro", "should_trigger": true },
+    { "query": "escrever um ADR novo sobre a decisao de banco", "should_trigger": false },
+    { "query": "corrigir o layout do botao da tela", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "no enum",
+      "why": "template_animation_id being unenumerable is what stops an agent from inventing a complete template list"
+    },
+    {
+      "must_contain": "high top-down",
+      "why": "the TilesetCameraView default trap silently ruins terrain perspective if this passage is dropped"
+    },
+    {
+      "must_contain": "anyOf",
+      "why": "without the nested-constraint warning, a flat lookup reports no limit on limited fields"
+    },
+    {
+      "must_contain": "S, SW, W, NW, N, NE, E, SE",
+      "why": "the canonical frame order; getting it wrong makes sprites walk sideways with no error"
+    }
+  ],
+  "check_provenance": true
+}

@@ -1,0 +1,31 @@
+{
+  "skill": "writing-project-docs",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "documentar essa decisao num ADR novo", "should_trigger": true },
+    { "query": "atualizar o README e o indice da documentacao", "should_trigger": true },
+    { "query": "escrever a documentacao de economia", "should_trigger": true },
+    { "query": "revisar a documentacao do pixellab", "should_trigger": true },
+    { "query": "gerar os sprites das criaturas", "should_trigger": false },
+    { "query": "rodar o typecheck do estudio", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "never edited",
+      "why": "editing an accepted ADR destroys exactly the value the record has; this is the irreversible act the skill guards"
+    },
+    {
+      "must_contain": "update the table in `docs/README.md`",
+      "why": "the convention that breaks most often, because adding a file feels finished"
+    },
+    {
+      "must_contain": "não foi verificado",
+      "why": "the honesty rule; stripping a hedge is how a correct document becomes a wrong one"
+    },
+    {
+      "must_contain": "Co-authored-by",
+      "why": "overrides the machine-wide default and must not be re-derived from habit"
+    }
+  ],
+  "check_provenance": true
+}

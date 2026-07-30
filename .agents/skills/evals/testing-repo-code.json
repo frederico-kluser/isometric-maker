@@ -1,0 +1,31 @@
+{
+  "skill": "testing-repo-code",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "rodar os testes do pipeline", "should_trigger": true },
+    { "query": "escrever um teste para a funcao de hash", "should_trigger": true },
+    { "query": "isso tem cobertura de teste", "should_trigger": true },
+    { "query": "validar a mudanca antes de commitar", "should_trigger": true },
+    { "query": "documentar o combate em grupo", "should_trigger": false },
+    { "query": "atualizar o snapshot do openapi", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "node --test",
+      "why": "the runner invocation; there is no jest or vitest in this repo"
+    },
+    {
+      "must_contain": "no external signal",
+      "why": "the honest statement that money-critical changes cannot currently be validated by a test"
+    },
+    {
+      "must_contain": "That test does not exist",
+      "why": "AGENTS.md claims an idempotency test enforces the guarantee; the skill must keep contradicting that claim until it is true"
+    },
+    {
+      "must_contain": "There is no CI",
+      "why": "prevents an agent from reporting that a pipeline validated something"
+    }
+  ],
+  "check_provenance": true
+}

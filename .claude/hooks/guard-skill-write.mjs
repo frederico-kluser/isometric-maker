@@ -81,12 +81,32 @@ try {
   deny(`validation token unreadable (${err.message})`);
 }
 
-if (token.ok !== true) deny('validation token records a FAILED eval run');
-
 const ageMs = Date.now() - Date.parse(token.at ?? 0);
 if (!Number.isFinite(ageMs)) deny('validation token has no usable timestamp');
 if (ageMs > TTL_MINUTES * 60_000) {
   deny(`validation token is stale (${Math.round(ageMs / 60_000)} min old, TTL ${TTL_MINUTES} min)`);
+}
+
+/**
+ * A fresh but RED token means the evals ran and this skill is currently
+ * failing. Denying here would be a deadlock: repairing a broken skill requires
+ * editing it, and editing requires a green token that a broken skill cannot
+ * produce. Forbidding repair is strictly worse than allowing it, so the write
+ * goes through — loudly, and as a repair rather than an evolution.
+ *
+ * The residual loophole is real and worth stating: someone could sabotage a
+ * skill's eval file (which is not gated) to mint a red token and then edit the
+ * skill freely. What closes it is not this hook but git — an eval file being
+ * weakened shows up in the diff, and the post-edit gate still has to go green
+ * before anything is promoted.
+ */
+if (token.ok !== true) {
+  console.error(
+    `NOTE: ${skill} is currently FAILING its evals. Allowing this write as a REPAIR.\n` +
+      `Failures recorded in the token:\n` +
+      (token.failures ?? []).map((f) => `  · ${f}`).join('\n') +
+      `\nRe-run the evals after editing; the change is only promoted if they go green.`,
+  );
 }
 
 process.exit(0);

@@ -1,0 +1,32 @@
+{
+  "skill": "writing-repo-typescript",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "adicionar um import novo no arquivo api.ts", "should_trigger": true },
+    { "query": "por que o compilador reclama desse enum", "should_trigger": true },
+    { "query": "rodar o typecheck nas duas ferramentas", "should_trigger": true },
+    { "query": "instalar um pacote novo no pipeline", "should_trigger": true },
+    { "query": "criar um arquivo ts novo em tools", "should_trigger": true },
+    { "query": "documentar a decisao de permadeath num ADR", "should_trigger": false },
+    { "query": "quanto custa gerar as criaturas", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "no build step",
+      "why": "the whole import convention follows from Node running .ts directly"
+    },
+    {
+      "must_contain": "node:",
+      "why": "the node: prefix is what keeps the shared client resolvable under both module resolutions"
+    },
+    {
+      "must_contain": "across package",
+      "why": "the sprite-studio to pipeline coupling is why the stricter tsconfig wins on shared files"
+    },
+    {
+      "must_contain": "no linter and no formatter",
+      "why": "an agent that assumes a formatter exists will reformat files as a side effect"
+    }
+  ],
+  "check_provenance": true
+}

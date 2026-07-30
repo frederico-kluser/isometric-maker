@@ -2,7 +2,7 @@
   "mission": "knowledge-skills-system",
   "mission_complete": false,
   "stop_attempts": 0,
-  "updated_by": "380d5dc",
+  "updated_by": "6c4efba",
   "phases": [
     {
       "id": 1,
@@ -28,8 +28,8 @@
     {
       "id": 4,
       "name": "Router + verified-evolution mechanism",
-      "done": false,
-      "gate_passed": false,
+      "done": true,
+      "gate_passed": true,
       "artifact": ".claude/settings.json"
     },
     {

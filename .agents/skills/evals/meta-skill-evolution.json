@@ -1,0 +1,35 @@
+{
+  "skill": "meta-skill-evolution",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "atualiza a skill com esse aprendizado", "should_trigger": true },
+    { "query": "salva esse conhecimento pra proxima vez", "should_trigger": true },
+    { "query": "cria uma skill nova pra essa area", "should_trigger": true },
+    { "query": "isso deveria estar documentado na memoria", "should_trigger": true },
+    { "query": "gerar os sprites das criaturas", "should_trigger": false },
+    { "query": "rodar o typecheck do pipeline", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "write nothing",
+      "why": "discarding is the default outcome; a pipeline that usually writes is a pipeline that propagates errors"
+    },
+    {
+      "must_contain": "cannot referee its own errors",
+      "why": "the reason importance alone never authorises a write"
+    },
+    {
+      "must_contain": "validity condition",
+      "why": "a rule stripped of its scope gets applied where it is false - the most damaging over-compression"
+    },
+    {
+      "must_contain": "promote-or-discard",
+      "why": "the regression gate has no third branch; promoting with a caveat defeats it"
+    },
+    {
+      "must_contain": "never a publication",
+      "why": "a new skill is a draft for review; an unreviewed skill in the catalog is already routing traffic"
+    }
+  ],
+  "check_provenance": false
+}

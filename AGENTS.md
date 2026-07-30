@@ -74,8 +74,35 @@ Além disso, específico deste repo:
 
 Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior que documentação ausente, porque ninguém vai checar depois.
 
+## Comandos
+
+Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da sua ferramenta.
+
+```bash
+cd tools/pixellab-pipeline && npm test         # node --test src/*.test.ts
+cd tools/pixellab-pipeline && npm run typecheck
+cd tools/sprite-studio     && npm run typecheck
+bash scripts/check-docs.sh                     # convenções de doc + endpoints citados
+node .agents/skills/scripts/lint-skills.mjs    # formato das skills
+node .agents/skills/scripts/run-skill-evals.mjs
+```
+
+Não há linter, formatter nem CI neste repositório. O compilador e esses scripts são as únicas opiniões automatizadas que existem.
+
+## Skills
+
+Toda tarefa passa por [`.agents/skills/project-router`](.agents/skills/project-router/SKILL.md), que pergunta antes de agir, escreve um `TASK_PLAN.md` descartável e escolhe as skills. O índice fica em [`.agents/skills/catalog.md`](.agents/skills/catalog.md).
+
+`.claude/skills` é symlink para `.agents/skills` — a fonte da verdade é a pasta `.agents/`, e o symlink existe para que qualquer agente que leia `.claude/skills` veja os mesmos arquivos.
+
+Três hooks em `.claude/settings.json` tornam determinístico o que prosa não garante: escrita em `SKILL.md` existente exige token de validação fresco; `.env` e `secrets/` são ilegíveis; padrões destrutivos de shell são bloqueados. Hooks são lidos no início da sessão — editar `settings.json` só vale na próxima.
+
+**As skills são em inglês, por decisão do sistema que as gerou** — divergem da regra de idioma acima, que continua valendo para `docs/`, README e texto de jogo. As perguntas do router ao usuário e o `TASK_PLAN.md` são em português, por requisito funcional.
+
 ## Referências
 
 - [`README.md`](README.md) — visão geral do projeto
 - [`docs/README.md`](docs/README.md) — índice da documentação
 - [`docs/adr/`](docs/adr/) — decisões e seus motivos
+- [`.agents/skills/catalog.md`](.agents/skills/catalog.md) — índice das skills
+- [`.agents/skills/project-analysis.md`](.agents/skills/project-analysis.md) — o levantamento que originou as skills

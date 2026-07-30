@@ -134,6 +134,11 @@ function gate4() {
 
   const evals = runQuiet('node', [join(SKILLS_DIR, 'scripts', 'run-skill-evals.mjs')]);
   need(evals.ok, `phase 4: suíte de evals falhou\n${evals.out ?? ''}`);
+
+  // Hooks are captured at session start, so "installed" is not the same as
+  // "works". Firing real payloads at them is what proves the enforcement.
+  const hookTests = runQuiet('node', [join(SKILLS_DIR, 'scripts', 'test-hooks.mjs')]);
+  need(hookTests.ok, `phase 4: os hooks não bloquearam o que deveriam\n${hookTests.out ?? ''}`);
 }
 
 // ---------------------------------------------------------------- phase 5

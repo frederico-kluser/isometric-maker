@@ -1,0 +1,37 @@
+{
+  "skill": "guarding-generation-cost",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "gerar os sprites das criaturas do catalogo", "should_trigger": true },
+    { "query": "quanto custa gerar todos os assets", "should_trigger": true },
+    { "query": "o pipeline travou no meio da geracao", "should_trigger": true },
+    { "query": "preciso retomar a fila depois do crash", "should_trigger": true },
+    { "query": "por que o cache invalidou e quer regerar tudo", "should_trigger": true },
+    { "query": "empacotar o atlas pro cliente", "should_trigger": true },
+    { "query": "escrever a documentacao do combate em grupo", "should_trigger": false },
+    { "query": "qual a ordem correta dos parametros dessa funcao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "decoded pixels",
+      "why": "hashing bytes instead of pixels would re-bill on any re-encode; this is the load-bearing hash decision"
+    },
+    {
+      "must_contain": "PIPELINE_VERSION",
+      "why": "bumping it regenerates everything and is a budget decision, not a refactor"
+    },
+    {
+      "must_contain": "rescue",
+      "why": "rescue-before-resume is the recovery order that saves ephemeral resources from expiring"
+    },
+    {
+      "must_contain": "drops `remote`",
+      "why": "the resume trap permanently breaks child animations and is only recoverable by paying again"
+    },
+    {
+      "must_contain": "never resubmitted",
+      "why": "the never-resubmit rule is the most expensive mistake this pipeline can make"
+    }
+  ],
+  "check_provenance": true
+}

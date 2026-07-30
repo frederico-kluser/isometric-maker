@@ -55,8 +55,12 @@ const MIN_WORD = 4;
 function words(s) {
   return new Set(
     s.toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')   // fold accents: "geração" ~ "geracao"
-      .split(/[^a-z0-9_-]+/)
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')  // fold accents: "geração" ~ "geracao"
+      // Hyphens split too: a query saying "tileset" must reach a description
+      // that says "create-tileset", and one saying "spec" must reach
+      // "inspect-spec". Keeping compounds whole would make most real queries
+      // miss on vocabulary they visibly share.
+      .split(/[^a-z0-9]+/)
       .filter((w) => w.length >= MIN_WORD && !STOP.has(w)),
   );
 }

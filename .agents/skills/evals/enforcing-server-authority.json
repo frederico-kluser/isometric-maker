@@ -1,0 +1,36 @@
+{
+  "skill": "enforcing-server-authority",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "calcular o dano no servidor autoritativo", "should_trigger": true },
+    { "query": "como transferir item sem permitir dupe", "should_trigger": true },
+    { "query": "escrever o netcode do protocolo binario", "should_trigger": true },
+    { "query": "implementar o full loot na morte", "should_trigger": true },
+    { "query": "predicao de movimento no cliente", "should_trigger": true },
+    { "query": "atualizar o snapshot do openapi", "should_trigger": false },
+    { "query": "rodar o typecheck e o lint", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "client decides nothing",
+      "why": "the single rule everything else derives from; the client is public code"
+    },
+    {
+      "must_contain": "fails in the player's favour",
+      "why": "an infrastructure error must never cause a permanent, unappealable loss"
+    },
+    {
+      "must_contain": "One living character per account",
+      "why": "without it a mule alt holds the gear and death stops costing anything"
+    },
+    {
+      "must_contain": "log-only mode",
+      "why": "the anti-cheat rollout rule; an instant-ban implementation would violate the design"
+    },
+    {
+      "must_contain": "open and must not be papered over",
+      "why": "group combat and ranged are unresolved; an agent inventing a resolution would encode a guess as a decision"
+    }
+  ],
+  "check_provenance": true
+}

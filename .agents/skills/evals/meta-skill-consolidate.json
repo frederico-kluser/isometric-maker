@@ -1,0 +1,31 @@
+{
+  "skill": "meta-skill-consolidate",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "as skills estao inchadas demais", "should_trigger": true },
+    { "query": "consolidar o conhecimento duplicado entre skills", "should_trigger": true },
+    { "query": "a citacao mudou e ficou stale", "should_trigger": true },
+    { "query": "limpar a biblioteca de skills", "should_trigger": true },
+    { "query": "gerar os sprites das criaturas", "should_trigger": false },
+    { "query": "escrever um teste novo pro atlas", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "second opinion",
+      "why": "deletion is the irreversible half; a single judgement is not enough to authorise it"
+    },
+    {
+      "must_contain": "Never bump the hash without reading the file",
+      "why": "converting a stale warning into a false assurance is worse than leaving it stale"
+    },
+    {
+      "must_contain": "progressive disclosure first, deletion last",
+      "why": "over-budget content moves to references before anything is removed"
+    },
+    {
+      "must_contain": "Explicit hedges also survive",
+      "why": "compressing an unverified marker into a confident claim is the exact failure the doc rules prevent"
+    }
+  ],
+  "check_provenance": false
+}

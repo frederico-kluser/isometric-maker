@@ -1,0 +1,35 @@
+{
+  "skill": "project-router",
+  "_min_overlap_note": "1, not 2: the router is the universal entry point. A domain skill needs two matches so it does not steal a sibling's traffic; the router needs one so it never misses.",
+  "min_overlap": 1,
+  "routing": [
+    { "query": "implementa o sistema de loot", "should_trigger": true },
+    { "query": "corrige esse bug no refactor", "should_trigger": true },
+    { "query": "adiciona uma feature nova de analise", "should_trigger": true },
+    { "query": "muda e documenta esse comportamento", "should_trigger": true },
+    { "query": "qual a previsao do tempo amanha", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "Brazilian Portuguese",
+      "why": "the language of every user-facing question is a functional requirement, not a style choice"
+    },
+    {
+      "must_contain": "TASK_PLAN.md",
+      "why": "the plan file is created and deleted by this skill; losing either half breaks the lifecycle"
+    },
+    {
+      "must_contain": "Never delete the bootstrap artifacts",
+      "why": "the disposable plan and the permanent audit trail must never be confused"
+    },
+    {
+      "must_contain": "not auto-invocable",
+      "why": "generate spends money and consolidate deletes knowledge; both need confirmation"
+    },
+    {
+      "must_contain": "writes nothing",
+      "why": "the evolution step must run every time, and writing nothing is the expected outcome"
+    }
+  ],
+  "check_provenance": false
+}
