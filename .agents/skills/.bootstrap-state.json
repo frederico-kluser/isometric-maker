@@ -2,7 +2,7 @@
   "mission": "knowledge-skills-system",
   "mission_complete": false,
   "stop_attempts": 0,
-  "updated_by": "d371ce9",
+  "updated_by": "550a4dd",
   "phases": [
     {
       "id": 1,
@@ -14,8 +14,8 @@
     {
       "id": 2,
       "name": "Skill map",
-      "done": false,
-      "gate_passed": false,
+      "done": true,
+      "gate_passed": true,
       "artifact": ".agents/skills/skill-map.md"
     },
     {
