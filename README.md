@@ -73,6 +73,7 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 
 ## Referências
 
+- [`PLANO-DE-EXECUCAO.md`](PLANO-DE-EXECUCAO.md) — a árvore de tarefas: 46 cards em 18 ondas, com o prompt de cada um. **Comece pelo card `I-01`**
 - [`docs/README.md`](docs/README.md) — índice completo da documentação
 - [`AGENTS.md`](AGENTS.md) — instruções para agentes de código
 - [`docs/adr/`](docs/adr/) — as decisões e seus motivos
