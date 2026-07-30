@@ -1,0 +1,32 @@
+{
+  "skill": "animating-pixi-sprites",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "carregar o atlas do personagem", "should_trigger": true },
+    { "query": "animar o personagem andando", "should_trigger": true },
+    { "query": "o sprite anda de lado quando troca de direcao", "should_trigger": true },
+    { "query": "onde fica a ancora do frame", "should_trigger": true },
+    { "query": "como vestir o equipamento no corpo", "should_trigger": true },
+    { "query": "rodar os testes do pipeline", "should_trigger": false },
+    { "query": "escrever a documentacao do modulo", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "S, SW, W, NW, N, NE, E, SE",
+      "why": "the canonical frame order; naming it wrong makes the sprite walk sideways with no error"
+    },
+    {
+      "must_contain": "{ x: 0.5, y: 0.875 }",
+      "why": "the feet anchor is what makes position mean ground position for depth sorting and the grid"
+    },
+    {
+      "must_contain": "Never extend the Pixi JSON with game semantics",
+      "why": "the two-file split; putting fps in the Pixi atlas breaks against the parser's own shape"
+    },
+    {
+      "must_contain": "same base silhouette",
+      "why": "the constraint that makes a general layered paper-doll renderer the wrong first move"
+    }
+  ],
+  "check_provenance": true
+}

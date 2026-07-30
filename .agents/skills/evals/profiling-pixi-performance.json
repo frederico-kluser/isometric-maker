@@ -1,0 +1,28 @@
+{
+  "skill": "profiling-pixi-performance",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "caiu o fps e esta travando", "should_trigger": true },
+    { "query": "engasga quando entra na zona nova", "should_trigger": true },
+    { "query": "esta consumindo memoria sem parar", "should_trigger": true },
+    { "query": "vale a pena otimizar o draw call", "should_trigger": true },
+    { "query": "achar o gargalo de desempenho", "should_trigger": true },
+    { "query": "documentar a decisao no ADR", "should_trigger": false },
+    { "query": "qual enum o endpoint aceita", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "There is no baseline",
+      "why": "every performance claim in these skills is reasoning, and saying so is the skill's main job"
+    },
+    {
+      "must_contain": "Measure draw calls, not sprites",
+      "why": "sprite count is a poor predictor; what ends a batch is a state change between draws"
+    },
+    {
+      "must_contain": "silently do not forward them",
+      "why": "the deprecated GC shims accept old options and drop them, with no warning at all"
+    }
+  ],
+  "check_provenance": true
+}

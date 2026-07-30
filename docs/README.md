@@ -110,6 +110,7 @@ Escrito por último, de propósito: doc de infra antes de existir infra é ficç
 |---|---|---|
 | [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de orçamento e atlas | **funcional** |
 | [`tools/sprite-studio`](../tools/sprite-studio/README.md) | Tela de autoria: corpo base 8 direções, poses, guarda-roupa | **funcional** |
+| [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
 
 ## ADR — decisões registradas
 
@@ -125,6 +126,7 @@ Nunca editadas. Uma decisão revista gera ADR novo que substitui a anterior.
 | [`0006`](./adr/0006-animacao-em-template-mode.md) | Animação em `mode='template'`; `pro` proibido sem decisão explícita | **pronto** |
 | [`0007`](./adr/0007-fase1-vm-unica.md) | Fase 1 VM única em São Paulo, com gatilho numérico para GKE + Agones | **pronto** |
 | [`0008`](./adr/0008-idioma-docs-ptbr-codigo-en.md) | Docs e texto de jogo em pt-BR; código e commits em inglês | **pronto** |
+| [`0009`](./adr/0009-conhecimento-pixijs-vendorizado.md) | Tipos e skills oficiais do PixiJS 8.19.0 vendorizados; skills citam, não reescrevem a API | **pronto** |
 
 ## Skills
 
@@ -138,6 +140,7 @@ Duas Agent Skills em `/home/ondokai/Projects/ferro-e-cinzas-skills/`, instaladas
 ## Histórico
 
 - **2026-07-29** — Repositório criado. Spec v2 do PixelLab vendorizado (sha256 `5b11c9a7afa1…`). Pipeline com `plan`/`estimate`/`balance`/`verify`/`doctor` funcionando. Manual de custos e limites, doc de combate e as 8 ADRs escritos.
+- **2026-07-30** — PixiJS 8.19.0 vendorizado em `tools/pixi-reference/` (tipos + as 26 skills oficiais do pacote, MIT). Sub-router `routing-pixijs-work` e dez skills de ponte, com `check-pixi-claims.mjs` reprovando símbolo inexistente **ou deprecado**. ADR 0009.
 
 ## Referências
 
@@ -145,4 +148,4 @@ Duas Agent Skills em `/home/ondokai/Projects/ferro-e-cinzas-skills/`, instaladas
 - [`/home/ondokai/Projects/config/CLAUDE.md`](/home/ondokai/Projects/config/CLAUDE.md) — origem das 8 convenções obrigatórias de doc
 - [`/home/ondokai/Projects/tech-docs/games/5.md`](/home/ondokai/Projects/tech-docs/games/5.md) — guia anterior do PixelLab, **defasado**; ver `01-pixellab/delta-vs-guia-antigo.md`
 
-**Última atualização:** 2026-07-29
+**Última atualização:** 2026-07-30

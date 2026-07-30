@@ -1,0 +1,28 @@
+{
+  "skill": "applying-pixi-filters",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "fazer o sprite piscar quando toma dano", "should_trigger": true },
+    { "query": "adicionar um efeito de brilho no alvo", "should_trigger": true },
+    { "query": "colocar sombra embaixo do personagem", "should_trigger": true },
+    { "query": "recortar a area do minimapa com mascara", "should_trigger": true },
+    { "query": "implementar nevoa de guerra", "should_trigger": true },
+    { "query": "conferir o saldo antes de gerar", "should_trigger": false },
+    { "query": "escrever o teste de regressao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "rendering detour",
+      "why": "a filter is not a property; the render-target switch is the entire cost model"
+    },
+    {
+      "must_contain": "Prefer art to shaders",
+      "why": "outline, flash and shadow are cheaper and sharper as authored pixels in a pixel-art game"
+    },
+    {
+      "must_contain": "Nothing here has been measured",
+      "why": "the budget table is reasoning, not a profile, and must not be quoted as measurement"
+    }
+  ],
+  "check_provenance": true
+}

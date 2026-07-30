@@ -75,7 +75,7 @@ And a rule that overrides the machine-wide default:
 ### ADRs: the part that is irreversible
 
 An accepted ADR is **never edited**. A revised decision becomes a **new** ADR that supersedes the old
-one, and the old one stays exactly as written (`docs/README.md:116@fa318430`). This is the guard: the
+one, and the old one stays exactly as written (`docs/README.md:117@cb21ed03`). This is the guard: the
 value of the record is that it shows what was believed at the time, and editing destroys precisely
 that.
 
