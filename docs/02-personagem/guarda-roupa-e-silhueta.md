@@ -5,7 +5,7 @@
 > **A API do PixelLab não resolve isso.** Não existe primitiva de equipamento entre personagens, e o `transfer-outfit-v2` é limitado a **3 frames por job** acima de 80px. Todo jogo 2D que faz paper-doll de verdade resolve fora do gerador, e os três mecanismos que funcionam estão abaixo.
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/sprite-studio && npm run dev
+> cd /home/ondokai/Projects/isometric-maker/tools/sprite-studio && npm run dev
 > ```
 
 ## O problema
@@ -79,6 +79,6 @@ O caminho recomendado, em ordem:
 - Universal-LPC-Spritesheet — a divisão `fg/`/`bg/` e o aliasing de tipo de corpo
 - ClassicUO — a regra de reordenação da capa por direção
 - OTClient — as 2 camadas em disco e as 4 regiões recoloríveis
-- [`/home/ondokai/Projects/power-abuse/tools/sprite-studio/README.md`](../../tools/sprite-studio/README.md) — a ferramenta que implementa a restrição de silhueta
+- [`/home/ondokai/Projects/isometric-maker/tools/sprite-studio/README.md`](../../tools/sprite-studio/README.md) — a ferramenta que implementa a restrição de silhueta
 
 **Última atualização:** 2026-07-30

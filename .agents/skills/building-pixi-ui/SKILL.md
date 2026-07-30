@@ -22,7 +22,7 @@ reference document per text class. This skill does not restate them.
 This is a hard rule of the repository, not a localisation plan:
 
 > "Todo texto que o usuário do editor lê (UI, mensagens de erro) e o texto do jogo exportado" —
-> português do Brasil — `AGENTS.md:10@7a66ff95`
+> português do Brasil — `AGENTS.md:10@eb529ae5`
 
 The rendering consequence is concrete and easy to miss until it ships: pt-BR needs
 `á à â ã é ê í ó ô õ ú ç` and their capitals, and no built-in preset contains them. The vendored
@@ -50,7 +50,7 @@ What *is* fixed by construction is a bitmap font loaded from a file: its glyphs 
 atlas contains, so a pixel font that shipped without `ç` never draws one. That regression arrives
 with the art, not with the text.
 
-Identifiers, types and JSON keys stay English (`AGENTS.md:11@7a66ff95`). A label's variable name is
+Identifiers, types and JSON keys stay English (`AGENTS.md:11@eb529ae5`). A label's variable name is
 English; its value is Portuguese.
 
 ### The strings do not live where they are drawn
@@ -59,7 +59,7 @@ Every visible string lives in one frozen module, `src/i18n/pt-BR.ts`, reached by
 access and **not** through a `t('chave')` function. The reason is the compiler: both tsconfigs enable
 `noUncheckedIndexedAccess`, so indexing an object by string yields `string | undefined` and invites
 a `!` that erases the check, while property access makes a missing key a compile error instead of an
-empty label (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:39@6018ff3d`).
+empty label (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:39@6de9bec2`).
 
 ```ts
 import { S } from './i18n/pt-BR.ts';
@@ -68,9 +68,9 @@ label.textContent = S.custoDaSessao;   // English identifier, Portuguese value
 
 Error messages are inside the rule, not an exception to it — they are what the user reads at the
 worst moment, and the text that most often escapes centralisation
-(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:53@6018ff3d`). Nothing mechanical enforces this:
+(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:53@6de9bec2`). Nothing mechanical enforces this:
 there is no linter and no CI, so a literal typed straight into a component compiles and ships
-(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:56@6018ff3d`).
+(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:56@6de9bec2`).
 
 ### Glyph-atlas text is the default for anything whose string changes
 
@@ -99,12 +99,12 @@ Four kinds of text, and none of them is a game HUD:
 - **Barra de custo** — the one element that is live, and the only one with money behind it. The
   budget guard informs and never refuses, so a number on screen is the last thing standing between
   the user and a surprise invoice
-  (`docs/adr/0012-guard-de-orcamento-informativo.md:59@f2508118`). The report it renders carries the
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:59@23c76213`). The report it renders carries the
   session total, the month total and the balance — and the balance is typed `number | undefined`, so
   the widget needs a state for "not known", not a zero
-  (`docs/adr/0012-guard-de-orcamento-informativo.md:33-38@f2508118`); the confirmation that precedes
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:33-38@23c76213`); the confirmation that precedes
   each generation adds the estimate for that action
-  (`docs/adr/0012-guard-de-orcamento-informativo.md:46@f2508118`). Showing the accumulated totals is
+  (`docs/adr/0012-guard-de-orcamento-informativo.md:46@23c76213`). Showing the accumulated totals is
   the whole point — an estimate of US$ 0,02 displayed three hundred times is how an informative
   guard becomes a surprise.
 - **Mensagem de erro** — pt-BR, from the strings module, and specific enough to say what to do next.
@@ -130,7 +130,7 @@ on avoiding one.
 - No UI exists in this repository.
 - **Whether the panels are DOM or drawn on the canvas has not been decided.** The ADR's own example
   assigns to `textContent`, which is a DOM property
-  (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:9@6018ff3d`). Everything above about glyph
+  (`docs/adr/0016-ui-ptbr-strings-centralizadas.md:9@6de9bec2`). Everything above about glyph
   atlases and nearest sampling applies to text Pixi draws; DOM chrome with a web font has neither
   that problem nor that budget. The strings rule applies to both.
 - The community UI and layout packages are unverified against 8.19.0, as stated above.

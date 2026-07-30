@@ -2,11 +2,11 @@
 
 > **Quick Start (TL;DR)**
 >
-> O `pixi.js` 8.19.0 é fixado e vendorizado em `/home/ondokai/Projects/power-abuse/tools/pixi-reference/`: os tipos completos **e** as 26 skills oficiais que o próprio pacote publica. As skills deste repositório **citam** esse vendor e nunca reescrevem a API.
+> O `pixi.js` 8.19.0 é fixado e vendorizado em `/home/ondokai/Projects/isometric-maker/tools/pixi-reference/`: os tipos completos **e** as 26 skills oficiais que o próprio pacote publica. As skills deste repositório **citam** esse vendor e nunca reescrevem a API.
 >
 > ```bash
-> node /home/ondokai/Projects/power-abuse/tools/pixi-reference/scripts/vendor-types.mjs --check
-> node /home/ondokai/Projects/power-abuse/.agents/skills/scripts/check-pixi-claims.mjs
+> node /home/ondokai/Projects/isometric-maker/tools/pixi-reference/scripts/vendor-types.mjs --check
+> node /home/ondokai/Projects/isometric-maker/.agents/skills/scripts/check-pixi-claims.mjs
 > ```
 
 **Status:** aceita · **Data:** 2026-07-30
@@ -61,9 +61,9 @@ As skills upstream ficam sob `tools/`, **não** sob `.agents/skills/`, porque o 
 
 ## Referências
 
-- [`/home/ondokai/Projects/power-abuse/tools/pixi-reference/README.md`](../../tools/pixi-reference/README.md) — o que é vendorizado e como regenerar
-- [`/home/ondokai/Projects/power-abuse/.agents/skills/routing-pixijs-work/SKILL.md`](../../.agents/skills/routing-pixijs-work/SKILL.md) — o sub-router que consome o vendor
-- [`/home/ondokai/Projects/power-abuse/.agents/skills/catalog.md`](../../.agents/skills/catalog.md) — as dez skills de ponte
+- [`/home/ondokai/Projects/isometric-maker/tools/pixi-reference/README.md`](../../tools/pixi-reference/README.md) — o que é vendorizado e como regenerar
+- [`/home/ondokai/Projects/isometric-maker/.agents/skills/routing-pixijs-work/SKILL.md`](../../.agents/skills/routing-pixijs-work/SKILL.md) — o sub-router que consome o vendor
+- [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../../.agents/skills/catalog.md) — as dez skills de ponte
 - [ADR 0001](0001-pixijs-em-vez-de-cocos.md) — a escolha do PixiJS 8
 - [ADR 0002](0002-cliente-rest-gerado-do-openapi.md) — o mesmo padrão de vendorização, aplicado antes ao spec do PixelLab
 

@@ -5,7 +5,7 @@
 > O documento que evita prejuízo. Antes de qualquer lote, rode o guard:
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 > node src/cli.ts plan && node src/cli.ts estimate
 > ```
 
@@ -228,7 +228,7 @@ Uma nota de honestidade: o dinheiro deixou de ser o eixo do risco. O que custa a
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — spec vendorizado, capturado 2026-07-29, sha256 em `PROVENIENCIA.txt` (**fonte autoritativa dos limites de tamanho**)
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json` — spec vendorizado, capturado 2026-07-29, sha256 em `PROVENIENCIA.txt` (**fonte autoritativa dos limites de tamanho**)
 - [`https://www.pixellab.ai/pixellab-api`](https://www.pixellab.ai/pixellab-api) — tabela de preço estimado; conferida em 2026-07-29 no HTML e no bundle JS
 - [`https://api.pixellab.ai/mcp/docs`](https://api.pixellab.ai/mcp/docs) — latências e bandas de `generations`, verificado 2026-07-29
 - [`https://www.pixellab.ai/docs/tools/create-8-rotations-pro`](https://www.pixellab.ai/docs/tools/create-8-rotations-pro) — corrobora a banda Pro (20 gen até 85px, 40 até 168px)

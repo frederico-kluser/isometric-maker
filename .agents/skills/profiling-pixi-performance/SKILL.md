@@ -21,7 +21,7 @@ For the API and the techniques read
 ### There is no baseline, and that is the most important fact here
 
 Nothing in this repository has ever rendered a frame, and PixiJS is not installed
-(`docs/00-produto/visao.md:58@41a4855a`). Every performance claim in the PixiJS skills — the filter
+(`docs/00-produto/visao.md:60@613eaec7`). Every performance claim in the PixiJS skills — the filter
 budget in `applying-pixi-filters`, the tilemap options in `rendering-pixi-tilemap`, the sorting
 advice in `composing-pixi-scene` — is **reasoning from how the renderer works, not a measurement of
 this editor**.
@@ -39,14 +39,14 @@ What ends a batch is a change of state between adjacent draws — a different te
 or mask forcing a render target, a blend-mode change.
 
 That is why the pipeline packs whole families into single atlas pages
-(`tools/pixellab-pipeline/src/atlas.ts:204-215@e9504d6c`) and why the page ceiling is 2048, the safe
-limit on integrated and mobile GPUs (`tools/pixellab-pipeline/src/atlas.ts:43@e9504d6c`). Splitting a
+(`tools/pixellab-pipeline/src/atlas.ts:204-215@a8bede59`) and why the page ceiling is 2048, the safe
+limit on integrated and mobile GPUs (`tools/pixellab-pipeline/src/atlas.ts:43@a8bede59`). Splitting a
 family across pages is a batching cost, not just a packing detail — worth knowing before splitting
 one to dodge the missing multipack support.
 
 Interleaving is the subtle version: drawing A-atlas, B-atlas, A-atlas costs three batches where
 sorting by atlas would cost two. The isometric draw order is `2*(x+y+z)` plus an integer edge bias
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`), which is deliberately something
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@e194895c`), which is deliberately something
 other than texture, so a map that stacks floor, wall and prop **will** interleave. That tension is
 real and unresolved, and resolving it needs a measurement, not a preference.
 
@@ -98,9 +98,9 @@ Two things look like optimisation opportunities and are not:
 
 - **The atlas is tight NPOT rather than power-of-two, deliberately.** Pixi 8 requires WebGL2 or
   WebGPU, both handle NPOT, pixel art uses no mipmaps, and POT would waste up to 72% of the texture
-  (`tools/pixellab-pipeline/src/atlas.ts:202-204@e9504d6c`).
+  (`tools/pixellab-pipeline/src/atlas.ts:202-204@a8bede59`).
 - **Regeneration is idempotent by design** and the atlas PNG is byte-stable
-  (`tools/pixellab-pipeline/src/atlas.ts:100-101@e9504d6c`). Anything that makes packing
+  (`tools/pixellab-pipeline/src/atlas.ts:100-101@a8bede59`). Anything that makes packing
   non-deterministic to save time breaks caching and costs real money in the generation pipeline —
   see `guarding-generation-cost`.
 

@@ -294,7 +294,7 @@ export async function packGrid(
     frames: pixiFrames,
     animations,
     meta: {
-      app: 'power-abuse/pixellab-pipeline',
+      app: 'isometric-maker/pixellab-pipeline',
       version: '1.0',
       image: pngName,
       format: 'RGBA8888',

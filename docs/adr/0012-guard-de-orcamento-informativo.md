@@ -5,7 +5,7 @@
 > O guard deixa de recusar geração acima de um teto. Passa a estimar, mostrar o gasto da sessão e do mês, e exigir confirmação explícita a cada geração. A idempotência **não** é flexibilizada: o guard é conselho, o cache é lei.
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 > node src/cli.ts estimate    # sai 0 mesmo acima do limiar; imprime AVISO, nunca RECUSADO
 > ```
 
@@ -13,7 +13,7 @@
 
 ## Contexto
 
-O guard atual, em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/cost.ts`, tem quatro limiares e **recusa** acima de três deles: US$ 0,30 por asset, US$ 15 por execução, US$ 60 por mês, e confirmação acima de US$ 5. A recusa devolve exit code 2.
+O guard atual, em `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/cost.ts`, tem quatro limiares e **recusa** acima de três deles: US$ 0,30 por asset, US$ 15 por execução, US$ 60 por mês, e confirmação acima de US$ 5. A recusa devolve exit code 2.
 
 Esses números foram calibrados para um catálogo de MMORPG: sessenta criaturas, quatrocentos itens, cerca de 2.700 jobs, tudo planejado de antemão e gerado em lote. Nesse mundo, um teto é proteção contra um `mode='pro'` acidental multiplicando a fatura por cem.
 
@@ -62,8 +62,8 @@ Em `src/cost.ts`:
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/cost.ts` — os limiares e a ordem de avaliação
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/catalog.ts` — `decide()`, que esta ADR deliberadamente não toca
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/cost.ts` — os limiares e a ordem de avaliação
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/catalog.ts` — `decide()`, que esta ADR deliberadamente não toca
 - [`ADR 0006`](0006-animacao-em-template-mode.md) — `mode='pro'` continua exigindo decisão registrada, independentemente do guard
 
 **Não verificado:** se a PixelLab expõe algum limite de gasto do lado dela. O `GET /balance` devolve saldo, não teto.

@@ -36,14 +36,14 @@ node $S flow /create-character-v3
 | `/create-character-v3` | 32–256 | formula, see below | `outline`/`detail` **when a reference image is given** |
 
 `mode='standard'` on the 8-direction endpoint is the project's backbone: one generation for all
-eight rotations (`docs/01-pixellab/custos-e-limites.md:70@39059cac`). Every other route costs more,
+eight rotations (`docs/01-pixellab/custos-e-limites.md:70@fe52f3d5`). Every other route costs more,
 and `mode='pro'` costs more **and** discards the style parameters you passed — a silent downgrade,
 not an error.
 
 `/create-character-v3` is the only one whose cost is a published formula rather than a table:
 `ceil(w*h*8 / 65536)` generations with a reference image, and `1 + ceil(s*s*8 / 65536)` from scratch
 where `s = max(width, height)`. Treat every resulting number as a **preço estimado**
-(`docs/01-pixellab/custos-e-limites.md:59@39059cac`).
+(`docs/01-pixellab/custos-e-limites.md:59@fe52f3d5`).
 
 ### All four are asynchronous, and none of them says 202
 

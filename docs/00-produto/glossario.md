@@ -5,7 +5,7 @@
 > A [ADR 0008](../adr/0008-idioma-docs-ptbr-codigo-en.md) manda documentar em português e programar em inglês, então **todo conceito deste projeto tem dois nomes**. Esta tabela é o dicionário entre os dois. Use o termo em português na doc e na UI; use o identificador em inglês no código.
 >
 > ```bash
-> grep -rn "zStep\|depthSort\|anchorMode" /home/ondokai/Projects/power-abuse/tools/
+> grep -rn "zStep\|depthSort\|anchorMode" /home/ondokai/Projects/isometric-maker/tools/
 > ```
 
 ## Por que este documento existe antes do código
@@ -83,7 +83,7 @@ Não é doc especulativa: não descreve infra que não existe, descreve as palav
 - [`ADR 0008`](../adr/0008-idioma-docs-ptbr-codigo-en.md) — a divisão de idioma que obriga este glossário
 - [`ADR 0013`](../adr/0013-geometria-isometrica-64x32-z16.md) — `zStep`, `tile`, e o Z inteiro
 - [`ADR 0016`](../adr/0016-ui-ptbr-strings-centralizadas.md) — onde as strings em português moram no código
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/endpoints.ts` — `DIRECTIONS_8`, a ordem canônica
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/endpoints.ts` — `DIRECTIONS_8`, a ordem canônica
 
 **Não verificado:** os termos de mapa (`edge`, `mask`, `depthSort`, `jumpLevels`) ainda não existem em código nenhum — são o vocabulário acordado para quando existirem, não a descrição de algo escrito.
 

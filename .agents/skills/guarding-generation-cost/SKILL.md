@@ -19,21 +19,21 @@ after any crash or interruption.
 
 > "Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o
 > mesmo spec **não deve gastar nada**. […] **O teste que prova isso ainda não existe; escrevê-lo é
-> item de entrada da próxima onda.**" — `AGENTS.md:37@7a66ff95`
+> item de entrada da próxima onda.**" — `AGENTS.md:37@eb529ae5`
 
 `plan` and `estimate` never touch the network in a paid way. `generate` spends. That asymmetry is
 the whole design, and it only holds while the hashes hold.
 
 The contract has two halves and only one of them is hard. **Idempotency is law** — it is what makes
 the most common mistake, regenerating what already exists, cost zero. The budget guard is advice: it
-informs and never refuses (`docs/adr/0012-guard-de-orcamento-informativo.md:26@f2508118`). So every
+informs and never refuses (`docs/adr/0012-guard-de-orcamento-informativo.md:26@23c76213`). So every
 sentence below about hashing is load-bearing in a way no sentence about thresholds is, and the
 honest reading of that is uncomfortable: the one hard defence left has **no test proving it**
-(`docs/adr/0012-guard-de-orcamento-informativo.md:60@f2508118`). Treat any change to `catalog.ts` or
+(`docs/adr/0012-guard-de-orcamento-informativo.md:60@23c76213`). Treat any change to `catalog.ts` or
 to a hash function as unprotected by the suite until those tests exist.
 
 `--force` breaks **idempotency, not the budget** — that is why it still requires `--reason`
-(`AGENTS.md:39@7a66ff95`). No CLI flag by that name exists in `cli.ts` today; the implemented lever
+(`AGENTS.md:39@eb529ae5`). No CLI flag by that name exists in `cli.ts` today; the implemented lever
 is the per-asset `salt` (`tools/pixellab-pipeline/src/catalog.ts:34-35@2a45b362`), and bumping it is
 the same decision under a different name.
 
@@ -83,14 +83,14 @@ it is hand-edited into the lockfile.
 session total, the month total, the balance, the warnings, and `requiresConfirmation` typed as the
 literal `true` rather than `boolean` — that literal is what makes the compiler reject any future
 path that generates without asking
-(`docs/adr/0012-guard-de-orcamento-informativo.md:30-43@f2508118`). `RefusalCode` becomes
+(`docs/adr/0012-guard-de-orcamento-informativo.md:30-43@23c76213`). `RefusalCode` becomes
 `WarningCode`; `DEFAULT_LIMITS` becomes `DEFAULT_THRESHOLDS` and **keeps the same four numbers** —
 what changes is their meaning, from "refuse above this" to "warn above this"
-(`docs/adr/0012-guard-de-orcamento-informativo.md:45@f2508118`). Confirmation is **per generation**
+(`docs/adr/0012-guard-de-orcamento-informativo.md:45@23c76213`). Confirmation is **per generation**
 and shows three axes: this action, the session so far, the month so far
-(`docs/adr/0012-guard-de-orcamento-informativo.md:46@f2508118`) — because a US$ 0.02 estimate
+(`docs/adr/0012-guard-de-orcamento-informativo.md:46@23c76213`) — because a US$ 0.02 estimate
 accepted three hundred times is exactly how an informative guard becomes a US$ 6 surprise
-(`docs/adr/0012-guard-de-orcamento-informativo.md:59@f2508118`).
+(`docs/adr/0012-guard-de-orcamento-informativo.md:59@23c76213`).
 
 Numbers at `tools/pixellab-pipeline/src/cost.ts:293@e3fe3b1f`; evaluation order at `:326`.
 
@@ -151,7 +151,7 @@ raise a number to get past it.
 ### The never-resubmit rule
 
 > "**Nunca resubmeta um job cujo id você tem.** É o bug mais caro possível neste sistema."
-> — `docs/01-pixellab/modelo-assincrono.md:46@7e9b1831`
+> — `docs/01-pixellab/modelo-assincrono.md:46@9335c20d`
 
 Money leaves at submit, so the job id is written to disk atomically **before the first poll**
 (`tools/pixellab-pipeline/src/generate.ts:265@d7959fa4`). Any record holding a `jobId` is re-polled
@@ -181,7 +181,7 @@ Exit codes are a contract: `0` ok · `1` error · `2` **the user did not confirm
 pending, run `resume` · `5` artifact verification failed. Code `3` is documented and never returned —
 no `return 3` exists (`tools/pixellab-pipeline/src/cli.ts:6@8d21d33a`). The meaning of `2` changed
 with the guard: it used to mean "refused by budget"
-(`docs/adr/0012-guard-de-orcamento-informativo.md:58@f2508118`), which is still what that header
+(`docs/adr/0012-guard-de-orcamento-informativo.md:58@23c76213`), which is still what that header
 comment says. Scripts that only test `!= 0` keep working; scripts that treat `2` as "over budget"
 are now wrong.
 
@@ -209,4 +209,4 @@ confirmed behaviour of the queue. Do not record run outcomes, asset counts, or c
 run — those are facts about a moment, not about the system. If the pipeline's untested modules
 caused the finding, note that the signal was a user confirmation rather than a test, because
 `catalog.ts`, `cost.ts`, `generate.ts` and `queue.ts` still have no coverage — the declared open
-risk of loosening the guard (`docs/adr/0012-guard-de-orcamento-informativo.md:60@f2508118`).
+risk of loosening the guard (`docs/adr/0012-guard-de-orcamento-informativo.md:60@23c76213`).

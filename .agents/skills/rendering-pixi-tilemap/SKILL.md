@@ -41,21 +41,21 @@ the part of this surface that is already decided, and the part whose limits are 
 
 Three numbers are settled by ADR and are not open to inline reinterpretation: the tile diamond is
 **64×32 px**, one level of Z is **16 px**, and **Z is an integer** — stacked blocks per cell, with no
-half heights (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24-26@4229af26`). Changing any of them
+half heights (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24-26@e194895c`). Changing any of them
 later invalidates every project file already written and every tile already generated
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:16@4229af26`), so a tilemap that quietly assumes
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:16@e194895c`), so a tilemap that quietly assumes
 another diamond is not a style choice, it is a migration.
 
 Two consequences land directly on the renderer:
 
 - **The stage scale must be a whole number.** A 1.5× upscale destroys the seam of the 2:1 diamond,
   and no amount of edge extrusion repairs it
-  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`). That is a renderer setting rather
+  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@e194895c`). That is a renderer setting rather
   than a tilemap one — the sharpness rules live in `choosing-pixi-renderer`.
 - **Draw order is `x + y + z`, but the sort key is not.** Walls sit on a half cell — the north edge
   of cell `(x, y)` is at `(x, y-0.5)` — so the value that actually sorts is `2*(x+y+z)` plus an
   integer bias per edge, which keeps the whole comparison in integer arithmetic
-  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`). Doubling first is what buys the
+  (`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@e194895c`). Doubling first is what buys the
   half cell without floats.
 
 ### Two places where the sort key is provably wrong
@@ -72,7 +72,7 @@ comparator:
 
 The mitigation for the second one is a decision about the data model, not about rendering: **the
 project format forbids multi-cell sprites**, and anything larger is sliced at authoring time
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`). An editor can refuse the impossible
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@e194895c`). An editor can refuse the impossible
 combination at the moment it is authored; a shipped game inheriting arbitrary art could not. So when
 a task asks for a multi-cell sprite, the answer is the format, not a better sort.
 
@@ -136,10 +136,10 @@ whole world on without a fallback to ordinary containers of sprites.
 Two things are already decided and should not be re-litigated:
 
 - **Tiles get 2px extrusion, sprites 1px**, because tiles abut and sprites do not
-  (`tools/pixellab-pipeline/src/atlas.ts:39-40@e9504d6c`). Seams between tiles are a zoom problem, not
+  (`tools/pixellab-pipeline/src/atlas.ts:39-40@a8bede59`). Seams between tiles are a zoom problem, not
   an atlas problem.
 - **An atlas page is capped at 2048×2048 and multipack is not implemented** — over the limit, packing
-  throws (`tools/pixellab-pipeline/src/atlas.ts:235-240@e9504d6c`). Terrain that needs more than one
+  throws (`tools/pixellab-pipeline/src/atlas.ts:235-240@a8bede59`). Terrain that needs more than one
   page needs the multipack work done first, or a hand-split family.
 
 Undecided, and needing a measurement rather than an opinion: chunk size, how many chunks stay
@@ -154,7 +154,7 @@ a map is expected to stack, how many distinct terrain and wall textures one map 
 tile animates. A design chosen without them is a guess wearing a diagram.
 
 Nothing outside the editor defines the partition. There is no server and no zone sharding
-(`docs/adr/0010-pivo-para-editor-isometrico.md:27@4cdee5b3`), so chunk shape is the editor's own
+(`docs/adr/0010-pivo-para-editor-isometrico.md:27@2fd6d75f`), so chunk shape is the editor's own
 choice and has to be earned by a measurement instead of inherited from someone else's boundary.
 
 ### What is not verified

@@ -29,7 +29,7 @@ It enforces four format rules (`scripts/check-docs.sh:14-17@075079fb`): a single
 `README.md` and `tools/*/README.md`; `AGENTS.md` is left out on purpose, because it is an
 instruction file and not a document (`scripts/check-docs.sh:19-20@075079fb`).
 
-Those four are conventions 1, 2, 6 and 7 of the twelve listed in `AGENTS.md:55@7a66ff95`. The other
+Those four are conventions 1, 2, 6 and 7 of the twelve listed in `AGENTS.md:55@eb529ae5`. The other
 eight are the ones an agent silently breaks:
 
 - 3. absolute paths always, never relative
@@ -58,8 +58,8 @@ Beyond the format rules the checker runs three semantic passes, and any of them 
    `docs/00-produto/visao.md`, the document whose job *is* to name what the product is not; and
    `docs/README.md`, the index, which has to name the deleted ADRs. The match is case-insensitive
    and by substring, so a listed term inside a longer word still trips it — but only as written: the
-   old product *name* is on the list, while the folder name inside a mandatory absolute path is not,
-   so `/home/ondokai/Projects/power-abuse/...` passes and the same name spelled as prose does not.
+   old product *name* is on the list as prose, and since ADR 0017 the folder is named after the
+   current product too, so no mandatory absolute path can trip the check by accident.
 3. **Every relative markdown link must resolve** (`scripts/check-docs.sh:87-100@075079fb`), over the
    same set of files as the format rules. `docs/adr/` is exempt here too, for the same reason: an ADR
    still pointing at a file that has since been deleted is the record working, and repairing it
@@ -68,20 +68,20 @@ Beyond the format rules the checker runs three semantic passes, and any of them 
 ### Honesty is a hard rule, not a tone preference
 
 > "Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior
-> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:75@7a66ff95`
+> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:75@eb529ae5`
 
 The existing docs do this and the pattern is worth copying:
-`docs/01-pixellab/custos-e-limites.md:237@39059cac` closes with an explicit **Não verificado:** line
+`docs/01-pixellab/custos-e-limites.md:237@fe52f3d5` closes with an explicit **Não verificado:** line
 naming what is still unknown. Preserve those hedges when quoting; stripping a hedge is the most
 common way a correct document becomes a wrong one.
 
 ### No speculative documentation
 
-> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@7a66ff95`
+> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@eb529ae5`
 
 The index applies this literally. It lists only files that exist on disk
-(`docs/README.md:11@da30118b`), and a numbered folder with no file yet is declared **reserved**
-rather than promised (`docs/README.md:42@da30118b`). An earlier version of that index promised
+(`docs/README.md:11@62ab10c3`), and a numbered folder with no file yet is declared **reserved**
+rather than promised (`docs/README.md:42@62ab10c3`). An earlier version of that index promised
 dozens of entries it did not have, and the repair was to withdraw the promise, not to rush the
 writing. Never add a row for a file you have not written.
 
@@ -95,26 +95,26 @@ identifiers, code folder names and commit messages: **English**
 And a rule that overrides the machine-wide default:
 
 > "**Nunca assine `Co-authored-by Claude` automaticamente** — o usuário decide caso a caso."
-> — `AGENTS.md:18@7a66ff95`
+> — `AGENTS.md:18@eb529ae5`
 
 ### ADRs: the part that is irreversible
 
 An accepted ADR is **never edited**. A revised decision becomes a **new** ADR that supersedes the
-old one, and the old one stays exactly as written (`AGENTS.md:77@7a66ff95`). This is the guard: the
+old one, and the old one stays exactly as written (`AGENTS.md:77@eb529ae5`). This is the guard: the
 value of the record is that it shows what was believed at the time, and editing destroys precisely
 that.
 
 The supersession mechanism is one-directional, and that is the whole point:
 
 - the **new** ADR declares `**Substitui:** ADR NNNN` on a line immediately below its `**Status:**`
-  line — the shape to copy is `docs/adr/0014-pixijs-para-o-editor.md:12@a7f2aab7`;
+  line — the shape to copy is `docs/adr/0014-pixijs-para-o-editor.md:12@c4bf785c`;
 - the `Situação` column of the ADR table registers it for whoever reads the index, and that column
-  is the only place supersession is visible from outside the new file (`docs/README.md:61@da30118b`);
+  is the only place supersession is visible from outside the new file (`docs/README.md:61@62ab10c3`);
 - the **old file is never touched** — not its status line, not a note at the top, nothing.
 
 A deleted ADR is a different thing from a superseded one. When a decision's whole subject stopped
 existing, the file goes away and its row stays in the index, marked `apagada` with the reason
-(`docs/README.md:71@da30118b`) — so the number stays taken and the sequence never rewinds.
+(`docs/README.md:71@62ab10c3`) — so the number stays taken and the sequence never rewinds.
 
 Structure, from the thirteen that exist: `# ADR NNNN — <decision in one line>`, the Quick Start
 blockquote, a `**Status:** aceita · **Data:** YYYY-MM-DD` line, then `## Contexto`, `## Decisão`,
@@ -150,9 +150,9 @@ that cite them move in the same commit — never "delete now, repair later".
 1. Write or edit the file.
 2. If it is new, add its row to that section's table in `docs/README.md`. The doc tables carry
    `Arquivo` and `Descrição` only — there is no status column to hedge in
-   (`docs/README.md:17@da30118b`). If it is the first file of a folder still listed under **Pastas
+   (`docs/README.md:17@62ab10c3`). If it is the first file of a folder still listed under **Pastas
    reservadas**, move that folder out of the reserved table and give it a section
-   (`docs/README.md:44-49@da30118b`).
+   (`docs/README.md:44-49@62ab10c3`).
 3. If it is an ADR that revises another, add the `**Substitui:** ADR NNNN` line under the Status
    line and set the older row's `Situação` to `substituída por NNNN`. Do not open the older file.
 4. Update the `**Última atualização:**` line of every file touched.

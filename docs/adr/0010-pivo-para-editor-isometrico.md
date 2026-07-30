@@ -5,7 +5,7 @@
 > O produto passa a ser o **isometric-maker**: um editor de jogos isométricos local, de usuário único, em PixiJS 8 com arte gerada pela PixelLab. Servidor, multiplayer, netcode, permadeath e moderação saem do escopo. As ADRs 0003, 0004 e 0007 são apagadas; as 0001 e 0005 recebem sucessoras.
 >
 > ```bash
-> ls /home/ondokai/Projects/power-abuse/docs/adr/
+> ls /home/ondokai/Projects/isometric-maker/docs/adr/
 > ```
 
 **Status:** aceita · **Data:** 2026-07-30
@@ -26,7 +26,7 @@ O produto é o **isometric-maker**, um editor isométrico local de usuário úni
 
 **Fora do escopo, explicitamente:** servidor autoritativo, multiplayer, netcode, protocolo de rede, sharding de zona, anti-cheat, permadeath, full loot, economia entre jogadores, moderação e GMs. Não há jogadores — há um usuário, na própria máquina.
 
-Reintroduzir qualquer um desses itens exige ADR nova. A lista existe para que o MMORPG não volte a crescer por um parágrafo bem-intencionado, e `/home/ondokai/Projects/power-abuse/scripts/check-docs.sh` passa a falhar se um desses termos reaparecer em `docs/`.
+Reintroduzir qualquer um desses itens exige ADR nova. A lista existe para que o MMORPG não volte a crescer por um parágrafo bem-intencionado, e `/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh` passa a falhar se um desses termos reaparecer em `docs/`.
 
 ### O que é apagado
 
@@ -84,9 +84,9 @@ O mecanismo é **unidirecional de propósito**: o arquivo novo ganha um campo, o
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/docs/README.md` — o índice, e a regra de supersessão que esta ADR altera
-- `/home/ondokai/Projects/power-abuse/docs/00-produto/visao.md` — o escopo do produto e o que ele não é
-- `/home/ondokai/Projects/power-abuse/.agents/skills/scripts/lib.mjs` — a diferença entre citação com erro e citação obsoleta
+- `/home/ondokai/Projects/isometric-maker/docs/README.md` — o índice, e a regra de supersessão que esta ADR altera
+- `/home/ondokai/Projects/isometric-maker/docs/00-produto/visao.md` — o escopo do produto e o que ele não é
+- `/home/ondokai/Projects/isometric-maker/.agents/skills/scripts/lib.mjs` — a diferença entre citação com erro e citação obsoleta
 
 **Não verificado:** o significado exato do campo `isometric` nos endpoints de personagem — ver ADR 0015. A decisão de pivô não depende dele, mas o custo da primeira geração sim.
 

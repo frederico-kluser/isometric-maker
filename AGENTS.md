@@ -24,7 +24,7 @@ A API do PixelLab **muda sem versionar** — o `info.version` do spec é literal
 A fonte da verdade neste repositório é o spec vendorizado:
 
 ```
-/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json
+/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json
 (+ PROVENIENCIA.txt com data de captura e sha256)
 ```
 
@@ -106,9 +106,9 @@ A skill `enforcing-server-authority` foi **retirada com o pivô e não tem suces
 
 ## Nome do repositório e caminhos
 
-O repositório no GitHub se chama **`isometric-maker`**. A pasta local continua **`/home/ondokai/Projects/power-abuse/`**, e todo caminho absoluto em documentação, skill ou comentário aponta para ela.
+Repositório, pasta local e escopo npm são o mesmo nome: **`isometric-maker`**. Todo caminho absoluto aponta para `/home/ondokai/Projects/isometric-maker/`, e os pacotes são `@isometric-maker/*`.
 
-**Isso não é inconsistência a corrigir.** Quatro worktrees ativas dependem do nome da pasta, e o skip de `scripts/check-docs.sh` casa o prefixo `/home/` literalmente. Uma varredura trocando `power-abuse` por `isometric-maker` nos caminhos quebra, de uma vez, o caminho do spec vendorizado, os comandos das ferramentas e o verificador do vendor do PixiJS. Ver [ADR 0011](docs/adr/0011-repo-isometric-maker-pasta-power-abuse.md).
+A [ADR 0011](docs/adr/0011-repo-isometric-maker-pasta-power-abuse.md) tinha mantido a pasta com o nome antigo para não quebrar worktrees; a [ADR 0017](docs/adr/0017-nome-unico-isometric-maker.md) reverteu isso e purgou o nome anterior. O nome `power-abuse` só sobrevive no **arquivo** da 0011, que nomeia a decisão desfeita — e deve continuar lá.
 
 ## Referências
 

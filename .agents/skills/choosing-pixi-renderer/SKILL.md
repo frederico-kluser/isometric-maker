@@ -21,8 +21,8 @@ For the backend machinery itself read
 ### The backend choice is about booting at all, not about speed
 
 This is a local, single-user tool: the user starts it themselves and everything runs on their own
-machine (`docs/00-produto/visao.md:15@41a4855a`). The editor is a local process and what it produces
-is a file on disk (`docs/00-produto/visao.md:21@41a4855a`).
+machine (`docs/00-produto/visao.md:15@613eaec7`). The editor is a local process and what it produces
+is a file on disk (`docs/00-produto/visao.md:21@613eaec7`).
 
 So there is no audience to reach — there is one browser, on one machine, and no telemetry and no
 second user to route around it. That does not make the backend choice free; it inverts it. A backend
@@ -31,7 +31,7 @@ open**, and the person it fails for is the only person there is.
 
 Pixi 8 **requires WebGL2 or WebGPU** for its accelerated paths — there is no WebGL1 renderer, which
 is why the atlas packer can use tight non-power-of-two sizing at all
-(`tools/pixellab-pipeline/src/atlas.ts:202-204@e9504d6c`).
+(`tools/pixellab-pipeline/src/atlas.ts:202-204@a8bede59`).
 
 The selection option is `RendererPreference`, and its value set is wider than most recollections of
 it: `"webgl" | "webgpu" | "canvas"`
@@ -63,7 +63,7 @@ TextureSource.defaultOptions.autoGenerateMipmaps = false;
 ```
 
 Then, defensively, on the sheet itself, because anything loaded before that assignment kept the old
-default (`tools/pixellab-pipeline/src/atlas.ts:329-341@e9504d6c`):
+default (`tools/pixellab-pipeline/src/atlas.ts:329-341@a8bede59`):
 
 ```ts
 sheet.textureSource.style.scaleMode = 'nearest';
@@ -76,13 +76,13 @@ because it exists at more than one level and setting the wrong one silently does
 **A one-pixel seam between tiles** — sampling exactly at a cell edge reads the neighbouring cell. The
 pipeline already extrudes the border ring outward, 1px for sprites and 2px for tiles, precisely so
 the out-of-bounds read returns the correct colour
-(`tools/pixellab-pipeline/src/atlas.ts:117-122@e9504d6c`). If a seam still appears, the cause is
+(`tools/pixellab-pipeline/src/atlas.ts:117-122@a8bede59`). If a seam still appears, the cause is
 almost always a non-integer zoom, not the atlas.
 
 ### One integer upscale, and only one
 
 The pipeline does three things for pixel-perfect output; whatever draws the result must do two, and
-the second is the one most easily lost (`tools/pixellab-pipeline/src/atlas.ts:11-16@e9504d6c`):
+the second is the one most easily lost (`tools/pixellab-pipeline/src/atlas.ts:11-16@a8bede59`):
 
 > render at logical resolution, then **ONE** integer nearest upscale
 
@@ -93,7 +93,7 @@ every artefact the pipeline spent effort removing.
 
 The geometry raised the stakes on this. The tile is a 64×32 diamond and one level of Z is 16 px, and
 a non-integer upscale destroys the seam of that 2:1 diamond — **no amount of edge extrusion repairs
-it** (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`). The recorded consequence is
+it** (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@e194895c`). The recorded consequence is
 `resolution: 1`, `autoDensity: false`, and one whole-number factor on the stage. So the editor's
 zoom control is not a continuous slider: it steps through integers. Offering 1.5× is offering a
 broken picture, and it will be reported as a tileset bug.
@@ -106,7 +106,7 @@ pixels to blur.
 Pixi 8 premultiplies on upload and that is correct. The dark halo people blame on it comes from
 *filtering* between an opaque pixel and a transparent black one; with nearest sampling, extrusion and
 integer transforms there is no interpolation and it cannot occur
-(`tools/pixellab-pipeline/src/atlas.ts:17-23@e9504d6c`). Disabling it to chase a halo treats the
+(`tools/pixellab-pipeline/src/atlas.ts:17-23@a8bede59`). Disabling it to chase a halo treats the
 symptom and breaks blending everywhere else.
 
 ### Device pixel ratio is a budget decision
@@ -120,7 +120,7 @@ attached.
 ### What is not verified
 
 - Which backend the machine this runs on actually reports. Nothing here has ever rendered a frame
-  (`docs/00-produto/visao.md:58@41a4855a`), and there is no telemetry and nobody to collect it from.
+  (`docs/00-produto/visao.md:58@613eaec7`), and there is no telemetry and nobody to collect it from.
 - Whether WebGPU on this art style measurably beats WebGL2 here. Untested, and the honest default is
   to prefer WebGPU with a WebGL2 fallback and revisit with numbers.
 - Which integer factors a real editing session actually wants. That the factor must be an integer is

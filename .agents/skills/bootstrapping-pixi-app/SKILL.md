@@ -46,7 +46,7 @@ Consequence: **never conclude an option does not exist by reading the interface.
 
 The map is a 2:1 diamond, and that makes three renderer options a boot decision rather than a later
 tuning knob: `resolution: 1`, `autoDensity: false`, and a single **integer** scale factor applied on
-the stage (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`).
+the stage (`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@e194895c`).
 
 The reason is the seam. A 1,5× upscale lands diamond edges on half-pixels, the tiles stop meeting,
 and no amount of edge extrusion repairs it — the geometry is wrong before sampling ever happens.
@@ -72,7 +72,7 @@ belong to `choosing-pixi-renderer`.
 ### The loop draws. It does not decide.
 
 There is no server and no authoritative tick to defer to
-(`AGENTS.md:51@7a66ff95`). The rule survives anyway, with a different owner: in an editor the
+(`AGENTS.md:51@eb529ae5`). The rule survives anyway, with a different owner: in an editor the
 document changes because the user issued a command, and for no other reason. **A frame is not an
 edit.** Nothing in the saved document advances on its own — no physics, no clock, no elapsed-time
 integration writing back into the project. Preview playback does run on its own fixed step, but
@@ -147,7 +147,7 @@ page is going away; closing a project should reach step 3 and stop.
 ### Resize is a correctness problem here, not a cosmetic one
 
 Pixel art demands rendering at logical resolution and then exactly one integer nearest upscale
-(`tools/pixellab-pipeline/src/atlas.ts:15-16@e9504d6c`). A resize handler that scales the renderer to
+(`tools/pixellab-pipeline/src/atlas.ts:15-16@a8bede59`). A resize handler that scales the renderer to
 an arbitrary window size breaks that upscale and the diamond seam goes with it. Snap to integer scale
 factors and letterbox the remainder; the leftover pixels are the price of the guarantee, and they are
 cheap. The details are in `choosing-pixi-renderer`.
@@ -156,11 +156,11 @@ cheap. The details are in `choosing-pixi-renderer`.
 
 There is no editor in this repository. The API shape above is checked against the vendored 8.19.0
 declarations and the constraints come from accepted ADRs, but no boot sequence here has ever run and
-no frame has ever been rendered (`docs/adr/0014-pixijs-para-o-editor.md:57@a7f2aab7`). Treat every
+no frame has ever been rendered (`docs/adr/0014-pixijs-para-o-editor.md:57@c4bf785c`). Treat every
 performance statement as a hypothesis until the first window exists.
 
 **The command model is anticipated, not decided.** An ADR states that undo/redo is a piece this
-project writes itself (`docs/adr/0014-pixijs-para-o-editor.md:46@a7f2aab7`); no ADR says mutations
+project writes itself (`docs/adr/0014-pixijs-para-o-editor.md:46@c4bf785c`); no ADR says mutations
 are commands. "Every document mutation is a command" above is engineering consequence, not a recorded
 decision — if it is ever made formally, it should be made in an ADR and cited from here.
 

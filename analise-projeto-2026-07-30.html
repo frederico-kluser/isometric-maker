@@ -60,7 +60,7 @@
     </p>
     <div class="d-flex flex-wrap gap-2">
       <span class="badge text-bg-secondary">5 ondas</span>
-      <span class="badge text-bg-secondary">7 ADRs novas</span>
+      <span class="badge text-bg-secondary">8 ADRs novas</span>
       <span class="badge text-bg-secondary">6 apagados &middot; 1 movido</span>
       <span class="badge text-bg-secondary">29 skills</span>
       <span class="badge text-bg-success">0 gasto neste replanejamento</span>
@@ -229,7 +229,7 @@
             <div class="accordion-body">
               <p><strong>Critério de entrada da W1.</strong> Cada item está aqui porque fazê-lo depois custa dinheiro real ou quebra identidade de cache.</p>
               <ul>
-                <li><strong>Rename.</strong> <code>@power-abuse/*</code> → <code>@isometric-maker/*</code>; <code>tools/sprite-studio</code> → <code>tools/character-builder</code>. E o <code>ATLAS_OUT</code> em <code>cli.ts:28</code>, que hoje aponta para <code>packages/game-assets/atlas</code> — um diretório que <strong>não existe</strong>.</li>
+                <li><strong>Rename.</strong> <code>@isometric-maker/*</code> → <code>@isometric-maker/*</code>; <code>tools/sprite-studio</code> → <code>tools/character-builder</code>. E o <code>ATLAS_OUT</code> em <code>cli.ts:28</code>, que hoje aponta para <code>packages/game-assets/atlas</code> — um diretório que <strong>não existe</strong>.</li>
                 <li><strong>Guard informativo.</strong> <code>GuardVerdict</code> perde a variante <code>refuse</code>. Vira um relatório com <code>requiresConfirmation: true</code> como <strong>tipo literal</strong>, que é o que faz o compilador impedir alguém de criar um caminho "gera sem perguntar".</li>
                 <li><strong>Os testes que não existem.</strong> <code>catalog</code>, <code>cost</code>, <code>queue</code>, <code>generate</code>. O teste de manchete: plano → generate simulado contra cliente falso que conta submits → plano de novo → <strong><code>submits === 0</code></strong>.</li>
                 <li><strong>As três mentiras pequenas.</strong> <code>schema.d.ts</code> gerado e importado por ninguém; <code>zod</code> declarado e nunca importado; <code>refresh-openapi</code> apontando para script inexistente. Cada uma vira decisão, não pendência.</li>
@@ -425,7 +425,7 @@ grep -rn "character-builder/src" tools/runtime/src | wc -l    # tem que dar 0</c
 
 <pre><code class="language-bash">export PIXELLAB_SECRET="..."          # não existe .env carregado automaticamente
 export PIXELLAB_TIER="t1"
-cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 node src/cli.ts doctor                # confere node, spec vendorizado, proveniência, catálogo
 node src/cli.ts plan                  # nunca gasta</code></pre>
 
@@ -522,8 +522,12 @@ node src/cli.ts plan                  # nunca gasta</code></pre>
           <div class="small text-body-secondary">Define o escopo removido, apaga as ADRs 0003/0004/0007 e registra que a regra de nunca apagar ADR foi revogada <strong>para esses três arquivos e apenas para eles</strong>. Define o mecanismo de supersessão que as outras seis usam.</div>
         </div>
         <div class="list-group-item">
-          <div class="fw-semibold">0011 — Repositório <code>isometric-maker</code>, pasta local <code>power-abuse</code></div>
-          <div class="small text-body-secondary">O GitHub muda de nome; a pasta não. Quatro worktrees dependem dela e o <code>check-docs.sh</code> casa o prefixo <code>/home/</code> literalmente. <strong>Um agente futuro não deve "consertar" isso.</strong></div>
+          <div class="fw-semibold">0011 — Repositório <code>isometric-maker</code>, pasta local com o nome antigo <span class="badge text-bg-secondary">substituída por 0017</span></div>
+          <div class="small text-body-secondary">O GitHub mudava de nome; a pasta não, porque quatro worktrees dependiam dela. Durou algumas horas — ver 0017.</div>
+        </div>
+        <div class="list-group-item">
+          <div class="fw-semibold">0017 — Um nome só: <code>isometric-maker</code> no repositório, na pasta e nos pacotes</div>
+          <div class="small text-body-secondary">Purga o nome anterior de todos os caminhos e escopos, <strong>inclusive dentro das ADRs congeladas</strong>, com o precedente escrito: caminho de sistema de arquivos não é decisão. <strong>Substitui:</strong> ADR 0011.</div>
         </div>
         <div class="list-group-item">
           <div class="fw-semibold">0012 — O guard informa e nunca recusa</div>
@@ -681,15 +685,20 @@ node src/cli.ts plan                  # nunca gasta</code></pre>
       </div>
 
       <div class="card mb-3">
-        <div class="card-header"><span class="badge text-bg-secondary me-2">7</span><strong>A tensão do nome, que é permanente</strong></div>
+        <div class="card-header"><span class="badge text-bg-secondary me-2">7</span><strong>A tensão do nome durou algumas horas</strong></div>
         <div class="card-body">
+          <p>
+            A ADR 0011 tinha mantido a pasta local com o nome antigo enquanto o repositório já era
+            <code>isometric-maker</code>, porque quatro worktrees dependiam dela. A <strong>ADR 0017
+            reverteu isso</strong>: repositório, pasta e escopo npm passaram a ser o mesmo nome, e o
+            nome anterior foi purgado — 89 linhas em 31 arquivos.
+          </p>
           <p class="mb-0">
-            O repositório é <code>isometric-maker</code>, a pasta é <code>power-abuse</code>, e todo
-            caminho absoluto diz <code>power-abuse</code>. <strong>Isso está correto.</strong> Uma
-            varredura de consistência trocando um pelo outro quebra, de uma vez, o caminho do spec
-            vendorizado, os comandos das duas ferramentas, o verificador do vendor do PixiJS e a regra de
-            skip do <code>check-docs.sh</code>. Está escrito em três lugares — ADR 0011,
-            <code>AGENTS.md</code> e o documento de visão — e a redundância é deliberada.
+            Duas consequências que valem registro. O nome antigo <strong>sobrevive de propósito no
+            arquivo</strong> da ADR 0011, que nomeia a decisão desfeita. E a purga alcançou as ADRs
+            congeladas, o que exigiu um precedente escrito e estreito: <em>migração mecânica de caminho
+            é permitida em arquivo congelado; edição de conteúdo de decisão não é</em> — porque a regra
+            protege a decisão, e um endereço que aponta para o nada não preserva registro nenhum.
           </p>
         </div>
       </div>

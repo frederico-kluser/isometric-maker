@@ -36,13 +36,13 @@ what is true of one family. Load this one first, then the family.
 ### The rule, and why it is unusually strict
 
 > "A API do PixelLab **muda sem versionar** — o `info.version` do spec é literalmente `"dev"`."
-> — `AGENTS.md:22@7a66ff95`
+> — `AGENTS.md:22@eb529ae5`
 
 The vendored snapshot is the source of truth, not your memory and not any blog:
 `tools/pixellab-pipeline/openapi/openapi-v2.json`, captured 2026-07-29, sha256 `5b11c9a7afa1…`
 (`tools/pixellab-pipeline/openapi/PROVENIENCIA.txt:1@86625fb2`). There is a real, documented case of
 a guide in this same machine going stale and being wrong by an order of magnitude on price
-(`docs/01-pixellab/delta-vs-guia-antigo.md:16@bc48ce53`).
+(`docs/01-pixellab/delta-vs-guia-antigo.md:16@11e43044`).
 
 ### One command instead of a 387 KB file
 
@@ -144,10 +144,10 @@ never against the requested value, or the atlas cuts the sprites' heads off.
 ### Prices are always estimates
 
 Write "preço estimado", never a flat price. PixelLab labels its own column `Estimated Price* (USD)`
-with the note that it varies with GPU time (`AGENTS.md:33@7a66ff95`). One conflict is still
+with the note that it varies with GPU time (`AGENTS.md:33@eb529ae5`). One conflict is still
 unresolved and must stay marked as such: the spec's formula and the published table disagree on
 `/create-character-v3` at 64×64 (1 vs 2 generations); the repo's rule is to use the larger
-(`docs/01-pixellab/custos-e-limites.md:59@39059cac`).
+(`docs/01-pixellab/custos-e-limites.md:59@fe52f3d5`).
 
 ### The vendor's public pages are not a substitute for the spec
 
@@ -163,7 +163,7 @@ Checked directly, and each is a trap in its own way:
   (`create_character`, `animate_character`, `create_tileset`, `create_isometric_tile`). It does not
   document async handling, image return format or cost, and it cannot express the parameters this
   project depends on. It is not an alternative to the generated REST client of
-  `docs/adr/0002-cliente-rest-gerado-do-openapi.md:1@fbd2951e`.
+  `docs/adr/0002-cliente-rest-gerado-do-openapi.md:1@249ac399`.
 
 - **`GET /llms.txt`** is the API's own machine-readable index — the grouped endpoint listing an
   agent is most likely to be handed. It is an **index, not a reference**: it names the 79 paths and
@@ -184,9 +184,9 @@ bash scripts/check-docs.sh                                  # docs may now cite 
 ```
 
 Two caveats, both currently true. `npm run refresh-openapi` points at a script that does not exist
-(`tools/pixellab-pipeline/package.json:13@395c57f1`). And `npm run codegen` emits
+(`tools/pixellab-pipeline/package.json:13@4db3c05c`). And `npm run codegen` emits
 `openapi/schema.d.ts`, which **nothing imports** — so the "schema drift becomes a compile error"
-promise in `docs/adr/0002-cliente-rest-gerado-do-openapi.md:30@fbd2951e` does not currently hold.
+promise in `docs/adr/0002-cliente-rest-gerado-do-openapi.md:30@249ac399` does not currently hold.
 Treat `node $S summary` plus this skill's verification signal as the real drift detector.
 
 ## References

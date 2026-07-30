@@ -20,7 +20,7 @@ or cannot do. Before estimating whether something will hold its frame rate.
 ## The rule that comes before any routing
 
 **Never write the PixiJS API from memory.** This is the same rule the repo already applies to the
-PixelLab API (`AGENTS.md:22@7a66ff95`), and PixiJS earns it for a different and nastier reason.
+PixelLab API (`AGENTS.md:22@eb529ae5`), and PixiJS earns it for a different and nastier reason.
 
 v8 did not extend v7, it replaced parts of it — and then **kept the v7 methods as deprecated shims**.
 There are 97 deprecated declarations in the vendored surface. `Graphics.beginFill` is still declared,
@@ -133,7 +133,7 @@ than printing a short list as if it were complete; `prop` is the way around it.
 This skill and its ten siblings do not restate the PixiJS API. Upstream publishes 26 skills and 38
 reference documents describing it, versioned with the library and MIT-licensed, and copying them here
 would fork a document that upstream keeps current and we would not
-(`tools/pixi-reference/README.md:22@ffdb0f16`). When neither the vendored skills nor the declaration
+(`tools/pixi-reference/README.md:22@2718f200`). When neither the vendored skills nor the declaration
 file answer a question, upstream's own fallback applies: fetch
 `https://pixijs.download/release/docs/llms.txt`, the index regenerated on every release.
 

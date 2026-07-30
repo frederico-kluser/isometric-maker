@@ -59,6 +59,6 @@ Internacionalizar depois é escrever `en.ts` com o mesmo tipo e trocar o módulo
 
 - [`ADR 0008`](0008-idioma-docs-ptbr-codigo-en.md) — o eixo de idioma que esta ADR aplica ao editor
 - [`ADR 0010`](0010-pivo-para-editor-isometrico.md) — a troca de leitor, de jogador para usuário de ferramenta
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/tsconfig.json` — `noUncheckedIndexedAccess`, que é o motivo de o acesso ser por propriedade
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/tsconfig.json` — `noUncheckedIndexedAccess`, que é o motivo de o acesso ser por propriedade
 
 **Última atualização:** 2026-07-30

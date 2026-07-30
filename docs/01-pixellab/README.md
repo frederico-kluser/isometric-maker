@@ -6,7 +6,7 @@
 >
 > ```bash
 > export PIXELLAB_SECRET="seu-token"   # https://pixellab.ai/account
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 > node src/cli.ts balance
 > ```
 
@@ -60,7 +60,7 @@ Porque a documentação pública sobre PixelLab é sistematicamente errada em tr
 
 ## Referências
 
-- [`https://api.pixellab.ai/v2/openapi.json`](https://api.pixellab.ai/v2/openapi.json) — fonte da verdade, vendorizada em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/` (capturada 2026-07-29, sha256 em `PROVENIENCIA.txt`)
+- [`https://api.pixellab.ai/v2/openapi.json`](https://api.pixellab.ai/v2/openapi.json) — fonte da verdade, vendorizada em `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/` (capturada 2026-07-29, sha256 em `PROVENIENCIA.txt`)
 - [`https://api.pixellab.ai/v2/llms.txt`](https://api.pixellab.ai/v2/llms.txt) — índice legível por máquina
 - [`https://api.pixellab.ai/v2/redoc`](https://api.pixellab.ai/v2/redoc) — referência navegável
 - [`https://api.pixellab.ai/mcp/docs`](https://api.pixellab.ai/mcp/docs) — docs do MCP, onde estão as latências e as bandas de `generations`

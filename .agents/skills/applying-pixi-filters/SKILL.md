@@ -49,10 +49,10 @@ batched per-sprite properties than as shaders:
 - **Highlight of the cell under the cursor** → one sprite — a diamond the size of a tile — moved to
   the picked cell, or a tint on the tile already there. Both stay in the batch. Finding the cell is
   arithmetic, not a shader problem: picking is walking the `(+1,+1,+1)` diagonal from the top down
-  until the first solid block (`docs/adr/0013-geometria-isometrica-64x32-z16.md:39@4229af26`).
+  until the first solid block (`docs/adr/0013-geometria-isometrica-64x32-z16.md:39@e194895c`).
 - **Ground shadow** → a sprite. A blurred ellipse costs nothing as art and a lot as a blur pass.
 - **Recolouring a region of a wardrobe piece** → tint, or a recoloured mask region the way the
-  wardrobe research describes (`docs/02-personagem/guarda-roupa-e-silhueta.md:49-53@54f21fed`).
+  wardrobe research describes (`docs/02-personagem/guarda-roupa-e-silhueta.md:49-53@be1e5781`).
 
 Reach for a filter when the effect genuinely needs neighbouring pixels — blur, displacement, a real
 colour grade over the whole screen. Those are the cases a shader is actually for.
@@ -68,7 +68,7 @@ per thumbnail.
 
 This is the editor's version of the decision worth writing down rather than improvising, because the
 cheap version and the ruinous one are the same feature to the user. Z is integer and discrete in this
-project (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24@4229af26`), so "the levels above" is a
+project (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24@e194895c`), so "the levels above" is a
 set of whole levels rather than a continuous height field — which is what makes the cheap version
 available at all. Applied once per level it is a handful of operations; applied as a filter or mask
 per tile it is thousands of detours.

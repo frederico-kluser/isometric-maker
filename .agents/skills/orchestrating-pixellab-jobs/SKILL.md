@@ -34,7 +34,7 @@ Branch on the **shape of the body** — is there a `background_job_id`? — neve
 Two endpoints, `/create-tileset` and `/create-isometric-tile`, declare both `200` and `202` and may
 genuinely answer either way, which makes a code-based branch wrong even in principle.
 
-This distinction is not academic: `docs/01-pixellab/modelo-assincrono.md:5@7e9b1831` states the 23
+This distinction is not academic: `docs/01-pixellab/modelo-assincrono.md:5@9335c20d` states the 23
 figure, which is correct about `202` and undercounts the asynchronous surface by 13. The repo's own
 hand-written endpoint table gets it right (`tools/pixellab-pipeline/src/endpoints.ts:95@b6e61f99`
 marks `create-character-with-8-directions` async despite its 200).

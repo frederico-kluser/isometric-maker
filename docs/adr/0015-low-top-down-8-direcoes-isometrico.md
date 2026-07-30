@@ -5,8 +5,8 @@
 > `view: "low top-down"` e 8 direções na ordem canônica `S, SW, W, NW, N, NE, E, SE` continuam — justificadas agora por navegação nos eixos isométricos, não por leitura de equipamento em PvP. E uma consequência nova e forçada: o construtor usa `/create-character-with-8-directions`, porque é o **único** endpoint de personagem que tem o campo `isometric` **e** o mapa `directions`.
 >
 > ```bash
-> node /home/ondokai/Projects/power-abuse/.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs \
->   /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json --list
+> node /home/ondokai/Projects/isometric-maker/.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs \
+>   /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json --list
 > ```
 
 **Status:** aceita · **Data:** 2026-07-30
@@ -62,8 +62,8 @@ Três ordenações convivem no mesmo spec. O schema compartilhado `Direction` co
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — `CreateCharacterWith8DirectionsRequest`, `CreateCharacterV3Request`, `CreateCharacterProRequest`, `CameraView`, `TilesetCameraView`, `Direction`
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/endpoints.ts` — `DIRECTIONS_8`, a ordem canônica deste repositório
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json` — `CreateCharacterWith8DirectionsRequest`, `CreateCharacterV3Request`, `CreateCharacterProRequest`, `CameraView`, `TilesetCameraView`, `Direction`
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/src/endpoints.ts` — `DIRECTIONS_8`, a ordem canônica deste repositório
 - [`ADR 0005`](0005-low-top-down-8-direcoes.md) — a decisão que esta substitui
 - [`ADR 0013`](0013-geometria-isometrica-64x32-z16.md) — a geometria em que estes personagens se assentam
 

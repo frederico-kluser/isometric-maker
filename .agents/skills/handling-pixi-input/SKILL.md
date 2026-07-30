@@ -23,14 +23,14 @@ For the event system itself read `tools/pixi-reference/vendor/skills/pixijs-even
 This project is a local, single-user editor. There is nothing to ask permission from:
 
 > "Sem servidor autoritativo, sem multiplayer, sem netcode, sem protocolo de rede, sem sharding."
-> — `AGENTS.md:51@7a66ff95`
+> — `AGENTS.md:51@eb529ae5`
 
 So a click on a cell **selects that cell**, a drag **paints**, a keypress **deletes**. The effect
 lands on the open document, in this frame, with no round trip and nothing to confirm it.
 
 What protects the user is therefore not authority — it is history. The undo/redo stack is ours to
 write, and it was accepted as ours deliberately
-(`docs/adr/0014-pixijs-para-o-editor.md:46@a7f2aab7`). Two rules follow, and they are the whole
+(`docs/adr/0014-pixijs-para-o-editor.md:46@c4bf785c`). Two rules follow, and they are the whole
 reason this section exists:
 
 1. **An input handler must not mutate the document.** It builds a command and hands it to the
@@ -75,7 +75,7 @@ fixed geometry already answers the question exactly.
 > "o raio da câmera em espaço de grid é exatamente a diagonal `(+1,+1,+1)`. Selecionar o que está
 > sob o cursor é caminhar essa diagonal do topo para baixo até achar o primeiro bloco sólido. Sem
 > raycast, sem heurística."
-> — `docs/adr/0013-geometria-isometrica-64x32-z16.md:39@4229af26`
+> — `docs/adr/0013-geometria-isometrica-64x32-z16.md:39@e194895c`
 
 So the whole map gets **one** hit shape, on the world container, and the pointer is converted to
 grid coordinates by hand:
@@ -84,14 +84,14 @@ grid coordinates by hand:
    divides the stage scale out — do not divide by the scale factor again afterwards.
 2. Invert the projection at the level you are testing:
    `a = sx/32`, `b = (sy + z*16)/16`, `x = (b+a)/2`, `y = (b-a)/2`
-   (`docs/adr/0013-geometria-isometrica-64x32-z16.md:9@4229af26`).
+   (`docs/adr/0013-geometria-isometrica-64x32-z16.md:9@e194895c`).
 3. Walk the diagonal `(+1,+1,+1)` downward from the highest occupied level and stop at the first
    solid block. Each level down is exactly `+1` in x and `+1` in y, so the walk is addition — step 2
    is paid once, not once per level.
 
 That arithmetic assumes 32 and 16 are whole screen pixels, which holds because the stage scale is a
 single integer factor: a 1,5× upscale destroys the 2:1 diamond seam
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`). The ADR states the seam, not the
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@e194895c`). The ADR states the seam, not the
 picking consequence — that the pick would land off-centre inside the diamond under a fractional
 factor is derived here.
 
@@ -111,12 +111,12 @@ because it teaches the user to distrust the cursor and click twice.
 Characters and props do stay individually interactive, and for them the rule is an explicit hit
 shape rather than rendered bounds. A sprite's texture bounds include transparent margin, and the
 atlas packer anchors at the feet — its default is `{ x: 0.5, y: 0.875 }`
-(`tools/pixellab-pipeline/src/atlas.ts:216@e9504d6c`) — so the margin sits mostly above the head and
+(`tools/pixellab-pipeline/src/atlas.ts:216@a8bede59`) — so the margin sits mostly above the head and
 bounds-based hits are generous in exactly the wrong direction.
 
 That default is also already known to be wrong: with a Z level worth 16 px it misses by roughly
 11 px on an inflated canvas, and the anchor becomes a measured value
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:42@4229af26`). Input code must read the anchor
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:42@e194895c`). Input code must read the anchor
 from the atlas data instead of assuming the constant, or the click target drifts by most of a level
 the day the packer starts measuring.
 
@@ -150,12 +150,12 @@ that outlives the document it was bound to applies a delete to the wrong project
 
 Any label, tooltip or status text that input code produces is Brazilian Portuguese and comes from
 the centralised string table, never from a literal at the call site
-(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:28@6018ff3d`).
+(`docs/adr/0016-ui-ptbr-strings-centralizadas.md:28@6de9bec2`).
 
 ### What is not verified
 
 - No input code exists in this repository, and nothing here has ever rendered a frame
-  (`docs/00-produto/visao.md:58@41a4855a`).
+  (`docs/00-produto/visao.md:58@613eaec7`).
 - The command/undo format does not exist yet. The rules above constrain it; they do not describe it.
 - Three rules here are this skill's prescriptions, recorded in no ADR: one gesture equals one undo
   entry, the hover highlight reusing the click's walk, and the empty-space pick falling back to the

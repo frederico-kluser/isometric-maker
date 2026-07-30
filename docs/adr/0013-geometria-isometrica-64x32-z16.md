@@ -44,7 +44,7 @@ Cada célula `(x, y)` tem uma pilha de blocos indexada por `z`. Não existe meia
 
 ## Referências
 
-- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — `CreateTilesProRequest` (`tile_type`, `tile_size`, `tile_height`, `tile_flat_top_px`, `tile_depth_ratio`) e `CreateIsometricTileRequest` (`isometric_tile_size`, `isometric_tile_shape`)
+- `/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json` — `CreateTilesProRequest` (`tile_type`, `tile_size`, `tile_height`, `tile_flat_top_px`, `tile_depth_ratio`) e `CreateIsometricTileRequest` (`isometric_tile_size`, `isometric_tile_shape`)
 - [`ADR 0015`](0015-low-top-down-8-direcoes-isometrico.md) — a perspectiva dos personagens que se assentam neste chão
 
 **Não verificado:** se `/create-tiles-pro` com `tile_size: 64` e `tile_height: 48` devolve de fato uma face superior de exatamente 64×32 com saia de 16 px, ou se a proporção precisa ser calibrada por `tile_depth_ratio`. Isso só se responde gerando. Também não verificado: o custo desse endpoint, que não tem ponto medido em lugar nenhum.

@@ -7,7 +7,7 @@ Um **construtor de jogos isométricos**: monta o personagem a partir de uma imag
 > A ferramenta de arte já funciona; o editor ainda não existe. Comece pelo pipeline, que planeja custo sem gastar nada.
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
 > npm install
 > export PIXELLAB_SECRET="seu-token"   # https://pixellab.ai/account
 > node src/cli.ts doctor               # confere ambiente e spec vendorizado
@@ -69,7 +69,7 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 - **Código, identificadores, nomes de arquivo de código e mensagens de commit: inglês.**
 - Todo documento abre com um Quick Start (TL;DR) em blockquote e fecha com `## Referências`.
 - Fatos sobre APIs externas são checados contra fonte primária e **datados**. Nada de memória.
-- O repositório se chama `isometric-maker`; **a pasta local continua `power-abuse`**, e isso é decisão ([ADR 0011](docs/adr/0011-repo-isometric-maker-pasta-power-abuse.md)), não descuido.
+- Repositório, pasta local e escopo npm são o mesmo nome: `isometric-maker` ([ADR 0017](docs/adr/0017-nome-unico-isometric-maker.md)).
 
 ## Referências
 

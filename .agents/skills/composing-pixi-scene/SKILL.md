@@ -23,7 +23,7 @@ documents, and `pixijs-scene-container`.
 
 PixiJS is only a renderer: scene, tilemap, collision, camera and UI are all ours — and for this
 product that is the requirement rather than a cost reluctantly accepted, because those four things
-*are* the editor (`docs/adr/0014-pixijs-para-o-editor.md:30@a7f2aab7`). There is no camera object; a
+*are* the editor (`docs/adr/0014-pixijs-para-o-editor.md:30@c4bf785c`). There is no camera object; a
 camera is a `Container` whose transform is the inverse of where you want to look.
 
 The split that keeps this manageable:
@@ -43,22 +43,22 @@ provides local/global conversion in both directions — check the exact names wi
 shimmering that `choosing-pixi-renderer` exists to prevent, it does so for every sprite at once —
 which makes it look like an art problem rather than a transform problem — and on a 2:1 diamond it
 also splits the tile seam, which no amount of edge extrusion repairs
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@4229af26`).
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:38@e194895c`).
 
 ### Depth is `x + y + z`, and walls sit on a half cell
 
 The geometry is fixed: a 64×32 diamond, one level of Z worth 16 px, and **Z is an integer** — stacked
-blocks per cell, no half heights (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24@4229af26`).
+blocks per cell, no half heights (`docs/adr/0013-geometria-isometrica-64x32-z16.md:24@e194895c`).
 Draw order therefore comes from the **grid**, not from the screen: the ordering is `x + y + z`.
 
 Walls are not cell contents, they are **edges**, and an edge sits on a half cell — the north edge of
 `(x, y)` is at `(x, y-0.5)`. So the value that actually sorts is `2*(x+y+z)` plus an integer bias per
 edge, which keeps the whole comparison in integer arithmetic
-(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`). Doubling first is what buys the half
+(`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@e194895c`). Doubling first is what buys the half
 cell without introducing floats into a comparator that runs per element per frame.
 
 Sorting by screen `y` — the reflex from three-quarter top-down — is wrong here and wrong silently.
-With `sy = (x+y)*16 - z*16` (`docs/adr/0013-geometria-isometrica-64x32-z16.md:8@4229af26`), raising a
+With `sy = (x+y)*16 - z*16` (`docs/adr/0013-geometria-isometrica-64x32-z16.md:8@e194895c`), raising a
 block one level *decreases* its screen `y`, so a screen-`y` sort draws the higher block **behind** the
 lower one. On a flat map the two orders agree, which is exactly why this survives the first test map
 and breaks on the first staircase.
@@ -66,13 +66,13 @@ and breaks on the first staircase.
 The perspective itself — `low top-down`, 8 directions — is still the choice, but its reason changed:
 it is now the perspective that matches the 2:1 dimetric projection and the eight directions are the
 cardinality of the movement space, not a legibility argument
-(`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:29@160d3199`). Perspective decides how the art
+(`docs/adr/0015-low-top-down-8-direcoes-isometrico.md:29@0a0dfd33`). Perspective decides how the art
 *looks*; the grid decides what draws first.
 
 ### The two failure modes, said plainly
 
 Both are limits of any single linear order over this grid, not defects waiting for a cleverer
-comparator (`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@4229af26`):
+comparator (`docs/adr/0013-geometria-isometrica-64x32-z16.md:40@e194895c`):
 
 1. **A sprite taller than one level of Z.** It claims one cell in the model and covers roughly four
    on screen, so it ties with walls that should draw behind it. Its footprint and its silhouette
@@ -91,10 +91,10 @@ project format, never a better comparator.
 
 The key needs each sprite's cell, and a sprite's cell comes from where its feet sit inside its frame.
 The atlas packer still emits a fixed anchor, `{ x: 0.5, y: 0.875 }`
-(`tools/pixellab-pipeline/src/atlas.ts:216@e9504d6c`) — an empirical guess against the roughly 40%
+(`tools/pixellab-pipeline/src/atlas.ts:216@a8bede59`) — an empirical guess against the roughly 40%
 canvas inflation the character endpoint applies. With Z discrete that guess is now expensive: one
 level is 16 px, so about 12% of error on a canvas of about 90 px is about 11 px, nearly a whole level
-of displacement (`docs/adr/0013-geometria-isometrica-64x32-z16.md:42@4229af26`).
+of displacement (`docs/adr/0013-geometria-isometrica-64x32-z16.md:42@e194895c`).
 
 The decided replacement is a **measured** anchor: the opaque bounding box of the **union of every
 frame in the family**. Union, not per frame — a per-frame box makes the raised foot of a walk cycle
@@ -176,7 +176,7 @@ either**, because both trade memory for CPU and this project has no measurements
 ### What is not verified
 
 No scene has ever been built in this repository, and nothing here has ever rendered a frame
-(`docs/00-produto/visao.md:58@41a4855a`). The API facts are checked against the vendored 8.19.0
+(`docs/00-produto/visao.md:58@613eaec7`). The API facts are checked against the vendored 8.19.0
 declarations; the depth and camera rules are derived from accepted ADRs. What has **not** been
 measured is the interaction between them at the size of map this editor is meant to open — how many
 buckets a real map produces, what bucketing costs in container count, and whether per-bucket culling

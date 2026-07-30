@@ -5,7 +5,7 @@
 > Quer entender o produto? [`00-produto/visao.md`](00-produto/visao.md). Quer gerar arte? [`01-pixellab/README.md`](01-pixellab/README.md). Quer saber por que algo é do jeito que é? [`adr/`](adr/).
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline && node src/cli.ts plan
+> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
 Estado em **2026-07-30**: **22 arquivos, e todos existem**. Esta tabela não lista documento que não foi escrito — a versão anterior deste índice prometia 57 entradas e entregava 15, e a correção foi tirar a promessa, não apressar a escrita.
@@ -72,12 +72,13 @@ Nunca editadas. Uma decisão revista gera ADR novo que substitui a anterior, e a
 | [`0008`](./adr/0008-idioma-docs-ptbr-codigo-en.md) | Docs em pt-BR; código e commits em inglês | vigente |
 | [`0009`](./adr/0009-conhecimento-pixijs-vendorizado.md) | Tipos e skills oficiais do PixiJS 8.19.0 vendorizados; skills citam, não reescrevem a API | vigente |
 | [`0010`](./adr/0010-pivo-para-editor-isometrico.md) | **O produto é um editor isométrico, não um MMORPG** | vigente |
-| [`0011`](./adr/0011-repo-isometric-maker-pasta-power-abuse.md) | Repositório `isometric-maker`, pasta local continua `power-abuse` | vigente |
+| [`0011`](./adr/0011-repo-isometric-maker-pasta-power-abuse.md) | Repositório `isometric-maker`, pasta local continua `power-abuse` | substituída por 0017 |
 | [`0012`](./adr/0012-guard-de-orcamento-informativo.md) | O guard de orçamento informa e nunca recusa | vigente |
 | [`0013`](./adr/0013-geometria-isometrica-64x32-z16.md) | Tile 64×32, nível Z de 16 px, Z inteiro e discreto | vigente |
 | [`0014`](./adr/0014-pixijs-para-o-editor.md) | PixiJS 8 continua, agora contra o argumento oposto | vigente |
 | [`0015`](./adr/0015-low-top-down-8-direcoes-isometrico.md) | `low top-down`, 8 direções, e o endpoint que o isométrico obriga | vigente |
 | [`0016`](./adr/0016-ui-ptbr-strings-centralizadas.md) | UI em pt-BR com strings centralizadas desde o primeiro commit | vigente |
+| [`0017`](./adr/0017-nome-unico-isometric-maker.md) | Um nome só: `isometric-maker` no repositório, na pasta e nos pacotes | vigente |
 
 ## Skills
 
@@ -97,9 +98,9 @@ Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), 
 
 ## Referências
 
-- [`/home/ondokai/Projects/power-abuse/README.md`](../README.md) — visão geral do repositório
-- [`/home/ondokai/Projects/power-abuse/AGENTS.md`](../AGENTS.md) — instruções para agentes, e as 12 convenções de documentação
-- [`/home/ondokai/Projects/power-abuse/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
-- [`/home/ondokai/Projects/power-abuse/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
+- [`/home/ondokai/Projects/isometric-maker/README.md`](../README.md) — visão geral do repositório
+- [`/home/ondokai/Projects/isometric-maker/AGENTS.md`](../AGENTS.md) — instruções para agentes, e as 12 convenções de documentação
+- [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
+- [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
 **Última atualização:** 2026-07-30

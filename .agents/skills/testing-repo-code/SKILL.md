@@ -29,7 +29,7 @@ node --test --test-name-pattern="extrusion" src/*.test.ts   # one test
 Tests are co-located as `src/<module>.test.ts` and import from `node:test` and
 `node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@d28e4f8a`).
 
-`tools/sprite-studio` has **no test script at all** (`tools/sprite-studio/package.json:8@ecf4958f`).
+`tools/sprite-studio` has **no test script at all** (`tools/sprite-studio/package.json:8@ee3664ec`).
 Its only automated signal is `npm run typecheck`.
 
 ### What is covered, and what is not
@@ -47,7 +47,7 @@ property, byte-identical determinism of the packed sheet
 | `src/generate.ts` | submit/poll/ledger, and the never-resubmit rule |
 | `src/queue.ts` | state transitions, expiry deadlines, the limiter |
 
-This matters beyond coverage hygiene. `AGENTS.md:37@7a66ff95` states the idempotency guarantee and,
+This matters beyond coverage hygiene. `AGENTS.md:37@eb529ae5` states the idempotency guarantee and,
 in the same sentence, names the fact that nothing enforces it:
 
 > "Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro —

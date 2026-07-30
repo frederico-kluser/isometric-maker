@@ -7,8 +7,8 @@
 > em vez de **lembrar**.
 >
 > ```bash
-> node /home/ondokai/Projects/power-abuse/tools/pixi-reference/scripts/vendor-types.mjs --check
-> node /home/ondokai/Projects/power-abuse/.agents/skills/routing-pixijs-work/scripts/inspect-pixi.mjs class Sprite
+> node /home/ondokai/Projects/isometric-maker/tools/pixi-reference/scripts/vendor-types.mjs --check
+> node /home/ondokai/Projects/isometric-maker/.agents/skills/routing-pixijs-work/scripts/inspect-pixi.mjs class Sprite
 > ```
 
 ## Por que existe
@@ -38,9 +38,9 @@ linter continuem sendo nossas.
 ## Regenerar e conferir
 
 ```bash
-npm install --prefix /home/ondokai/Projects/power-abuse/tools/pixi-reference   # respeita o pin exato
-npm run vendor  --prefix /home/ondokai/Projects/power-abuse/tools/pixi-reference
-node /home/ondokai/Projects/power-abuse/tools/pixi-reference/scripts/vendor-types.mjs --check
+npm install --prefix /home/ondokai/Projects/isometric-maker/tools/pixi-reference   # respeita o pin exato
+npm run vendor  --prefix /home/ondokai/Projects/isometric-maker/tools/pixi-reference
+node /home/ondokai/Projects/isometric-maker/tools/pixi-reference/scripts/vendor-types.mjs --check
 ```
 
 `--check` confere os hashes contra o manifesto e funciona **sem** `node_modules` — que é justamente o

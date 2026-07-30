@@ -5,7 +5,7 @@
 > Um **editor de jogos isométricos** local, de usuário único: constrói o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Sem servidor, sem multiplayer, sem netcode. Este documento existe para que o MMORPG que este repositório era **não volte a crescer**.
 >
 > ```bash
-> cd /home/ondokai/Projects/power-abuse/tools/sprite-studio && npm run dev
+> cd /home/ondokai/Projects/isometric-maker/tools/sprite-studio && npm run dev
 > ```
 
 ## O produto em um parágrafo
@@ -25,7 +25,7 @@ Esta lista é a razão de ser do documento. Cada item foi uma decisão registrad
 - **Não é um motor de jogo genérico.** É um editor isométrico com eixo Z discreto e projeção 2:1 fixa. Fazer um jogo de plataforma ou de topo puro com ele é usar a ferramenta errada.
 - **Não é um serviço.** Não há conta, não há nuvem, não há sincronização. A chave da PixelLab é do usuário e mora na shell dele.
 
-Reintroduzir qualquer um desses itens exige ADR nova. E não é só prosa: `/home/ondokai/Projects/power-abuse/scripts/check-docs.sh` falha se os termos de MMORPG reaparecerem em `docs/`.
+Reintroduzir qualquer um desses itens exige ADR nova. E não é só prosa: `/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh` falha se os termos de MMORPG reaparecerem em `docs/`.
 
 ## As quatro partes, na ordem em que são construídas
 
@@ -49,9 +49,11 @@ As três pastas reservadas **não existem em disco**, e isso é deliberado: a co
 
 O guard de orçamento **informa e nunca recusa** ([ADR 0012](../adr/0012-guard-de-orcamento-informativo.md)): antes de cada geração ele estima o custo e mostra o acumulado da sessão e do mês. Quem decide parar é o usuário.
 
-## O nome, e a divergência de propósito
+## O nome
 
-O repositório no GitHub se chama `isometric-maker`. **A pasta local continua `/home/ondokai/Projects/power-abuse/`**, e todo caminho absoluto na documentação aponta para ela. Quatro worktrees ativas dependem desse nome, e o verificador de docs casa o prefixo `/home/` literalmente. Ver [ADR 0011](../adr/0011-repo-isometric-maker-pasta-power-abuse.md) — e **não "corrija" isso**.
+Repositório, pasta local e escopo npm são o mesmo nome: **`isometric-maker`**. Todo caminho absoluto na documentação aponta para `/home/ondokai/Projects/isometric-maker/`.
+
+Houve um intervalo em que não era assim: a [ADR 0011](../adr/0011-repo-isometric-maker-pasta-power-abuse.md) manteve a pasta com o nome anterior para não quebrar worktrees, e a [ADR 0017](../adr/0017-nome-unico-isometric-maker.md) reverteu essa decisão. O nome antigo sobrevive apenas no **arquivo** da 0011, que nomeia a decisão desfeita.
 
 ## O que não foi verificado
 
