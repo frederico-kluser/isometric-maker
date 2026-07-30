@@ -2,7 +2,7 @@
   "mission": "knowledge-skills-system",
   "mission_complete": false,
   "stop_attempts": 0,
-  "updated_by": "550a4dd",
+  "updated_by": "380d5dc",
   "phases": [
     {
       "id": 1,
@@ -21,8 +21,8 @@
     {
       "id": 3,
       "name": "Generate knowledge and task skills",
-      "done": false,
-      "gate_passed": false,
+      "done": true,
+      "gate_passed": true,
       "artifact": ".agents/skills/catalog.md"
     },
     {
