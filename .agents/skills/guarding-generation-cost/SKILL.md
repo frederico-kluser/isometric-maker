@@ -18,7 +18,7 @@ after any crash or interruption.
 ### The contract
 
 > "Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o
-> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@b5b22e84`
+> mesmo spec **não deve gastar nada**." — `AGENTS.md:37@e451cfee`
 
 `plan` and `estimate` never touch the network in a paid way. `generate` spends. That asymmetry is
 the whole design, and it only holds while the hashes hold.
@@ -33,7 +33,7 @@ Three exclusions, each deliberate:
 
 - **The OpenAPI snapshot hash.** If PixelLab edits a field the project never sends, including it
   would invalidate the whole catalog and produce a bill for zero benefit. Schema drift is a `doctor`
-  warning, never invalidation (`tools/pixellab-pipeline/src/cli.ts:206@b333647e`).
+  warning, never invalidation (`tools/pixellab-pipeline/src/cli.ts:206@8d21d33a`).
 - **`out` and `post`.** They live in `postHash` instead (`tools/pixellab-pipeline/src/catalog.ts:133@2a45b362`).
   Moving an output path therefore costs nothing.
 - **`budgetGroup`.** Reporting metadata; regrouping the report must not rebill.
@@ -95,9 +95,9 @@ silently inactive.
    so the real margin is under an hour. It is also the only ephemeral, non-re-downloadable resource
    — a lost local file means paying again.
 5. **CI trap.** Non-TTY without `--yes` returns exit 2 even when the verdict is `allow`
-   (`tools/pixellab-pipeline/src/cli.ts:285@b333647e`).
+   (`tools/pixellab-pipeline/src/cli.ts:285@8d21d33a`).
 6. **`verify` proves less than its name suggests.** It compares file existence and byte size only
-   (`tools/pixellab-pipeline/src/cli.ts:172@b333647e`); the `sha256` recorded at generation time
+   (`tools/pixellab-pipeline/src/cli.ts:172@8d21d33a`); the `sha256` recorded at generation time
    (`tools/pixellab-pipeline/src/generate.ts:169@d7959fa4`) is never re-read. A green `verify` means
    the artifacts are present and the right length — not that they are the right images. A truncated
    download that happens to match the recorded size passes.
@@ -105,7 +105,7 @@ silently inactive.
 ### The never-resubmit rule
 
 > "**Nunca resubmeta um job cujo id você tem.** É o bug mais caro possível neste sistema."
-> — `docs/01-pixellab/modelo-assincrono.md:46@1be351ba`
+> — `docs/01-pixellab/modelo-assincrono.md:46@b581e174`
 
 Money leaves at submit, so the job id is written to disk atomically **before the first poll**
 (`tools/pixellab-pipeline/src/generate.ts:265@d7959fa4`). Any record holding a `jobId` is re-polled
@@ -127,7 +127,7 @@ node src/cli.ts atlas         # free
 ```
 
 **After any crash, `rescue` comes first** — it downloads ephemeral resources before their deadline
-(`tools/pixellab-pipeline/src/cli.ts:306@b333647e`). Then `resume`, which re-polls paid jobs and
+(`tools/pixellab-pipeline/src/cli.ts:306@8d21d33a`). Then `resume`, which re-polls paid jobs and
 never resubmits.
 
 Exit codes are a contract: `0` ok · `1` error · `2` refused by budget · `4` paid jobs pending, run

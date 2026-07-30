@@ -19,7 +19,7 @@ that would be legal in a normal TypeScript project.
 
 Node 24 runs `.ts` files directly by stripping types. The `build` script says so literally:
 `echo "Node 24 executa .ts direto; use typecheck"`
-(`tools/pixellab-pipeline/package.json:11@cb7194dc`). `engines.node` is `>=24` in both tools. The CLI
+(`tools/pixellab-pipeline/package.json:11@395c57f1`). `engines.node` is `>=24` in both tools. The CLI
 is executed as `node src/cli.ts`, and `bin.pixellab` points straight at the `.ts` source.
 
 Two consequences that look like style and are not:
@@ -74,7 +74,7 @@ const tier = process.env['PIXELLAB_TIER'] ?? 't1';
 ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
 ```
 
-That last idiom is at `tools/pixellab-pipeline/src/cli.ts:240@b333647e` if you need the full shape.
+That last idiom is at `tools/pixellab-pipeline/src/cli.ts:240@8d21d33a` if you need the full shape.
 
 ### There is no workspace
 
@@ -110,7 +110,7 @@ introduce a formatter as a side effect of another task.
 Identifiers, types, functions, file names and commit messages are English; comments that explain
 *why* may be either, and the existing code mixes them deliberately — English for mechanical notes,
 Portuguese for user-facing strings and for reasoning aimed at the project owner
-(`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@abdd2ed9`). Anything the player or the CLI user
+(`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@fff4be23`). Anything the player or the CLI user
 reads is pt-BR.
 
 ## References

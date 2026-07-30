@@ -48,7 +48,7 @@ Guarda **2 camadas em disco** e expande em memória para o corpo base mais **4 r
 
 É o mais econômico em disco e o que gera mais variedade por asset — mas amarra o visual a um esquema de 4 regiões recoloríveis, o que é uma decisão estética forte, não neutra.
 
-## A consequência para Ferro e Cinzas
+## A consequência para Power Abuse
 
 **Uma peça gerada é reutilizável apenas entre personagens que compartilham a mesma silhueta base.** Isso não é limitação da nossa ferramenta, é o que o maior projeto aberto de paper-doll demonstra na prática.
 
@@ -72,6 +72,6 @@ O caminho recomendado, em ordem:
 - Universal-LPC-Spritesheet — a divisão `fg/`/`bg/` e o aliasing de tipo de corpo
 - ClassicUO — a regra de reordenação da capa por direção
 - OTClient — as 2 camadas em disco e as 4 regiões recoloríveis
-- [`/home/ondokai/Projects/ferro-e-cinzas/tools/sprite-studio/README.md`](../../tools/sprite-studio/README.md) — a ferramenta que implementa a restrição de silhueta
+- [`/home/ondokai/Projects/power-abuse/tools/sprite-studio/README.md`](../../tools/sprite-studio/README.md) — a ferramenta que implementa a restrição de silhueta
 
 **Última atualização:** 2026-07-30

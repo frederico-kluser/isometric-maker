@@ -371,7 +371,7 @@ async function cmdAtlas(): Promise<number> {
 
 function usage(): void {
   console.log(`
-pixellab — pipeline de assets do Ferro e Cinzas
+pixellab — pipeline de assets do Power Abuse
 
   balance     Saldo da conta e gasto do mês (ledger local).
   plan        Resolve o catálogo, diffa contra o lockfile. NUNCA gasta.

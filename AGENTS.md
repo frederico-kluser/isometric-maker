@@ -1,4 +1,4 @@
-# AGENTS.md — Ferro e Cinzas
+# AGENTS.md — Power Abuse
 
 Instruções para agentes de código que trabalham neste repositório. `CLAUDE.md` é symlink para este arquivo.
 
@@ -24,7 +24,7 @@ A API do PixelLab **muda sem versionar** — o `info.version` do spec é literal
 A fonte da verdade neste repositório é o spec vendorizado:
 
 ```
-/home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/openapi/openapi-v2.json
+/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json
 (+ PROVENIENCIA.txt com data de captura e sha256)
 ```
 

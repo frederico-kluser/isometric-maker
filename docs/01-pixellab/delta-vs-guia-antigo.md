@@ -47,7 +47,7 @@ Estas partes de `5.md` seguem corretas e boas, e foram preservadas no manual nov
 
 Três mecanismos, todos no repositório:
 
-1. **Spec vendorizado** com data e sha256 em `/home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/openapi/`.
+1. **Spec vendorizado** com data e sha256 em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/`.
 2. **`scripts/check-docs.sh`**, que falha se alguma doc citar endpoint que não existe no spec — com uma lista explícita de nomes v1 citados de propósito.
 3. **`scripts/fetch-spec.mjs --diff`** na skill, que compara o snapshot com a API ao vivo e relata paths adicionados e removidos.
 

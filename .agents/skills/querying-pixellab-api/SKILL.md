@@ -18,13 +18,13 @@ an enum value, a price, or a response code.
 ### The rule, and why it is unusually strict
 
 > "A API do PixelLab **muda sem versionar** — o `info.version` do spec é literalmente `"dev"`."
-> — `AGENTS.md:22@b5b22e84`
+> — `AGENTS.md:22@e451cfee`
 
 The vendored snapshot is the source of truth, not your memory and not any blog:
 `tools/pixellab-pipeline/openapi/openapi-v2.json`, captured 2026-07-29, sha256 `5b11c9a7afa1…`
 (`tools/pixellab-pipeline/openapi/PROVENIENCIA.txt:1@86625fb2`). There is a real, documented case of
 a guide in this same machine going stale and being wrong by an order of magnitude on price
-(`docs/01-pixellab/delta-vs-guia-antigo.md:16@2feba2c8`).
+(`docs/01-pixellab/delta-vs-guia-antigo.md:16@bc48ce53`).
 
 ### One command instead of a 387 KB file
 
@@ -94,10 +94,10 @@ never against the requested value, or the atlas cuts the sprites' heads off.
 ### Prices are always estimates
 
 Write "preço estimado", never a flat price. PixelLab labels its own column `Estimated Price* (USD)`
-with the note that it varies with GPU time (`AGENTS.md:33@b5b22e84`). One conflict is still
+with the note that it varies with GPU time (`AGENTS.md:33@e451cfee`). One conflict is still
 unresolved and must stay marked as such: the spec's formula and the published table disagree on
 `/create-character-v3` at 64×64 (1 vs 2 generations); the repo's rule is to use the larger
-(`docs/01-pixellab/custos-e-limites.md:59@86c1d244`).
+(`docs/01-pixellab/custos-e-limites.md:59@0c85bc2b`).
 
 ### Refreshing the snapshot
 
@@ -110,9 +110,9 @@ bash scripts/check-docs.sh                                  # docs may now cite 
 ```
 
 Two caveats, both currently true. `npm run refresh-openapi` points at a script that does not exist
-(`tools/pixellab-pipeline/package.json:13@cb7194dc`). And `npm run codegen` emits
+(`tools/pixellab-pipeline/package.json:13@395c57f1`). And `npm run codegen` emits
 `openapi/schema.d.ts`, which **nothing imports** — so the "schema drift becomes a compile error"
-promise in `docs/adr/0002-cliente-rest-gerado-do-openapi.md:30@56cea0d4` does not currently hold.
+promise in `docs/adr/0002-cliente-rest-gerado-do-openapi.md:30@fbd2951e` does not currently hold.
 Treat `node $S summary` plus this skill's verification signal as the real drift detector.
 
 ## References

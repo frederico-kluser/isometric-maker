@@ -6,7 +6,7 @@
 >
 > ```bash
 > node /home/ondokai/Projects/ferro-e-cinzas-skills/pixellab-assets/scripts/inspect-spec.mjs \
->   /home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/openapi/openapi-v2.json --list
+>   /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json --list
 > ```
 
 ## O que é síncrono e o que não é
@@ -86,7 +86,7 @@ Duas regras que evitam ficar permanentemente limitado:
 ## Referências
 
 - `https://api.pixellab.ai/mcp/docs` — latências, verificado 2026-07-29
-- O spec vendorizado em `/home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/openapi/openapi-v2.json`
+- O spec vendorizado em `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json`
 - Implementação: `src/api.ts` (transporte e poll) e `src/queue.ts` (estado à prova de queda)
 
 **Última atualização:** 2026-07-29

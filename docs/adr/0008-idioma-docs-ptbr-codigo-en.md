@@ -17,7 +17,7 @@ Além disso, em 40 projetos na árvore, **nenhum diretório de código tem nome 
 
 ## Decisão
 
-Ferro e Cinzas é repositório de código, então segue o padrão de `leet-code-rpg`: commits e nomes de pasta de código em inglês, `tools/` em vez de `ferramentas/`. Documentação e texto de jogo em pt-BR.
+Power Abuse é repositório de código, então segue o padrão de `leet-code-rpg`: commits e nomes de pasta de código em inglês, `tools/` em vez de `ferramentas/`. Documentação e texto de jogo em pt-BR.
 
 Duas regras herdadas que valem aqui:
 

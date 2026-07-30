@@ -5,7 +5,7 @@
 > Tela de autoria: modelo base nu e careca nas 8 direções, poses, e guarda-roupa que vale para todos os personagens. O token nunca chega ao navegador.
 >
 > ```bash
-> cd /home/ondokai/Projects/ferro-e-cinzas/tools/sprite-studio
+> cd /home/ondokai/Projects/power-abuse/tools/sprite-studio
 > export PIXELLAB_SECRET="..."
 > npm run dev        # http://localhost:5174
 > ```
@@ -96,8 +96,8 @@ Três decisões, e o porquê de cada uma:
 
 ## Referências
 
-- `/home/ondokai/Projects/ferro-e-cinzas/docs/01-pixellab/` — o manual da API
-- `/home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/openapi/openapi-v2.json` — o spec, fonte de verdade
-- `/home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline/src/api.ts` — o transporte reaproveitado (429/529/423, backoff, poll)
+- `/home/ondokai/Projects/power-abuse/docs/01-pixellab/` — o manual da API
+- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/openapi/openapi-v2.json` — o spec, fonte de verdade
+- `/home/ondokai/Projects/power-abuse/tools/pixellab-pipeline/src/api.ts` — o transporte reaproveitado (429/529/423, backoff, poll)
 
 **Última atualização:** 2026-07-30

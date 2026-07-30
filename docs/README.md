@@ -5,7 +5,7 @@
 > Comece por [`01-pixellab/README.md`](./01-pixellab/README.md) se vai gerar arte, ou por [`02-design/combate-zonas-oscilantes.md`](./02-design/combate-zonas-oscilantes.md) se quer entender o que torna este jogo diferente.
 >
 > ```bash
-> cd /home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
 > node src/cli.ts plan     # nunca gasta
 > ```
 
@@ -141,7 +141,7 @@ Duas Agent Skills em `/home/ondokai/Projects/ferro-e-cinzas-skills/`, instaladas
 
 ## Referências
 
-- [`/home/ondokai/Projects/ferro-e-cinzas/AGENTS.md`](../AGENTS.md) — regras para agentes, incluindo as 12 convenções de documentação
+- [`/home/ondokai/Projects/power-abuse/AGENTS.md`](../AGENTS.md) — regras para agentes, incluindo as 12 convenções de documentação
 - [`/home/ondokai/Projects/config/CLAUDE.md`](/home/ondokai/Projects/config/CLAUDE.md) — origem das 8 convenções obrigatórias de doc
 - [`/home/ondokai/Projects/tech-docs/games/5.md`](/home/ondokai/Projects/tech-docs/games/5.md) — guia anterior do PixelLab, **defasado**; ver `01-pixellab/delta-vs-guia-antigo.md`
 

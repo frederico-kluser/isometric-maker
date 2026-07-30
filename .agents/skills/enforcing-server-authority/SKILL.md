@@ -25,7 +25,7 @@ Permadeath is total and nothing is ever restored, so a failure of authority is n
 is the irreversible destruction of someone's progress with no appeal:
 
 > "Nenhuma decisão de dano, acerto, morte, loot ou transação de item pode originar no cliente."
-> — `AGENTS.md:51@b5b22e84`
+> — `AGENTS.md:51@e451cfee`
 
 > "**nenhuma restauração, nunca.** Nem por bug do servidor, nem por queda de rede, nem por decisão de
 > suporte." — `docs/adr/0003-permadeath-total.md:17@b24cc681`
@@ -88,7 +88,7 @@ gameplay requirement, which is what forced the `low top-down` perspective
 (`docs/adr/0005-low-top-down-8-direcoes.md:13@0f447499`).
 
 > "**A API do PixelLab não resolve isso.**" — there is no cross-character equipment primitive
-> (`docs/03-arquitetura/paper-doll-e-equipamento.md:5@a2c44714`)
+> (`docs/03-arquitetura/paper-doll-e-equipamento.md:5@1316896a`)
 
 A wardrobe piece is only valid within the **same silhouette**; the tooling refuses a cross-silhouette
 application before spending (`:55`). The recommended order is few silhouettes first, full baked

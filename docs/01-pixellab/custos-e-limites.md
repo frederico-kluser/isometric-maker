@@ -5,7 +5,7 @@
 > O documento que evita prejuízo. Antes de qualquer lote, rode o guard:
 >
 > ```bash
-> cd /home/ondokai/Projects/ferro-e-cinzas/tools/pixellab-pipeline
+> cd /home/ondokai/Projects/power-abuse/tools/pixellab-pipeline
 > node src/cli.ts plan && node src/cli.ts estimate
 > ```
 
@@ -198,7 +198,7 @@ Há desconto por fidelidade que reduz Tier 1 para ~US$ 9 e Tier 2 para ~US$ 22 a
 
 Quantas `generations` cada tier concede por mês **não foi verificado**. Antes de dimensionar a produção por assinatura, meça.
 
-## Orçamento de Ferro e Cinzas
+## Orçamento de Power Abuse
 
 Alvo: 60 criaturas com 8 direções e 4 animações, 400 itens, ~60 variantes de armadura vestida, 30 tilesets, 200 props de mapa, 40 elementos de UI.
 

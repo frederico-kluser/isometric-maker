@@ -1,5 +1,5 @@
 {
-  "name": "@ferro-e-cinzas/sprite-studio",
+  "name": "@power-abuse/sprite-studio",
   "version": "0.1.0",
   "private": true,
   "description": "Local authoring tool: base character model, 8 directions, poses, and wardrobe via the PixelLab API.",

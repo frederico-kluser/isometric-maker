@@ -31,7 +31,7 @@ in `docs/` exists in the vendored OpenAPI spec** (`:28`). That last one is the i
 is what stops the documentation from rotting the way the previous guide did.
 
 The seven the checker cannot see are the ones an agent silently breaks
-(`AGENTS.md:55@b5b22e84`):
+(`AGENTS.md:55@e451cfee`):
 
 1. absolute paths always, never relative
 2. dates in ISO form
@@ -47,16 +47,16 @@ index is the map, and a doc missing from it is a doc nobody finds.
 ### Honesty is a hard rule, not a tone preference
 
 > "Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior
-> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:75@b5b22e84`
+> que documentação ausente, porque ninguém vai checar depois." — `AGENTS.md:75@e451cfee`
 
-The existing docs do this well and the pattern is worth copying: `docs/01-pixellab/custos-e-limites.md:237@86c1d244`
+The existing docs do this well and the pattern is worth copying: `docs/01-pixellab/custos-e-limites.md:237@0c85bc2b`
 lists what remains unverified, and `docs/adr/0007-fase1-vm-unica.md:24@385b9c10` marks its central
 cost finding as not yet confirmed. Preserve those hedges when quoting; stripping a hedge is the most
 common way a correct document becomes a wrong one.
 
 ### No speculative documentation
 
-> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@b5b22e84`
+> "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@e451cfee`
 
 `docs/README.md` lists 57 entries and 42 of them are still `pendente`. Adding prose to a pending
 entry is only worth doing when the thing it describes exists.
@@ -64,18 +64,18 @@ entry is only worth doing when the thing it describes exists.
 ### Language, by axis
 
 Documentation and everything a player reads: **pt-BR**. Code identifiers, code folder names and
-commit messages: **English** (`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@abdd2ed9`). Doc
+commit messages: **English** (`docs/adr/0008-idioma-docs-ptbr-codigo-en.md:20@fff4be23`). Doc
 *filenames* stay Portuguese because they are documentation.
 
 And a rule that overrides the machine-wide default:
 
 > "**Nunca assine `Co-authored-by Claude` automaticamente** — o usuário decide caso a caso."
-> — `AGENTS.md:18@b5b22e84`
+> — `AGENTS.md:18@e451cfee`
 
 ### ADRs: the part that is irreversible
 
 An accepted ADR is **never edited**. A revised decision becomes a **new** ADR that supersedes the old
-one, and the old one stays exactly as written (`docs/README.md:116@a34506f4`). This is the guard: the
+one, and the old one stays exactly as written (`docs/README.md:116@fa318430`). This is the guard: the
 value of the record is that it shows what was believed at the time, and editing destroys precisely
 that.
 
