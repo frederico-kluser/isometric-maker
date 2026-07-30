@@ -1,0 +1,32 @@
+{
+  "skill": "rotating-pixellab-sprites",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "girar o sprite para leste", "should_trigger": true },
+    { "query": "em que ordem vem os frames das oito direcoes", "should_trigger": true },
+    { "query": "gerar as 8 rotacoes de uma imagem que ja existe", "should_trigger": true },
+    { "query": "mudar o angulo da camera do personagem", "should_trigger": true },
+    { "query": "qual a ordem correta das direcoes pra nomear os frames", "should_trigger": true },
+    { "query": "escrever o netcode do protocolo binario", "should_trigger": false },
+    { "query": "atualizar o indice da documentacao", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "S, SW, W, NW, N, NE, E, SE",
+      "why": "the canonical return order; any other ordering ships sprites facing the wrong way with no error"
+    },
+    {
+      "must_contain": "Three direction orderings coexist",
+      "why": "the whole point of the skill — the enum, the request map and the response differ"
+    },
+    {
+      "must_contain": "not versions of each other",
+      "why": "v2 can also create from scratch; v3 only rotates. Treating v3 as an upgrade loses capability"
+    },
+    {
+      "must_contain": "Neither persists a character",
+      "why": "sends the reader to create-character-pro/v3 when the result must be animatable"
+    }
+  ],
+  "check_provenance": true
+}

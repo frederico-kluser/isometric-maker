@@ -1,0 +1,36 @@
+{
+  "skill": "designing-pixellab-interfaces",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "criar o painel da interface do jogo", "should_trigger": true },
+    { "query": "gerar a barra de vida do HUD", "should_trigger": true },
+    { "query": "fazer a caixa de dialogo em pixel art", "should_trigger": true },
+    { "query": "gerar uma fonte pixelada pro menu", "should_trigger": true },
+    { "query": "moldura do inventario", "should_trigger": true },
+    { "query": "transferir item entre jogadores com ledger", "should_trigger": false },
+    { "query": "consultar o esquema do openapi vendorizado", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "192",
+      "why": "the panel endpoint has a size FLOOR larger than several sprite endpoints' ceiling"
+    },
+    {
+      "must_contain": "only endpoint in the entire API that accepts a **shape template**",
+      "why": "pieces is unique to create-ui-asset and is what makes it a panel composer, not an image generator"
+    },
+    {
+      "must_contain": "ghost rows",
+      "why": "the UI asset list includes unfinished jobs, so it is not a list of finished assets"
+    },
+    {
+      "must_contain": "`image_size` does not describe the font's size",
+      "why": "image_size is a pricing tier and glyph_px is the real glyph resolution — the confusing pair"
+    },
+    {
+      "must_contain": "free-text string",
+      "why": "UI takes a prose palette, not a color_image, so exact colours cannot be forced"
+    }
+  ],
+  "check_provenance": true
+}

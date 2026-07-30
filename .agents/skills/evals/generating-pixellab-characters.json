@@ -1,0 +1,61 @@
+{
+  "skill": "generating-pixellab-characters",
+  "min_overlap": 2,
+  "routing": [
+    {
+      "query": "gerar o personagem do NPC com 8 direcoes",
+      "should_trigger": true
+    },
+    {
+      "query": "criar o sprite do inimigo no pixellab",
+      "should_trigger": true
+    },
+    {
+      "query": "qual modo usar, standard ou pro, pra criar o personagem",
+      "should_trigger": true
+    },
+    {
+      "query": "passar imagem de referencia por direcao na criacao",
+      "should_trigger": true
+    },
+    {
+      "query": "baixar o personagem inteiro em zip",
+      "should_trigger": true
+    },
+    {
+      "query": "apagar o personagem e as animacoes dele",
+      "should_trigger": true
+    },
+    {
+      "query": "escrever a documentacao do combate em grupo",
+      "should_trigger": false
+    },
+    {
+      "query": "por que o compilador reclama desse import",
+      "should_trigger": false
+    }
+  ],
+  "invariants": [
+    {
+      "must_contain": "none of them says 202",
+      "why": "all four creation endpoints are async while answering 200; branching on the code discards a paid job id"
+    },
+    {
+      "must_contain": "~40%",
+      "why": "the canvas inflation of the 4/8-direction endpoints; cropping against the requested size cuts heads off"
+    },
+    {
+      "must_contain": "~2x",
+      "why": "create-character-pro pads differently from the others — a single inflation constant is wrong"
+    },
+    {
+      "must_contain": "Quadruped templates",
+      "why": "quadruped templates require both south and east references; bipedal only south"
+    },
+    {
+      "must_contain": "rotation_urls",
+      "why": "null unless status is completed — the reason polling is not optional"
+    }
+  ],
+  "check_provenance": true
+}
