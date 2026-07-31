@@ -135,7 +135,9 @@ stage "scripts/validate-plan.mjs" \
   "node scripts/validate-plan.mjs" \
   "F0-01"
 
-pending_stage "scripts/check-acceptance.mjs" "T-01"
+stage "scripts/check-acceptance.mjs" \
+  "node scripts/check-acceptance.mjs" \
+  "T-01"
 
 # ═══════════════════════════════════════════════════════════════════════
 header "ledger de incerteza"

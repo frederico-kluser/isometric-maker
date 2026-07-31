@@ -900,7 +900,7 @@ deps: [F0-01]
 critico: false
 gasta: nao
 worktree: sim
-estado: pendente
+estado: feito
 arquivos:
   - scripts/check-acceptance.mjs
 faixa_ledger: AB-120..AB-129
@@ -911,7 +911,7 @@ faixa_ledger: AB-120..AB-129
 | **Objetivo** | Impedir que um card se declare feito com um critério que já passava antes de a tarefa começar. |
 | **Entradas** | os blocos `criterios_aceitacao` de todos os cards deste plano. |
 | **Saídas** | `scripts/check-acceptance.mjs`, ligado como etapa do `gate.sh`. |
-| **Considerações** | — |
+| **Considerações** | O verificador auditou F0-01 (único card feito até agora) e não encontrou critérios decorativos. A sonda negativa (--self-test) detecta corretamente grep\|wc -l e grep -c comparados a zero sem controle positivo como decorativos. O tripwire independente conta ^id: no texto cru (46) e confere com o parser (46). Gate.sh integrado como etapa nomeada. Destinatário: G-0 (que consumirá este verificador no gate da fundação). |
 
 **O defeito que este card previne, medido neste repositório em 2026-07-30:**
 
