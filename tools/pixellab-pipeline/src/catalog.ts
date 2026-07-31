@@ -5,11 +5,29 @@
  * re-pay for assets we already have; wrong in the other and a changed prompt
  * silently keeps the stale image.
  */
-import { readFile } from 'node:fs/promises';
-import sharp from 'sharp';
-import { DIRECTION_KEYS, ENDPOINTS, QUADRUPED_TEMPLATES, validateSize, type DirectionKey, type EndpointId, type ImageSize } from './endpoints.ts';
-import { COST_TABLE, estimateByArea, sumEstimates, type CostEstimate } from './cost.ts';
-import { canonicalJson, digest, readJsonIfExists, writeFileAtomic } from './util.ts';
+import { readFile } from "node:fs/promises";
+import sharp from "sharp";
+import {
+	DIRECTION_KEYS,
+	ENDPOINTS,
+	QUADRUPED_TEMPLATES,
+	validateSize,
+	type DirectionKey,
+	type EndpointId,
+	type ImageSize,
+} from "./endpoints.ts";
+import {
+	COST_TABLE,
+	estimateByArea,
+	sumEstimates,
+	type CostEstimate,
+} from "./cost.ts";
+import {
+	canonicalJson,
+	digest,
+	readJsonIfExists,
+	writeFileAtomic,
+} from "./util.ts";
 
 /** Bump to force a full regeneration. This is a budget decision, not a refactor. */
 export const PIPELINE_VERSION = 1;
@@ -17,69 +35,92 @@ export const PIPELINE_VERSION = 1;
 export type AssetId = string;
 
 export interface AssetSpec {
-  readonly id: AssetId;
-  readonly endpoint: EndpointId;
-  /** Output path, relative to the atlas root. Not part of identity. */
-  readonly out: string;
-  /** Exactly the body sent to the API, after defaults are applied. */
-  readonly params: Record<string, unknown>;
-  /** Local files fed to the request (style refs, init images, masks). */
-  readonly inputs?: readonly string[];
-  /** Assets that must exist first. Regenerating a parent cascades to children. */
-  readonly dependsOn?: readonly AssetId[];
-  /** Free-form grouping for budget reporting. Not part of identity. */
-  readonly budgetGroup?: string;
-  /** Post-processing config. Changing it rebuilds locally, at zero API cost. */
-  readonly post?: Record<string, unknown>;
-  /** Bump to force regeneration of just this asset without lying about params. */
-  readonly salt?: string;
+	readonly id: AssetId;
+	readonly endpoint: EndpointId;
+	/** Output path, relative to the atlas root. Not part of identity. */
+	readonly out: string;
+	/** Exactly the body sent to the API, after defaults are applied. */
+	readonly params: Record<string, unknown>;
+	/** Local files fed to the request (style refs, init images, masks). */
+	readonly inputs?: readonly string[];
+	/** Assets that must exist first. Regenerating a parent cascades to children. */
+	readonly dependsOn?: readonly AssetId[];
+	/** Free-form grouping for budget reporting. Not part of identity. */
+	readonly budgetGroup?: string;
+	/** Post-processing config. Changing it rebuilds locally, at zero API cost. */
+	readonly post?: Record<string, unknown>;
+	/** Bump to force regeneration of just this asset without lying about params. */
+	readonly salt?: string;
 }
 
 export interface ResolvedAsset extends AssetSpec {
-  readonly specHash: string;
-  readonly postHash: string;
-  readonly estimate: CostEstimate;
+	readonly specHash: string;
+	readonly postHash: string;
+	readonly estimate: CostEstimate;
 }
 
 export interface LockEntry {
-  readonly specHash: string;
-  readonly postHash: string;
-  readonly endpoint: EndpointId;
-  readonly status: 'generated' | 'approved' | 'rejected';
-  readonly jobId?: string;
-  readonly remote?: { readonly kind: string; readonly id: string; readonly ephemeral: boolean };
-  readonly generatedAt: string;
-  readonly costUsd: number;
-  readonly artifacts: readonly { readonly path: string; readonly sha256: string; readonly bytes: number }[];
-  readonly requestSnapshot?: Record<string, unknown>;
-  readonly history?: readonly { readonly specHash: string; readonly replacedAt: string; readonly reason: string }[];
+	readonly specHash: string;
+	readonly postHash: string;
+	readonly endpoint: EndpointId;
+	readonly status: "generated" | "approved" | "rejected";
+	readonly jobId?: string;
+	readonly remote?: {
+		readonly kind: string;
+		readonly id: string;
+		readonly ephemeral: boolean;
+	};
+	readonly generatedAt: string;
+	readonly costUsd: number;
+	readonly artifacts: readonly {
+		readonly path: string;
+		readonly sha256: string;
+		readonly bytes: number;
+	}[];
+	readonly requestSnapshot?: Record<string, unknown>;
+	readonly history?: readonly {
+		readonly specHash: string;
+		readonly replacedAt: string;
+		readonly reason: string;
+	}[];
 }
 
 export interface Lockfile {
-  readonly lockfileVersion: 1;
-  readonly pipelineVersion: number;
-  readonly openapiSnapshot: { readonly sha256: string; readonly fetchedAt: string };
-  readonly assets: Record<AssetId, LockEntry>;
-  /** specHashes an art director rejected. Never spend on these again. */
-  readonly rejectedHashes: Record<string, { readonly assetId: AssetId; readonly reason: string; readonly at: string }>;
+	readonly lockfileVersion: 1;
+	readonly pipelineVersion: number;
+	readonly openapiSnapshot: {
+		readonly sha256: string;
+		readonly fetchedAt: string;
+	};
+	readonly assets: Record<AssetId, LockEntry>;
+	/** specHashes an art director rejected. Never spend on these again. */
+	readonly rejectedHashes: Record<
+		string,
+		{ readonly assetId: AssetId; readonly reason: string; readonly at: string }
+	>;
 }
 
 export function emptyLockfile(openapiSha: string, fetchedAt: string): Lockfile {
-  return {
-    lockfileVersion: 1,
-    pipelineVersion: PIPELINE_VERSION,
-    openapiSnapshot: { sha256: openapiSha, fetchedAt },
-    assets: {},
-    rejectedHashes: {},
-  };
+	return {
+		lockfileVersion: 1,
+		pipelineVersion: PIPELINE_VERSION,
+		openapiSnapshot: { sha256: openapiSha, fetchedAt },
+		assets: {},
+		rejectedHashes: {},
+	};
 }
 
-export async function loadLockfile(path: string): Promise<Lockfile | undefined> {
-  return readJsonIfExists<Lockfile>(path);
+export async function loadLockfile(
+	path: string,
+): Promise<Lockfile | undefined> {
+	return readJsonIfExists<Lockfile>(path);
 }
 
-export async function saveLockfile(path: string, lock: Lockfile): Promise<void> {
-  await writeFileAtomic(path, `${JSON.stringify(lock, null, 2)}\n`);
+export async function saveLockfile(
+	path: string,
+	lock: Lockfile,
+): Promise<void> {
+	await writeFileAtomic(path, `${JSON.stringify(lock, null, 2)}\n`);
 }
 
 /**
@@ -91,15 +132,19 @@ export async function saveLockfile(path: string, lock: Lockfile): Promise<void> 
  * for nothing.
  */
 export async function inputHash(path: string): Promise<string> {
-  const { data, info } = await sharp(await readFile(path)).raw().toBuffer({ resolveWithObject: true });
-  return digest(`${info.width}x${info.height}x${info.channels}:${digest(data)}`);
+	const { data, info } = await sharp(await readFile(path))
+		.raw()
+		.toBuffer({ resolveWithObject: true });
+	return digest(
+		`${info.width}x${info.height}x${info.channels}:${digest(data)}`,
+	);
 }
 
 export interface HashContext {
-  readonly pipelineVersion: number;
-  /** specHash of an already-resolved dependency. */
-  parentSpecHash(id: AssetId): string;
-  resolveInput(path: string): Promise<string>;
+	readonly pipelineVersion: number;
+	/** specHash of an already-resolved dependency. */
+	parentSpecHash(id: AssetId): string;
+	resolveInput(path: string): Promise<string>;
 }
 
 /**
@@ -110,68 +155,81 @@ export interface HashContext {
  * of hundreds of dollars for zero benefit. Schema drift is reported by
  * `doctor`, never treated as cache invalidation.
  */
-export async function computeSpecHash(spec: AssetSpec, ctx: HashContext): Promise<string> {
-  const inputs: Record<string, string> = {};
-  for (const p of spec.inputs ?? []) inputs[p] = await ctx.resolveInput(p);
+export async function computeSpecHash(
+	spec: AssetSpec,
+	ctx: HashContext,
+): Promise<string> {
+	const inputs: Record<string, string> = {};
+	for (const p of spec.inputs ?? []) inputs[p] = await ctx.resolveInput(p);
 
-  const parents: Record<string, string> = {};
-  for (const id of spec.dependsOn ?? []) parents[id] = ctx.parentSpecHash(id);
+	const parents: Record<string, string> = {};
+	for (const id of spec.dependsOn ?? []) parents[id] = ctx.parentSpecHash(id);
 
-  return digest(
-    canonicalJson({
-      endpoint: spec.endpoint,
-      params: spec.params,
-      inputs,
-      parents,
-      pipelineVersion: ctx.pipelineVersion,
-      ...(spec.salt === undefined ? {} : { salt: spec.salt }),
-    }),
-  );
+	return digest(
+		canonicalJson({
+			endpoint: spec.endpoint,
+			params: spec.params,
+			inputs,
+			parents,
+			pipelineVersion: ctx.pipelineVersion,
+			...(spec.salt === undefined ? {} : { salt: spec.salt }),
+		}),
+	);
 }
 
 /** Identity of local post-processing. Changing it costs nothing. */
 export function computePostHash(spec: AssetSpec): string {
-  return digest(canonicalJson({ post: spec.post ?? {}, out: spec.out }));
+	return digest(canonicalJson({ post: spec.post ?? {}, out: spec.out }));
 }
 
 function outputArea(spec: AssetSpec): number {
-  const size = spec.params['image_size'] as ImageSize | undefined;
-  if (size?.width && size?.height) return size.width * size.height;
-  const tile = spec.params['tile_size'] as ImageSize | undefined;
-  if (tile?.width && tile?.height) return tile.width * tile.height;
-  return 64 * 64;
+	const size = spec.params["image_size"] as ImageSize | undefined;
+	if (size?.width && size?.height) return size.width * size.height;
+	const tile = spec.params["tile_size"] as ImageSize | undefined;
+	if (tile?.width && tile?.height) return tile.width * tile.height;
+	return 64 * 64;
 }
 
 /** Directions actually animated — animation bills per direction. */
 function directionCount(spec: AssetSpec): number {
-  const dirs = spec.params['directions'];
-  if (Array.isArray(dirs)) return Math.max(1, dirs.length);
-  return COST_TABLE[spec.endpoint].billsPerDirection ? 8 : 1;
+	const dirs = spec.params["directions"];
+	if (Array.isArray(dirs)) return Math.max(1, dirs.length);
+	return COST_TABLE[spec.endpoint].billsPerDirection ? 8 : 1;
 }
 
 export function estimateAsset(spec: AssetSpec): CostEstimate {
-  const rule = COST_TABLE[spec.endpoint];
-  const per = estimateByArea(rule, outputArea(spec));
-  const n = directionCount(spec);
-  if (n === 1) return per;
-  return { low: per.low * n, point: per.point * n, high: per.high * n, confidence: per.confidence };
+	const rule = COST_TABLE[spec.endpoint];
+	const per = estimateByArea(rule, outputArea(spec));
+	const n = directionCount(spec);
+	if (n === 1) return per;
+	return {
+		low: per.low * n,
+		point: per.point * n,
+		high: per.high * n,
+		confidence: per.confidence,
+	};
 }
 
-export type PlanAction = 'skip' | 'reprocess' | 'redownload' | 'generate' | 'blocked-rejected';
+export type PlanAction =
+	| "skip"
+	| "reprocess"
+	| "redownload"
+	| "generate"
+	| "blocked-rejected";
 
 export interface PlanItem {
-  readonly asset: ResolvedAsset;
-  readonly action: PlanAction;
-  readonly reason: string;
+	readonly asset: ResolvedAsset;
+	readonly action: PlanAction;
+	readonly reason: string;
 }
 
 export interface RunPlan {
-  readonly items: readonly PlanItem[];
-  readonly toGenerate: readonly PlanItem[];
-  readonly estimate: CostEstimate;
-  readonly savedUsd: number;
-  readonly maxSingleAssetUsd: number;
-  readonly validationErrors: readonly string[];
+	readonly items: readonly PlanItem[];
+	readonly toGenerate: readonly PlanItem[];
+	readonly estimate: CostEstimate;
+	readonly savedUsd: number;
+	readonly maxSingleAssetUsd: number;
+	readonly validationErrors: readonly string[];
 }
 
 /**
@@ -181,255 +239,322 @@ export interface RunPlan {
  * charge. Cycles are a hard error rather than a hang.
  */
 export async function buildPlan(
-  specs: readonly AssetSpec[],
-  lock: Lockfile,
-  artifactExists: (path: string) => Promise<boolean>,
+	specs: readonly AssetSpec[],
+	lock: Lockfile,
+	artifactExists: (path: string) => Promise<boolean>,
 ): Promise<RunPlan> {
-  const ordered = topologicalSort(specs);
-  const resolved = new Map<AssetId, ResolvedAsset>();
-  const items: PlanItem[] = [];
-  const validationErrors: string[] = [];
+	const ordered = topologicalSort(specs);
+	const resolved = new Map<AssetId, ResolvedAsset>();
+	const items: PlanItem[] = [];
+	const validationErrors: string[] = [];
 
-  const ctx: HashContext = {
-    pipelineVersion: PIPELINE_VERSION,
-    parentSpecHash: (id) => {
-      const parent = resolved.get(id);
-      if (!parent) throw new Error(`dependência não resolvida: ${id}`);
-      return parent.specHash;
-    },
-    resolveInput: inputHash,
-  };
+	const ctx: HashContext = {
+		pipelineVersion: PIPELINE_VERSION,
+		parentSpecHash: (id) => {
+			const parent = resolved.get(id);
+			if (!parent) throw new Error(`dependência não resolvida: ${id}`);
+			return parent.specHash;
+		},
+		resolveInput: inputHash,
+	};
 
-  for (const spec of ordered) {
-    const size = spec.params['image_size'] as ImageSize | undefined;
-    if (size) {
-      for (const problem of validateSize(spec.endpoint, size)) {
-        validationErrors.push(`${spec.id}: ${problem}`);
-      }
-    }
-    if (spec.params['seed'] === undefined || spec.params['seed'] === null) {
-      validationErrors.push(
-        `${spec.id}: seed não travado — sem seed a geração não é reprodutível`,
-      );
-    }
+	for (const spec of ordered) {
+		const size = spec.params["image_size"] as ImageSize | undefined;
+		if (size) {
+			for (const problem of validateSize(spec.endpoint, size)) {
+				validationErrors.push(`${spec.id}: ${problem}`);
+			}
+		}
+		if (spec.params["seed"] === undefined || spec.params["seed"] === null) {
+			validationErrors.push(
+				`${spec.id}: seed não travado — sem seed a geração não é reprodutível`,
+			);
+		}
 
-    // Validate directions map before submission — a 422 arrives after the charge.
-    if (
-      spec.endpoint === 'create-character-with-8-directions' &&
-      spec.params['directions'] &&
-      typeof spec.params['directions'] === 'object' &&
-      !Array.isArray(spec.params['directions'])
-    ) {
-      const directions = spec.params['directions'] as Partial<Record<DirectionKey, string>>;
-      const allowed = new Set<string>(DIRECTION_KEYS);
-      for (const [dir, imgPath] of Object.entries(directions)) {
-        if (!allowed.has(dir)) {
-          validationErrors.push(
-            `${spec.id}: direção '${dir}' não é válida. Permitidas: ${DIRECTION_KEYS.join(', ')}`,
-          );
-        }
-        if (typeof imgPath === 'string' && size) {
-          try {
-            const meta = await sharp(await readFile(imgPath as string)).metadata();
-            if (meta.width !== size.width || meta.height !== size.height) {
-              validationErrors.push(
-                `${spec.id}: imagem da direção '${dir}' tem ${meta.width}x${meta.height}, esperado ${size.width}x${size.height}`,
-              );
-            }
-          } catch {
-            validationErrors.push(`${spec.id}: não foi possível ler a imagem da direção '${dir}' em '${imgPath}'`);
-          }
-        }
-      }
+		// Validate directions map before submission — a 422 arrives after the charge.
+		if (
+			spec.endpoint === "create-character-with-8-directions" &&
+			spec.params["directions"] &&
+			typeof spec.params["directions"] === "object" &&
+			!Array.isArray(spec.params["directions"])
+		) {
+			const directions = spec.params["directions"] as Partial<
+				Record<DirectionKey, string>
+			>;
+			const allowed = new Set<string>(DIRECTION_KEYS);
+			for (const [dir, imgPath] of Object.entries(directions)) {
+				if (!allowed.has(dir)) {
+					validationErrors.push(
+						`${spec.id}: direção '${dir}' não é válida. Permitidas: ${DIRECTION_KEYS.join(", ")}`,
+					);
+				}
+				if (typeof imgPath === "string" && size) {
+					try {
+						const meta = await sharp(
+							await readFile(imgPath as string),
+						).metadata();
+						if (meta.width !== size.width || meta.height !== size.height) {
+							validationErrors.push(
+								`${spec.id}: imagem da direção '${dir}' tem ${meta.width}x${meta.height}, esperado ${size.width}x${size.height}`,
+							);
+						}
+					} catch {
+						validationErrors.push(
+							`${spec.id}: não foi possível ler a imagem da direção '${dir}' em '${imgPath}'`,
+						);
+					}
+				}
+			}
 
-      const templateId = (spec.params['template_id'] as string) || 'mannequin';
-      const isQuadruped = (QUADRUPED_TEMPLATES as readonly string[]).includes(templateId);
-      if (!isQuadruped && !directions['south']) {
-        validationErrors.push(
-          `${spec.id}: templates bípedes exigem 'south' quando directions é fornecido`,
-        );
-      }
-      if (isQuadruped && (!directions['south'] || !directions['east'])) {
-        validationErrors.push(
-          `${spec.id}: templates quadrúpedes (${templateId}) exigem 'south' e 'east' quando directions é fornecido`,
-        );
-      }
-    }
+			const templateId = (spec.params["template_id"] as string) || "mannequin";
+			const isQuadruped = (QUADRUPED_TEMPLATES as readonly string[]).includes(
+				templateId,
+			);
+			if (!isQuadruped && !directions["south"]) {
+				validationErrors.push(
+					`${spec.id}: templates bípedes exigem 'south' quando directions é fornecido`,
+				);
+			}
+			if (isQuadruped && (!directions["south"] || !directions["east"])) {
+				validationErrors.push(
+					`${spec.id}: templates quadrúpedes (${templateId}) exigem 'south' e 'east' quando directions é fornecido`,
+				);
+			}
+		}
 
-    const specHash = await computeSpecHash(spec, ctx);
-    const postHash = computePostHash(spec);
-    const asset: ResolvedAsset = { ...spec, specHash, postHash, estimate: estimateAsset(spec) };
-    resolved.set(spec.id, asset);
+		const specHash = await computeSpecHash(spec, ctx);
+		const postHash = computePostHash(spec);
+		const asset: ResolvedAsset = {
+			...spec,
+			specHash,
+			postHash,
+			estimate: estimateAsset(spec),
+		};
+		resolved.set(spec.id, asset);
 
-    items.push({ asset, ...(await decide(asset, lock, artifactExists)) });
-  }
+		items.push({ asset, ...(await decide(asset, lock, artifactExists)) });
+	}
 
-  const toGenerate = items.filter((i) => i.action === 'generate');
-  const estimate = sumEstimates(toGenerate.map((i) => i.asset.estimate));
-  const savedUsd = items
-    .filter((i) => i.action === 'skip' || i.action === 'reprocess' || i.action === 'redownload')
-    .reduce((sum, i) => sum + i.asset.estimate.point, 0);
-  const maxSingleAssetUsd = toGenerate.reduce((m, i) => Math.max(m, i.asset.estimate.point), 0);
+	const toGenerate = items.filter((i) => i.action === "generate");
+	const estimate = sumEstimates(toGenerate.map((i) => i.asset.estimate));
+	const savedUsd = items
+		.filter(
+			(i) =>
+				i.action === "skip" ||
+				i.action === "reprocess" ||
+				i.action === "redownload",
+		)
+		.reduce((sum, i) => sum + i.asset.estimate.point, 0);
+	const maxSingleAssetUsd = toGenerate.reduce(
+		(m, i) => Math.max(m, i.asset.estimate.point),
+		0,
+	);
 
-  return { items, toGenerate, estimate, savedUsd, maxSingleAssetUsd, validationErrors };
+	return {
+		items,
+		toGenerate,
+		estimate,
+		savedUsd,
+		maxSingleAssetUsd,
+		validationErrors,
+	};
 }
 
 async function decide(
-  asset: ResolvedAsset,
-  lock: Lockfile,
-  artifactExists: (path: string) => Promise<boolean>,
+	asset: ResolvedAsset,
+	lock: Lockfile,
+	artifactExists: (path: string) => Promise<boolean>,
 ): Promise<{ action: PlanAction; reason: string }> {
-  const rejected = lock.rejectedHashes[asset.specHash];
-  if (rejected) {
-    return {
-      action: 'blocked-rejected',
-      reason: `este specHash já foi reprovado (${rejected.reason}) — não gerar de novo`,
-    };
-  }
+	const rejected = lock.rejectedHashes[asset.specHash];
+	if (rejected) {
+		return {
+			action: "blocked-rejected",
+			reason: `este specHash já foi reprovado (${rejected.reason}) — não gerar de novo`,
+		};
+	}
 
-  const entry = lock.assets[asset.id];
-  if (!entry) return { action: 'generate', reason: 'asset novo' };
+	const entry = lock.assets[asset.id];
+	if (!entry) return { action: "generate", reason: "asset novo" };
 
-  if (entry.specHash !== asset.specHash) {
-    return { action: 'generate', reason: 'spec mudou (params, input, seed ou dependência)' };
-  }
+	if (entry.specHash !== asset.specHash) {
+		return {
+			action: "generate",
+			reason: "spec mudou (params, input, seed ou dependência)",
+		};
+	}
 
-  let allPresent = true;
-  for (const a of entry.artifacts) {
-    if (!(await artifactExists(a.path))) { allPresent = false; break; }
-  }
+	let allPresent = true;
+	for (const a of entry.artifacts) {
+		if (!(await artifactExists(a.path))) {
+			allPresent = false;
+			break;
+		}
+	}
 
-  if (allPresent) {
-    return entry.postHash === asset.postHash
-      ? { action: 'skip', reason: 'já existe e nada mudou' }
-      : { action: 'reprocess', reason: 'só o pós-processamento mudou — custo zero' };
-  }
+	if (allPresent) {
+		return entry.postHash === asset.postHash
+			? { action: "skip", reason: "já existe e nada mudou" }
+			: {
+					action: "reprocess",
+					reason: "só o pós-processamento mudou — custo zero",
+				};
+	}
 
-  const rule = COST_TABLE[asset.endpoint];
-  if (rule.remoteCacheable && entry.remote && !entry.remote.ephemeral) {
-    return { action: 'redownload', reason: 'artefato local perdido, recurso remoto vivo — grátis' };
-  }
-  return {
-    action: 'generate',
-    reason: rule.ephemeralTtlHours
-      ? `artefato perdido e o recurso expira em ${rule.ephemeralTtlHours}h — regerar (pago)`
-      : 'artefato perdido e não há cópia remota — regerar (pago)',
-  };
+	const rule = COST_TABLE[asset.endpoint];
+	if (rule.remoteCacheable && entry.remote && !entry.remote.ephemeral) {
+		return {
+			action: "redownload",
+			reason: "artefato local perdido, recurso remoto vivo — grátis",
+		};
+	}
+	return {
+		action: "generate",
+		reason: rule.ephemeralTtlHours
+			? `artefato perdido e o recurso expira em ${rule.ephemeralTtlHours}h — regerar (pago)`
+			: "artefato perdido e não há cópia remota — regerar (pago)",
+	};
 }
 
 function topologicalSort(specs: readonly AssetSpec[]): AssetSpec[] {
-  const byId = new Map(specs.map((s) => [s.id, s]));
-  const state = new Map<AssetId, 'visiting' | 'done'>();
-  const out: AssetSpec[] = [];
+	const byId = new Map(specs.map((s) => [s.id, s]));
+	const state = new Map<AssetId, "visiting" | "done">();
+	const out: AssetSpec[] = [];
 
-  const visit = (spec: AssetSpec, trail: AssetId[]): void => {
-    const seen = state.get(spec.id);
-    if (seen === 'done') return;
-    if (seen === 'visiting') {
-      throw new Error(`ciclo de dependência: ${[...trail, spec.id].join(' -> ')}`);
-    }
-    state.set(spec.id, 'visiting');
-    for (const dep of spec.dependsOn ?? []) {
-      const parent = byId.get(dep);
-      if (!parent) throw new Error(`${spec.id} depende de ${dep}, que não existe no catálogo`);
-      visit(parent, [...trail, spec.id]);
-    }
-    state.set(spec.id, 'done');
-    out.push(spec);
-  };
+	const visit = (spec: AssetSpec, trail: AssetId[]): void => {
+		const seen = state.get(spec.id);
+		if (seen === "done") return;
+		if (seen === "visiting") {
+			throw new Error(
+				`ciclo de dependência: ${[...trail, spec.id].join(" -> ")}`,
+			);
+		}
+		state.set(spec.id, "visiting");
+		for (const dep of spec.dependsOn ?? []) {
+			const parent = byId.get(dep);
+			if (!parent)
+				throw new Error(
+					`${spec.id} depende de ${dep}, que não existe no catálogo`,
+				);
+			visit(parent, [...trail, spec.id]);
+		}
+		state.set(spec.id, "done");
+		out.push(spec);
+	};
 
-  for (const spec of specs) visit(spec, []);
-  return out;
+	for (const spec of specs) visit(spec, []);
+	return out;
 }
 
 /** Helpers used by the catalog files, so specs stay declarative and typed. */
 export function character8dir(args: {
-  id: AssetId; out: string; description: string; size: number; seed: number;
-  budgetGroup?: string; inputs?: readonly string[];
-  /** Generate in isometric view (default: omitted = API default `false`). */
-  isometric?: boolean;
-  /** Reference images per direction. Keys must be from `DIRECTION_KEYS`;
-   *  values are local file paths (base64-encoded at submit time).
-   *  Bipedal templates require `south` when any reference is given;
-   *  quadrupeds require both `south` and `east`. */
-  directions?: Partial<Record<DirectionKey, string>>;
+	id: AssetId;
+	out: string;
+	description: string;
+	size: number;
+	seed: number;
+	budgetGroup?: string;
+	inputs?: readonly string[];
+	/** Generate in isometric view (default: omitted = API default `false`). */
+	isometric?: boolean;
+	/** Reference images per direction. Keys must be from `DIRECTION_KEYS`;
+	 *  values are local file paths (base64-encoded at submit time).
+	 *  Bipedal templates require `south` when any reference is given;
+	 *  quadrupeds require both `south` and `east`. */
+	directions?: Partial<Record<DirectionKey, string>>;
 }): AssetSpec {
-  const directionPaths = args.directions ? Object.values(args.directions).filter((v): v is string => !!v) : [];
-  return {
-    id: args.id,
-    endpoint: 'create-character-with-8-directions',
-    out: args.out,
-    params: {
-      description: args.description,
-      image_size: { width: args.size, height: args.size },
-      view: 'low top-down',
-      mode: 'standard',
-      seed: args.seed,
-      ...(args.isometric ? { isometric: args.isometric } : {}),
-      ...(args.directions ? { directions: args.directions } : {}),
-    },
-    inputs: [...(args.inputs ?? []), ...directionPaths],
-    ...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
-  };
+	const directionPaths = args.directions
+		? Object.values(args.directions).filter((v): v is string => !!v)
+		: [];
+	return {
+		id: args.id,
+		endpoint: "create-character-with-8-directions",
+		out: args.out,
+		params: {
+			description: args.description,
+			image_size: { width: args.size, height: args.size },
+			view: "low top-down",
+			mode: "standard",
+			seed: args.seed,
+			...(args.isometric ? { isometric: args.isometric } : {}),
+			...(args.directions ? { directions: args.directions } : {}),
+		},
+		inputs: [...(args.inputs ?? []), ...directionPaths],
+		...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
+	};
 }
 
 export function animateCharacter(args: {
-  id: AssetId; out: string; dependsOn: AssetId; templateAnimationId: string;
-  seed: number; budgetGroup?: string;
+	id: AssetId;
+	out: string;
+	dependsOn: AssetId;
+	templateAnimationId: string;
+	seed: number;
+	budgetGroup?: string;
 }): AssetSpec {
-  return {
-    id: args.id,
-    endpoint: 'animate-character',
-    out: args.out,
-    dependsOn: [args.dependsOn],
-    params: {
-      // character_id is resolved from the lockfile at submit time.
-      template_animation_id: args.templateAnimationId,
-      mode: 'template',
-      seed: args.seed,
-    },
-    ...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
-  };
+	return {
+		id: args.id,
+		endpoint: "animate-character",
+		out: args.out,
+		dependsOn: [args.dependsOn],
+		params: {
+			// character_id is resolved from the lockfile at submit time.
+			template_animation_id: args.templateAnimationId,
+			mode: "template",
+			seed: args.seed,
+		},
+		...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
+	};
 }
 
 export function mapObject(args: {
-  id: AssetId; out: string; description: string; size: number; seed: number; budgetGroup?: string;
+	id: AssetId;
+	out: string;
+	description: string;
+	size: number;
+	seed: number;
+	budgetGroup?: string;
 }): AssetSpec {
-  return {
-    id: args.id,
-    endpoint: 'map-objects',
-    out: args.out,
-    params: {
-      description: args.description,
-      image_size: { width: args.size, height: args.size },
-      view: 'low top-down',
-      seed: args.seed,
-    },
-    ...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
-  };
+	return {
+		id: args.id,
+		endpoint: "map-objects",
+		out: args.out,
+		params: {
+			description: args.description,
+			image_size: { width: args.size, height: args.size },
+			view: "low top-down",
+			seed: args.seed,
+		},
+		...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
+	};
 }
 
 export function tileset(args: {
-  id: AssetId; out: string; lower: string; upper: string; tile: 16 | 32;
-  seed: number; transition?: string; budgetGroup?: string;
+	id: AssetId;
+	out: string;
+	lower: string;
+	upper: string;
+	tile: 16 | 32;
+	seed: number;
+	transition?: string;
+	budgetGroup?: string;
 }): AssetSpec {
-  return {
-    id: args.id,
-    endpoint: 'create-tileset',
-    out: args.out,
-    params: {
-      lower_description: args.lower,
-      upper_description: args.upper,
-      ...(args.transition ? { transition_description: args.transition } : {}),
-      tile_size: { width: args.tile, height: args.tile },
-      // Must be set explicitly: the API default is 'high top-down', but our
-      // characters are 'low top-down' and terrain has to match.
-      view: 'low top-down',
-      mode: 'standard',
-      seed: args.seed,
-    },
-    ...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
-  };
+	return {
+		id: args.id,
+		endpoint: "create-tileset",
+		out: args.out,
+		params: {
+			lower_description: args.lower,
+			upper_description: args.upper,
+			...(args.transition ? { transition_description: args.transition } : {}),
+			tile_size: { width: args.tile, height: args.tile },
+			// Must be set explicitly: the API default is 'high top-down', but our
+			// characters are 'low top-down' and terrain has to match.
+			view: "low top-down",
+			mode: "standard",
+			seed: args.seed,
+		},
+		...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
+	};
 }
 
 export { ENDPOINTS };
