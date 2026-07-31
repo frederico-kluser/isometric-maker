@@ -15,7 +15,7 @@ Um **construtor de jogos isométricos**: monta o personagem a partir de uma imag
 > ```
 
 | Quero… | Vá para |
-|---|---|
+| --- | --- |
 | Entender o produto em 5 minutos | [`docs/00-produto/visao.md`](docs/00-produto/visao.md) |
 | Saber o que cada termo significa | [`docs/00-produto/glossario.md`](docs/00-produto/glossario.md) |
 | Usar o PixelLab (a fonte de toda a arte) | [`docs/01-pixellab/README.md`](docs/01-pixellab/README.md) |
@@ -43,7 +43,7 @@ Este repositório já foi um MMORPG hardcore. O pivô aconteceu em 2026-07-30, a
 ## Requisitos
 
 | Requisito | Detalhe |
-|---|---|
+| --- | --- |
 | `PIXELLAB_SECRET` | **Obrigatório.** Token de `https://pixellab.ai/account`. Fica só no processo Node, nunca chega ao navegador. **Não há dotenv** — exporte na shell |
 | `PIXELLAB_TIER` | `free` \| `t1` \| `t2` \| `t3`, default `t1`. Define quantos jobs correm em paralelo (1 / 2 / 4 / 20) |
 | Node.js | **≥ 24.** Executa `.ts` direto, sem passo de build |
@@ -54,13 +54,14 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 ## Estado atual
 
 | Parte | Estado |
-|---|---|
+| --- | --- |
 | Pipeline de assets | **funcional** — 9 comandos, idempotente, guard de custo, empacotador de atlas |
 | Sprite Studio (vira o construtor de personagem) | **funcional** — gera personagem em 8 direções, poses e guarda-roupa |
 | Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 29 skills verificadas |
-| Documentação | **22 docs, todos escritos.** O índice não lista arquivo inexistente |
-| Construtor de personagem (prévia PixiJS, editor de esqueleto) | não começou |
-| Construtor de mapa, mecânicas, runtime | não começou |
+| Documentação | **28 docs escritos.** O índice não lista arquivo inexistente |
+| Construtor de personagem (prévia PixiJS, editor de esqueleto) | **funcional** — estúdio com editor de esqueleto e diálogo de custo |
+| Construtor de mapa (geometria, tiles, autoladrilhamento) | **funcional** — `packages/iso-core` (5.612 linhas) + `tools/map-builder` (2.716 linhas) |
+| Runtime (renderizador, exportação, preview) | **funcional** — `tools/runtime` (795 linhas) |
 | Assets gerados | **zero.** O lockfile não existe e o ledger está vazio |
 
 ## Convenções

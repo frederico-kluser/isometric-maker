@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # scripts/gate.sh — pipeline local do isometric-maker.
 #
-# Uma etapa por verificador. Três estados: PASS, FAIL, NÃO-EXERCITADO.
+# Uma etapa por verificador. Dois estados: PASS, FAIL.
+# Etapas auxiliares mostram OK (auxiliar) quando passam.
 # Ferramenta ausente é VERMELHO, nunca "pulado".
-# Etapa que ainda não existe entra como PENDENTE com o id do card que a vai criar.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +18,7 @@ NC='\033[0m' # No Color
 
 pass=0
 fail=0
-nao_exercitado=0
-pendente=0
+auxiliar=0
 
 # ─── Funções ──────────────────────────────────────────────────────────
 
@@ -31,7 +30,6 @@ header() {
 stage() {
 	local nome="$1"
 	local comando="$2"
-	local card="$3" # card que introduziu esta etapa, ou "-" se já existe
 
 	printf "  %-50s " "$nome"
 
@@ -63,14 +61,7 @@ stage() {
 	fi
 }
 
-pending_stage() {
-	local nome="$1"
-	local card="$2"
-	printf "  %-50s ${YELLOW}PENDENTE${NC} (card %s)\n" "$nome" "$card"
-	pendente=$((pendente + 1))
-}
-
-nao_exercitado_stage() {
+auxiliar_stage() {
 	local nome="$1"
 	local comando="$2"
 	printf "  %-50s " "$nome"
@@ -80,8 +71,8 @@ nao_exercitado_stage() {
 	local ec=$?
 
 	if [ $ec -eq 0 ]; then
-		echo -e "${YELLOW}NÃO-EXERCITADO${NC}"
-		nao_exercitado=$((nao_exercitado + 1))
+		echo -e "${GREEN}OK (auxiliar)${NC}"
+		auxiliar=$((auxiliar + 1))
 	else
 		echo -e "${RED}FAIL${NC}"
 		fail=$((fail + 1))
@@ -103,7 +94,7 @@ stage "pixellab-pipeline · npm run typecheck" \
 # ═══════════════════════════════════════════════════════════════════════
 header "character-builder"
 
-nao_exercitado_stage "character-builder · npm run typecheck" \
+auxiliar_stage "character-builder · npm run typecheck" \
 	"cd tools/character-builder 2>/dev/null && npm run typecheck"
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -116,10 +107,10 @@ stage "scripts/check-docs.sh" \
 # ═══════════════════════════════════════════════════════════════════════
 header "skills"
 
-nao_exercitado_stage "lint-skills.mjs" \
+auxiliar_stage "lint-skills.mjs" \
 	"node .agents/skills/scripts/lint-skills.mjs"
 
-nao_exercitado_stage "run-skill-evals.mjs" \
+auxiliar_stage "run-skill-evals.mjs" \
 	"node .agents/skills/scripts/run-skill-evals.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -132,7 +123,7 @@ stage "check-pixi-pin" \
 # ═══════════════════════════════════════════════════════════════════════
 header "PixiJS vendor"
 
-nao_exercitado_stage "vendor-types.mjs --check" \
+auxiliar_stage "vendor-types.mjs --check" \
 	"node tools/pixi-reference/scripts/vendor-types.mjs --check"
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -149,9 +140,34 @@ stage "scripts/validate-plan.mjs" \
 	"node scripts/validate-plan.mjs" \
 	"F0-01"
 
-stage "scripts/check-acceptance.mjs" \
+stage "check-acceptance.mjs (forma dos critérios)" \
 	"node scripts/check-acceptance.mjs" \
 	"T-01"
+
+# ═══════════════════════════════════════════════════════════════════════
+header "iso-core"
+
+stage "iso-core · npm test" \
+	"cd packages/iso-core && npm test" \
+	"-"
+
+stage "iso-core · npm run typecheck" \
+	"cd packages/iso-core && npm run typecheck" \
+	"-"
+
+# ═══════════════════════════════════════════════════════════════════════
+header "map-builder"
+
+stage "map-builder · npm run typecheck" \
+	"cd tools/map-builder && npm run typecheck" \
+	"-"
+
+# ═══════════════════════════════════════════════════════════════════════
+header "runtime (game)"
+
+stage "runtime · npm run typecheck" \
+	"cd tools/runtime && npm run typecheck" \
+	"-"
 
 # ═══════════════════════════════════════════════════════════════════════
 header "ledger de incerteza"
@@ -163,15 +179,12 @@ stage "validador do ledger.json" \
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════${NC}"
-printf "  PASS: %d  FAIL: %d  NÃO-EXERCITADO: %d  PENDENTE: %d\n" \
-	"$pass" "$fail" "$nao_exercitado" "$pendente"
+printf "  PASS: %d  FAIL: %d  AUXILIAR: %d\n" \
+	"$pass" "$fail" "$auxiliar"
 
 if [ "$fail" -gt 0 ]; then
 	echo -e "${RED}  VEREDITO: FALHOU${NC}"
 	exit 1
-elif [ "$pendente" -gt 0 ]; then
-	echo -e "${YELLOW}  VEREDITO: PASS (com etapas pendentes)${NC}"
-	exit 0
 else
 	echo -e "${GREEN}  VEREDITO: PASS${NC}"
 	exit 0

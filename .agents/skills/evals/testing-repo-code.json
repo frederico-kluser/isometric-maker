@@ -15,12 +15,8 @@
       "why": "the runner invocation; there is no jest or vitest in this repo"
     },
     {
-      "must_contain": "no external signal",
-      "why": "the honest statement that money-critical changes cannot currently be validated by a test"
-    },
-    {
-      "must_contain": "That test does not exist",
-      "why": "AGENTS.md now names the missing idempotency test itself; the skill must keep stating the gap plainly until the test lands, so no agent reads the guarantee as enforced"
+      "must_contain": "Known gaps",
+      "why": "the skill must honestly state which edge cases are still uncovered, so no agent reads the green suite as proving full coverage"
     },
     {
       "must_contain": "There is no CI",

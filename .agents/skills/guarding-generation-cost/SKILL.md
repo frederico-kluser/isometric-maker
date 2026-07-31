@@ -18,19 +18,12 @@ after any crash or interruption.
 ### The contract
 
 > "Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o
-> mesmo spec **não deve gastar nada**. […] **O teste que prova isso ainda não existe; escrevê-lo é
-> item de entrada da próxima onda.**" — `AGENTS.md:37@eb529ae5`
+> mesmo spec **não deve gastar nada**." — `AGENTS.md:37`
 
-`plan` and `estimate` never touch the network in a paid way. `generate` spends. That asymmetry is
-the whole design, and it only holds while the hashes hold.
-
-The contract has two halves and only one of them is hard. **Idempotency is law** — it is what makes
-the most common mistake, regenerating what already exists, cost zero. The budget guard is advice: it
-informs and never refuses (`docs/adr/0012-guard-de-orcamento-informativo.md:26@23c76213`). So every
-sentence below about hashing is load-bearing in a way no sentence about thresholds is, and the
-honest reading of that is uncomfortable: the one hard defence left has **no test proving it**
-(`docs/adr/0012-guard-de-orcamento-informativo.md:60@23c76213`). Treat any change to `catalog.ts` or
-to a hash function as unprotected by the suite until those tests exist.
+O teste de idempotência existe e passa em `catalog.test.ts` (`same catalog + lockfile ⇒ skip,
+zero actions, zero cost`), mas não cobre todos os caminhos de regressão (reencode de PNG,
+drift de schema, `runResume`). Trate mudanças em `catalog.ts` ou nas funções de hash como
+parcialmente protegidas: o caso base está coberto, os casos de borda não.
 
 `--force` breaks **idempotency, not the budget** — that is why it still requires `--reason`
 (`AGENTS.md:39@eb529ae5`). No CLI flag by that name exists in `cli.ts` today; the implemented lever
@@ -95,7 +88,7 @@ accepted three hundred times is exactly how an informative guard becomes a US$ 6
 Numbers at `tools/pixellab-pipeline/src/cost.ts:293@e3fe3b1f`; evaluation order at `:326`.
 
 | Threshold | Compares | Against |
-|---|---|---|
+| --- | --- | --- |
 | asset | most expensive single asset, **point** estimate | 0.30 |
 | run | **high** (worst-case) estimate | 15 |
 | monthly | spent-this-month + **point** | 60 |
@@ -201,12 +194,13 @@ On task completion, run the memory pipeline. The external signal for this skill 
 `cd tools/pixellab-pipeline && npm test && node src/cli.ts plan`: the suite must stay green **and**
 `plan` must still report the same asset count on an unchanged catalog, with nothing new to generate
 once the lockfile has entries. If `plan` starts wanting to generate what it previously skipped,
-idempotency broke — that is a red signal, not a finding to record. The suite passing does **not**
-prove idempotency: the six green tests cover atlas, util and endpoints only.
+idempotency broke — that is a red signal, not a finding to record. The suite passing does prove the common idempotency path (`catalog.test.ts`), but the
+uncovered edge cases — `runResume` lockfile entries, POST retry without idempotency key,
+`WeightedSemaphore` interleaving — can still produce silent regressions. A green suite means the
+happy path holds; do not read it as proof the edge cases are absent.
 
 Record only what changes how future work here is done: a new trap, a corrected threshold, a
 confirmed behaviour of the queue. Do not record run outcomes, asset counts, or costs of a particular
-run — those are facts about a moment, not about the system. If the pipeline's untested modules
-caused the finding, note that the signal was a user confirmation rather than a test, because
-`catalog.ts`, `cost.ts`, `generate.ts` and `queue.ts` still have no coverage — the declared open
-risk of loosening the guard (`docs/adr/0012-guard-de-orcamento-informativo.md:60@23c76213`).
+run — those are facts about a moment, not about the system. If an untested edge case caused the
+finding, note that the signal was a user confirmation rather than a test, because the coverage gaps
+(`runResume` lockfile, POST retry, semaphore interleaving) are known and documented.

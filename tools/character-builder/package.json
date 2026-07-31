@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "npx tsx server/rotate.test.ts"
+    "test": "node --test server/*.test.ts src/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
     "pixi.js": "8.19.0"

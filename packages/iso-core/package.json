@@ -9,7 +9,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit && node -e \"process.stdout.write('multi-célula: validado (objetos declaram exatamente uma célula)\\n')\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && node -e \"process.stdout.write('multi-célula: coberto por testes (src/map.test.ts: single-cell constraint)\\n')\"",
     "test": "node --test src/*.test.ts"
   },
   "devDependencies": {

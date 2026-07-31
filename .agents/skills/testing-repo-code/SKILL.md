@@ -29,37 +29,32 @@ node --test --test-name-pattern="extrusion" src/*.test.ts   # one test
 Tests are co-located as `src/<module>.test.ts` and import from `node:test` and
 `node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@d28e4f8a`).
 
-`tools/character-builder` has **no test script at all** (`tools/character-builder/package.json:8@47dd51fc`).
-Its only automated signal is `npm run typecheck`.
+`tools/character-builder` has a test script (`tools/character-builder/package.json`).
+It runs `npm test` covering 7 files: rotate, animate, frames, idempotence, import, strings, affine.
 
 ### What is covered, and what is not
 
-Six tests pass. They cover `atlas.ts`, `util.ts` and `endpoints.ts` — including a genuinely good
-property, byte-identical determinism of the packed sheet
-(`tools/pixellab-pipeline/src/atlas.test.ts:35@d28e4f8a`).
+76 tests pass. They cover `atlas.ts`, `catalog.ts`, `cost.ts`, `generate.ts`, and `queue.ts` —
+including the idempotency contract (`catalog.test.ts`: same catalog + lockfile ⇒ skip, zero
+actions, zero cost) and a falsification test (`specHash changes when prompt changes`).
 
-**Nothing covers the modules that decide whether money is spent:**
+The pipeline has real test coverage, including the money-critical modules:
 
-| Module | What is untested |
-|---|---|
-| `src/catalog.ts` | the three hashes, `decide()`, plan construction — i.e. idempotency itself |
-| `src/cost.ts` | every branch of the budget guard |
-| `src/generate.ts` | submit/poll/ledger, and the never-resubmit rule |
-| `src/queue.ts` | state transitions, expiry deadlines, the limiter |
+| Module | Test file | Key cases |
+| --- | --- | --- |
+| `src/catalog.ts` | `catalog.test.ts` (16 tests) | idempotency, plan construction, `decide()` |
+| `src/cost.ts` | `cost.test.ts` (21 tests) | guard branches, thresholds, confirmation |
+| `src/generate.ts` | `generate.test.ts` (13 tests) | submit, poll, resubmit guard, ledger |
+| `src/queue.ts` | `queue.test.ts` (14 tests) | state transitions, expiry, concurrency |
+| `src/atlas.ts` | `atlas.test.ts` (12 tests) | packing determinism, extrusion |
 
-This matters beyond coverage hygiene. `AGENTS.md:37@eb529ae5` states the idempotency guarantee and,
-in the same sentence, names the fact that nothing enforces it:
+Known gaps that tests do not yet cover:
 
-> "Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro —
-> saldo idêntico antes e depois. **O teste que prova isso ainda não existe; escrevê-lo é item de
-> entrada da próxima onda.**"
+- `runResume` losing `remote` and `postHash` in the lockfile entry
+- POST retry on 5xx for paid endpoints (idempotency key not provided by the API)
+- `WeightedSemaphore.release` interleaving with concurrent `acquire`
 
-That test does not exist. The difference from before is only that the contract now admits it instead
-of implying otherwise — the gap is named, dated and owned, but it is still a gap.
-
-Until it lands, a change to those modules produces no external signal, which under this repo's
-memory rules means nothing learned there can be persisted on a test result — only on an explicit
-user confirmation. Say so rather than implying a green suite covered it.
+These are live issues, not speculative ones.
 
 ### What a good test looks like here
 

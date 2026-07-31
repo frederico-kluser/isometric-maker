@@ -5,7 +5,7 @@ Instruções para agentes de código que trabalham neste repositório. `CLAUDE.m
 ## Idioma — não confunda os dois eixos
 
 | O que | Idioma |
-|---|---|
+| --- | --- |
 | Documentação (`docs/`), README, ADRs, comentários explicativos longos | **português do Brasil** |
 | Todo texto que o usuário do editor lê (UI, mensagens de erro) e o texto do jogo exportado | **português do Brasil** |
 | Código: identificadores, tipos, funções, arquivos de código, chaves de JSON de dados | **inglês** |
@@ -34,11 +34,12 @@ Ao citar preço, escreva **"preço estimado"**. A própria PixelLab rotula a col
 
 ## Regra dura: nada de custo surpresa
 
-Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o mesmo spec **não deve gastar nada**. Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro — saldo idêntico antes e depois. **O teste que prova isso ainda não existe; escrevê-lo é item de entrada da próxima onda.**
+Todo asset gerado gasta dinheiro real. O pipeline é idempotente por design: gerar de novo com o mesmo spec **não deve gastar nada**. Se você mexer em `src/catalog.ts` ou na função de hash, isso tem que continuar verdadeiro — saldo idêntico antes e depois. O teste de idempotência existe e passa (`catalog.test.ts`), mas não cobre todos os caminhos de regressão (reencode de PNG, drift de schema, `runResume`).
 
 **Sempre rode `pixellab plan` e `pixellab estimate` antes de qualquer geração.** O guard **informa e nunca recusa** ([ADR 0012](docs/adr/0012-guard-de-orcamento-informativo.md)) — ele estima, mostra o gasto da sessão e do mês, e pede confirmação. Nunca use `--force` sem `--reason`: `--force` fura a **idempotência**, não o orçamento.
 
 Duas decisões de hash que parecem detalhe e não são:
+
 - O `inputHash` é dos **pixels decodificados**, não dos bytes do arquivo. Reencodar um PNG muda os bytes e não muda a imagem; hashear bytes cobraria de novo por nada.
 - O hash do schema OpenAPI **não entra** no `specHash`. Se a PixelLab mexer num campo que nem usamos, incluí-lo invalidaria o catálogo inteiro e geraria uma fatura por zero benefício. Drift de schema é **aviso** do `doctor`, nunca invalidação de cache.
 
@@ -67,10 +68,10 @@ Herdadas de `/home/ondokai/Projects/config/CLAUDE.md`, que é o padrão do usuá
 
 Além disso, específico deste repo:
 
-9. Armadilhas e limitações em seção própria, honestas. Não venda a ferramenta.
-10. Marcar explicitamente o que é estimativa, o que é derivado e o que **não foi verificado**.
-11. **Atualizar a tabela de `docs/README.md` ao adicionar uma doc nova — sempre.**
-12. Não criar doc especulativa. Doc de infra escrita antes de existir infra é ficção.
+1. Armadilhas e limitações em seção própria, honestas. Não venda a ferramenta.
+2. Marcar explicitamente o que é estimativa, o que é derivado e o que **não foi verificado**.
+3. **Atualizar a tabela de `docs/README.md` ao adicionar uma doc nova — sempre.**
+4. Não criar doc especulativa. Doc de infra escrita antes de existir infra é ficção.
 
 Se algo não foi verificado, escreva que não foi verificado. Documentação que finge certeza é pior que documentação ausente, porque ninguém vai checar depois.
 
@@ -81,16 +82,39 @@ Se algo não foi verificado, escreva que não foi verificado. Documentação que
 Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da sua ferramenta.
 
 ```bash
-cd tools/pixellab-pipeline && npm test         # node --test src/*.test.ts
+# Pipeline e assets
+cd tools/pixellab-pipeline && npm test              # node --test src/*.test.ts (76 testes)
 cd tools/pixellab-pipeline && npm run typecheck
+# Estúdio de personagem
 cd tools/character-builder && npm run typecheck
-bash scripts/check-docs.sh                     # convenções de doc + endpoints + termos proibidos + links
-node .agents/skills/scripts/lint-skills.mjs    # formato das skills
+cd tools/character-builder && npm test              # 7 arquivos de teste
+# Mapa e geometria
+cd packages/iso-core && npm run typecheck
+cd packages/iso-core && npm test                    # 290 testes
+cd tools/map-builder && npm run typecheck
+cd tools/map-builder && npm test                    # autotile, export, picking
+# Runtime
+cd tools/runtime && npm run typecheck
+# Verificadores e docs
+bash scripts/gate.sh                                # portão de merge completo
+bash scripts/check-docs.sh                          # convenções de doc + endpoints + termos proibidos + links
+node .agents/skills/scripts/lint-skills.mjs         # formato das skills
 node .agents/skills/scripts/run-skill-evals.mjs
-node tools/pixi-reference/scripts/vendor-types.mjs --check   # integridade do vendor do PixiJS
+node tools/pixi-reference/scripts/vendor-types.mjs --check  # integridade do vendor do PixiJS
 ```
 
-Não há linter, formatter nem CI neste repositório. O compilador e esses scripts são as únicas opiniões automatizadas que existem.
+Não há linter, formatter nem CI neste repositório. O compilador e os scripts em `scripts/` são as únicas opiniões automatizadas que existem.
+
+| Script | O que verifica |
+| --- | --- |
+| `scripts/gate.sh` | Portão de merge: typecheck + testes de `pixellab-pipeline`, `iso-core`, `map-builder`, `runtime`; `check-docs.sh`; pin do PixiJS; fronteira do runtime; validadores de plano e ledger |
+| `scripts/check-docs.sh` | Convenções de documentação, termos proibidos, links |
+| `scripts/check-pixi-pin.mjs` | Versão do PixiJS está congelada |
+| `scripts/check-runtime-boundary.sh` | Fronteira entre `iso-core` e `runtime` não foi violada |
+| `scripts/validate-plan.mjs` | Integridade do `plan.json` |
+| `scripts/validate-ledger.mjs` | Integridade do ledger de incerteza |
+| `scripts/check-acceptance.mjs` | Forma dos critérios de aceitação (são falsificáveis, não se foram atendidos) |
+| `scripts/new-task-worktree.sh` | Cria worktree para nova task |
 
 ## Skills
 
