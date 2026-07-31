@@ -1,4 +1,7 @@
+import path from 'node:path';
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { handle } from './server/api.ts';
 
 /**
@@ -7,6 +10,7 @@ import { handle } from './server/api.ts';
  * this tool spends real money.
  */
 export default defineConfig({
+  resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
   server: {
     port: 5174,
     fs: { allow: ['..', '../..'] },
@@ -15,6 +19,8 @@ export default defineConfig({
   // new files appear without a rebuild.
   publicDir: 'assets',
   plugins: [
+    react(),
+    tailwindcss(),
     {
       name: 'character-builder-api',
       configureServer(server) {

@@ -6,44 +6,84 @@
  *   2. Long jobs. Generation takes 2-5 minutes; the browser polls this server,
  *      which owns the job registry and survives a page reload.
  *
- * The transport itself (429/529/423 handling, backoff, poll) is reused from the
- * pipeline rather than reimplemented — it is already tested.
+ * v2: o fluxo antigo de "modelo base" morreu — quem constrói o corpo é o
+ * wizard (server/mannequin.ts), em cadeia derivativa: sul por texto → edição
+ * → cardeais → 8 direções. Estas rotas só fazem a fiação: validam o pedido,
+ * escolhem as chaves canônicas de célula e disparam o módulo certo.
+ *
+ * Política de células (a UI lê o status por elas):
+ *   - As rotas do wizard NÃO pré-marcam célula 'gerando': a idempotência de
+ *     mannequin.ts lê o status 'pronto' da célula, e sobrescrevê-lo faria uma
+ *     geração já paga sair de novo. O andamento chega à UI pelo registro de
+ *     jobs, exposto em /api/studio.
+ *   - O MÓDULO escreve as células de sucesso (mannequin.ts grava as três
+ *     cardeais uma a uma; generatePose/generateWardrobe gravam a sua).
+ *   - O spawn escreve célula só na FALHA, e só nas chaves canônicas que não
+ *     estão 'pronto': uma cardeal concluída sobrevive à falha da irmã, e a
+ *     re-execução refaz só o que faltou.
+ *   - Poses e guarda-roupa pré-marcam 'gerando' SÓ quando a célula não está
+ *     'pronto': a rota responde 200 sem spawn numa célula pronta, e
+ *     generatePose/generateWardrobe releem a célula no início e retornam sem
+ *     chamar a API — 'pronto' é terminal de ponta a ponta, como no wizard.
  */
-import { appendFileSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { inflateSync } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PixelLabClient, pollJob } from "../../pixellab-pipeline/src/api.ts";
 import {
-	COST_TABLE,
-	estimateByArea,
-	checkBudget,
-	type BudgetReport,
-} from "../../pixellab-pipeline/src/cost.ts";
-import { rotateCardinals, estimateRotate, type RotateInput } from "./rotate.ts";
-import { validateImport } from "../src/import.ts";
+	generateSouthFromText,
+	editSouth,
+	undoSouth,
+	rotateCardinals,
+	generateDirections8,
+	type StudioStore,
+	type WizardOpts,
+} from "./mannequin.ts";
+import { exportMannequin, importMannequin } from "./mannequin-io.ts";
 import {
-	parseAndWriteFrames,
-	UnknownDirectionError,
-	MissingDirectionError,
-} from "./frames.ts";
-import { getEstimateReport, trackSpend } from "./estimate.ts";
+	runRotateLab,
+	RotateLabValidationError,
+	type RotateLabInput,
+} from "./rotate-lab.ts";
 import {
 	DIRECTIONS,
+	cardinalKey,
 	cellKey,
+	directions8Key,
 	seedStudio,
+	southKey,
 	wardrobeKey,
-	type Cell,
 	type Character,
+	type Keypoint,
+	type MannequinLock,
 	type Pose,
+	type PoseKind,
+	type Silhouette,
 	type Studio,
+	type TemplateAnimation,
 	type WardrobeItem,
 } from "./model.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const STUDIO_JSON = join(ROOT, "studio.json");
+// Test seam: lets server/api.test.ts point the state at a tmpdir. Never set
+// in normal use — the default is the tool's own studio.json.
+const STUDIO_JSON =
+	process.env["CHARACTER_BUILDER_STUDIO_JSON"] ?? join(ROOT, "studio.json");
 const ASSETS = join(ROOT, "assets");
+const LEDGER_PATH = join(ASSETS, "ledger.ndjson");
+/** Onde o bundle default do projeto mora (mannequin.json + 12 PNGs). */
+const MANNEQUIN_DEFAULT_DIR = join(
+	ROOT,
+	"../../packages/game-assets/manequim",
+);
+
+const SILHOUETTES: readonly Silhouette[] = [
+	"humano-medio",
+	"humano-corpulento",
+	"humano-esguio",
+	"quadrupede",
+];
 
 // ---------------------------------------------------------------- persistence
 
@@ -68,6 +108,9 @@ async function save(s: Studio): Promise<void> {
 	const { rename } = await import("node:fs/promises");
 	await rename(tmp, STUDIO_JSON);
 }
+
+/** A implementação de StudioStore que os módulos do wizard/export recebem. */
+const store: StudioStore = { load, save };
 
 // ---------------------------------------------------------------- job registry
 
@@ -146,404 +189,75 @@ async function writeFrames(
 	return frames;
 }
 
-// ---------------------------------------------------------------- helpers
-
-function sanitize(s: string): string {
-	return s.replace(/[^a-z0-9-]+/gi, "_");
-}
-
-function appendLedger(path: string, line: Record<string, unknown>): void {
-	mkdirSync(join(path, ".."), { recursive: true });
-	appendFileSync(path, `${JSON.stringify(line)}\n`);
-}
-
-function logBudgetReport(label: string, report: BudgetReport): void {
-	const e = report.estimate;
-	const lines = [
-		`[guard] ${label}: ${e.point.toFixed(4)} USD ` +
-			`(faixa ${e.low.toFixed(4)}–${e.high.toFixed(4)}, confiança ${e.confidence})`,
-	];
-	if (report.avisos.length > 0) {
-		for (const a of report.avisos) {
-			lines.push(`[guard]   aviso [${a.code}]: ${a.text}`);
-		}
-	}
-	// O guard informa e nunca recusa (F0-03). Logamos e seguimos.
-	for (const line of lines) console.log(line);
-}
-
-// ---------------------------------------------------------------- prova de congelamento
+// ---------------------------------------------------------------- wizard plumbing
 
 /**
- * Decodifica os pixels de um PNG 8 bpc RGB/RGBA usando só node:zlib.
- * Retorna null se o PNG não estiver num formato suportado.
+ * Opções comuns dos módulos do wizard: assets, ledger e log no stdout do
+ * servidor. `referenceB64` é o PNG da sul do manequim — presente só para
+ * personagens derivados (ver mannequinSouthB64); vai como color_image nos
+ * endpoints que o aceitam, prendendo a paleta do derivado à do manequim.
  */
-function decodePNGPixels(
-	b64: string,
-): { width: number; height: number; pixels: Buffer } | null {
-	const buf = Buffer.from(b64, "base64");
-	if (buf.length < 8) return null;
-	// Assinatura PNG
-	const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
-	for (let i = 0; i < 8; i += 1) if (buf[i] !== SIG[i]) return null;
+function wizardOpts(referenceB64?: string): WizardOpts {
+	return {
+		assetsDir: ASSETS,
+		ledgerPath: LEDGER_PATH,
+		onLog: (m) => console.log(m),
+		...(referenceB64 !== undefined
+			? { reference: { colorImageB64: referenceB64 } }
+			: {}),
+	};
+}
 
-	let pos = 8;
-	let width = 0,
-		height = 0,
-		bitDepth = 0,
-		colorType = 0;
-	const idatChunks: Buffer[] = [];
-
-	while (pos + 12 <= buf.length) {
-		const len = buf.readUInt32BE(pos);
-		const type = buf.toString("ascii", pos + 4, pos + 8);
-
-		if (type === "IHDR") {
-			width = buf.readUInt32BE(pos + 8);
-			height = buf.readUInt32BE(pos + 12);
-			bitDepth = buf[pos + 16]!;
-			colorType = buf[pos + 17]!;
-		} else if (type === "IDAT") {
-			idatChunks.push(buf.subarray(pos + 8, pos + 8 + len));
-		} else if (type === "IEND") {
-			break;
-		}
-		pos += 12 + len;
-	}
-
-	if (idatChunks.length === 0 || width === 0 || height === 0) return null;
-	if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) return null;
-
-	const channels = colorType === 6 ? 4 : 3;
-	const raw = inflateSync(Buffer.concat(idatChunks));
-	const stride = 1 + width * channels; // 1 filter byte + scanline
-	const pixels = Buffer.alloc(width * height * channels);
-
-	// Desfiltra cada scanline (None, Sub, Up, Average, Paeth).
-	for (let y = 0; y < height; y += 1) {
-		const row = raw.subarray(y * stride, (y + 1) * stride);
-		const filter = row[0]!;
-		const scanline = row.subarray(1);
-		const outRow = pixels.subarray(
-			y * width * channels,
-			(y + 1) * width * channels,
+/**
+ * PNG da sul ativa do manequim, lido do disco a partir da célula — funciona
+ * tanto para o manequim gerado no wizard (/assets/wizard/manequim/…) quanto
+ * para o importado do bundle default (/assets/manequim/south.png).
+ *
+ * Ausência NÃO é erro: devolve undefined e avisa no log. Um derivado gerado
+ * sem referência só perde a paleta travada; bloquear a geração por um arquivo
+ * recuperável seria pior.
+ */
+async function mannequinSouthB64(s: Studio): Promise<string | undefined> {
+	const cell = s.cells[southKey("manequim")];
+	if (cell?.status !== "pronto") return undefined;
+	const pub = cell.frames?.["south"]?.[0];
+	if (pub === undefined) return undefined;
+	const fsPath = join(ASSETS, pub.replace(/^\/+/, "").replace(/^assets\//, ""));
+	try {
+		return (await readFile(fsPath)).toString("base64");
+	} catch {
+		console.log(
+			`[wizard] sul do manequim não encontrada no disco (${fsPath}) — ` +
+				"o derivado segue sem color_image.",
 		);
-
-		for (let x = 0; x < scanline.length; x += 1) {
-			const left = x >= channels ? outRow[x - channels]! : 0;
-			const up = y > 0 ? pixels[(y - 1) * width * channels + x]! : 0;
-			const upLeft =
-				y > 0 && x >= channels
-					? pixels[(y - 1) * width * channels + x - channels]!
-					: 0;
-
-			let val = scanline[x]!;
-			switch (filter) {
-				case 0:
-					break; // None
-				case 1:
-					val = (val + left) & 0xff;
-					break; // Sub
-				case 2:
-					val = (val + up) & 0xff;
-					break; // Up
-				case 3:
-					val = (val + ((left + up) >> 1)) & 0xff;
-					break; // Average
-				case 4: {
-					// Paeth
-					const p = left + up - upLeft;
-					const pL = Math.abs(p - left);
-					const pU = Math.abs(p - up);
-					const pUL = Math.abs(p - upLeft);
-					const pr = pL <= pU && pL <= pUL ? left : pU <= pUL ? up : upLeft;
-					val = (val + pr) & 0xff;
-					break;
-				}
-				default:
-					return null; // filtro desconhecido
-			}
-			outRow[x] = val;
-		}
+		return undefined;
 	}
-
-	return { width, height, pixels };
-}
-
-/**
- * Compara os pixels decodificados de duas imagens PNG.
- * Retorna true se forem idênticos, false se diferirem, e null se a decodificação
- * falhar (formato não suportado).
- */
-function pixelsIdenticos(sentB64: string, returnedB64: string): boolean | null {
-	// Atalho: buffers idênticos = congelamento byte-a-byte confirmado.
-	if (
-		Buffer.from(sentB64, "base64").equals(Buffer.from(returnedB64, "base64"))
-	) {
-		return true;
-	}
-	// Comparação pixel a pixel para o caso de recompressão sem alteração.
-	const sent = decodePNGPixels(sentB64);
-	const returned = decodePNGPixels(returnedB64);
-	if (!sent || !returned) return null;
-	if (sent.width !== returned.width || sent.height !== returned.height)
-		return false;
-	return sent.pixels.equals(returned.pixels);
-}
-
-/**
- * Verifica que as 4 cardeais devolvidas pela API têm os mesmos pixels das
- * imagens enviadas no mapa `directions`. Esta é a prova de que o parâmetro
- * `directions` de /create-character-with-8-directions congela as direções
- * fornecidas em vez de regenerá-las.
- */
-function verifyFreezing(
-	sent: Record<string, string>,
-	response: unknown,
-	imageSize: number,
-): void {
-	// O endpoint devolve um dicionário keyeado por nome de direção.
-	const returned = (response as Record<string, unknown> | null) ?? {};
-
-	const cardinals = ["south", "north", "east", "west"] as const;
-	const results: string[] = [];
-
-	for (const dir of cardinals) {
-		const sentB64 = sent[dir];
-		const returnedVal = returned[dir];
-		if (!sentB64) {
-			results.push(`${dir}: ausente do mapa enviado — pulando`);
-			continue;
-		}
-		if (typeof returnedVal !== "string") {
-			results.push(
-				`${dir}: resposta não contém string base64 para esta direção`,
-			);
-			continue;
-		}
-		// Limpa prefixo data URI se presente.
-		const returnedB64 = returnedVal.replace(/^data:image\/\w+;base64,/, "");
-
-		const identical = pixelsIdenticos(sentB64, returnedB64);
-		if (identical === true) {
-			results.push(`${dir}: CONGELADA — pixels idênticos`);
-		} else if (identical === false) {
-			// Decodifica ambas mas difere — a API reprocessou.
-			const sDec = decodePNGPixels(sentB64);
-			const rDec = decodePNGPixels(returnedB64);
-			const sInfo = sDec ? `${sDec.width}×${sDec.height}` : "?";
-			const rInfo = rDec ? `${rDec.width}×${rDec.height}` : "?";
-			results.push(
-				`${dir}: REPROCESSADA — sent ${sInfo}, returned ${rInfo}. ` +
-					`O mapa directions não congelou esta direção.`,
-			);
-		} else {
-			results.push(
-				`${dir}: não foi possível decodificar — verificação inconclusiva`,
-			);
-		}
-	}
-
-	console.log(`[freeze] Prova de congelamento (image_size=${imageSize}):`);
-	for (const r of results) console.log(`[freeze]   ${r}`);
 }
 
 // ---------------------------------------------------------------- generation
 
 /**
- * Step 1: the base body, rotated into 8 directions via
- * /create-character-with-8-directions (mode='standard').
+ * Uma pose, animada sobre um personagem que concluiu o wizard (remoteId
+ * presente). frame_count vem do lock — nunca do cliente nem da pose.
  *
- * Este endpoint aceita um mapa `directions` que congela as 4 cardeais
- * fornecidas e gera apenas as 4 diagonais — ao contrário do endpoint v3
- * que gera todas as 8 direções a partir de uma única imagem de referência.
- *
- * Fluxo:
- *   1. Valida a imagem de referência (south) e suas dimensões.
- *   2. Obtém north/east/west via /rotate (com guard e ledger).
- *   3. Submete as 4 cardeais no mapa `directions` (com guard e ledger).
- *   4. Prova de congelamento: compara pixels devolvidos com os enviados.
- *
- * Idempotente: mesma (arte-base, seed, isometric) → nenhuma requisição sai.
+ * Célula 'pronto' é terminal: retorna sem chamar a API. A UI trata 'pronto'
+ * como final, mas o servidor é a trava de verdade — um clique duplo não pode
+ * cobrar de novo (mesma leitura idempotente que mannequin.ts faz).
  */
-async function generateBase(character: Character): Promise<void> {
+async function generatePose(
+	character: Character,
+	pose: Pose,
+	lock: MannequinLock,
+): Promise<void> {
+	const key = cellKey(character.id, pose.id);
 	const s = await load();
-	const key = cellKey(character.id, "__base__");
-
-	// Idempotência: célula pronta = não gasta.
-	const existing = s.cells[key];
-	if (existing?.status === "pronto") return;
-
-	// Validação: arte de referência é obrigatória.
-	if (!character.referenceImage) {
-		throw new Error(
-			"é preciso enviar uma imagem de referência (virada para o sul) antes de gerar. " +
-				"O endpoint /create-character-with-8-directions requer ao menos a direção south.",
-		);
-	}
-
-	// Validação: dimensões da referência batem com image_size.
-	// PROIBIDO enviar imagem de directions cujas dimensões não batam com image_size.
-	const refBuf = Buffer.from(character.referenceImage, "base64");
-	const validation = validateImport(
-		refBuf.buffer.slice(
-			refBuf.byteOffset,
-			refBuf.byteOffset + refBuf.byteLength,
-		),
-		character.size,
-	);
-	if (!validation.ok) {
-		throw new Error(`imagem de referência inválida: ${validation.error}`);
-	}
-	if (validation.width !== character.size) {
-		throw new Error(
-			`a imagem de referência tem ${validation.width}×${validation.height} px, ` +
-				`mas o personagem espera ${character.size}×${character.size}. ` +
-				`O mapa directions exige que todas as imagens tenham as mesmas dimensões de image_size.`,
-		);
-	}
-
-	const c = client();
-	const outputDir = join(ASSETS, "characters", sanitize(key));
-	const ledgerPath = join(ASSETS, "ledger.ndjson");
-
-	// --- Cardeais via /rotate (south→north, south→east, south→west) ---
-
-	const rotateInput: RotateInput = {
-		fromImage: character.referenceImage,
-		seed: character.seed,
-		imageSize: { width: character.size, height: character.size },
-		outputDir,
-		// isometric: OMITIDO quando undefined (F0-09). Com exactOptionalPropertyTypes
-		// não podemos passar `undefined` — só incluímos quando o valor é boolean.
-		...(character.isometric !== undefined
-			? { isometric: character.isometric }
-			: {}),
-	};
-
-	// Guard do rotate: informa, não recusa.
-	const rotateReport = estimateRotate(rotateInput);
-	logBudgetReport("rotate (3× south→N/E/W)", rotateReport);
-
-	const cards = await rotateCardinals(c, rotateInput, { ledgerPath });
-
-	// Ler as PNGs geradas como base64 para o mapa directions.
-	const northB64 = (await readFile(cards.north)).toString("base64");
-	const eastB64 = (await readFile(cards.east)).toString("base64");
-	const westB64 = (await readFile(cards.west)).toString("base64");
-
-	// --- Criação do personagem com 8 direções ---
-
-	const directions: Record<string, string> = {
-		south: character.referenceImage,
-		north: northB64,
-		east: eastB64,
-		west: westB64,
-	};
-
-	// Guard da criação: informa, não recusa.
-	const area = character.size * character.size;
-	const creationEstimate = estimateByArea(
-		COST_TABLE["create-character-with-8-directions"],
-		area,
-	);
-	const creationReport = checkBudget({
-		estimate: creationEstimate,
-		maxSingleAssetUsd: creationEstimate.point,
-		spentThisMonthUsd: 0,
-		spentThisSessionUsd: 0,
-		balanceUsd: undefined,
-	});
-	logBudgetReport("create-character-with-8-directions", creationReport);
-
-	const body: Record<string, unknown> = {
-		description: character.description,
-		image_size: { width: character.size, height: character.size },
-		view: "low top-down",
-		mode: "standard",
-		seed: character.seed,
-		directions,
-	};
-	// isometric: OMITIDO quando false (F0-09).
-	if (character.isometric) body["isometric"] = true;
-
-	const res = await c.submit<{
-		background_job_id?: string;
-		character_id?: string;
-	}>("create-character-with-8-directions", body);
-
-	// Tracking de sessão: o dinheiro já saiu na submissão.
-	if (typeof res.usage?.usd === "number") trackSpend(res.usage.usd);
-
-	// Persistir character_id IMEDIATAMENTE.
-	const jobId = res.data?.background_job_id;
-	const remoteId = res.data?.character_id;
-	if (remoteId) {
-		const ch = s.characters.find((x) => x.id === character.id);
-		if (ch) ch.remoteId = remoteId;
-		await save(s);
-	}
-	if (!jobId) throw new Error("a API não devolveu background_job_id");
-
-	// Ledger da criação.
-	const usage = res.usage;
-	appendLedger(ledgerPath, {
-		at: new Date().toISOString(),
-		endpoint: "create-character-with-8-directions",
-		usd: usage?.usd ?? null,
-		generations: usage?.generations ?? null,
-		unit: usage?.type ?? "unknown",
-	});
-
-	// Poll.
-	const polled = await pollJob(c, jobId, { timeoutMs: 900_000 });
-	if (!polled.ok) {
-		throw new Error(
-			polled.reason === "timeout"
-				? "tempo esgotado"
-				: (polled.detail ?? "falhou"),
-		);
-	}
-
-	// --- Prova de congelamento ---
-	const response = polled.job.last_response ?? polled.job;
-	verifyFreezing(directions, response, character.size);
-
-	// Extrair imagens e salvar — usando rotation_urls por chave, NUNCA por índice.
-	const { frames, hasSkeletons } = await parseAndWriteFrames(
-		response,
-		"characters",
-		key,
-		ASSETS,
-	);
-	if (Object.keys(frames).length === 0) throw new Error("resposta sem imagem");
-
-	const cell: Cell = {
-		key,
-		status: "pronto",
-		frames,
-		updatedAt: new Date().toISOString(),
-		...(jobId ? { jobId } : {}),
-		...(remoteId ? { remoteId } : {}),
-		...(usage?.usd != null ? { costUsd: usage.usd } : {}),
-	};
-	const cur = await load();
-	cur.cells[key] = cell;
-	await save(cur);
-
-	if (hasSkeletons) {
-		console.log("[skeletons] resposta de E5: skeletons populado para", key);
-	}
-}
-
-/** Step 2: a pose, animated on top of an existing base character. */
-async function generatePose(character: Character, pose: Pose): Promise<void> {
+	if (s.cells[key]?.status === "pronto") return;
 	if (!character.remoteId) {
 		throw new Error(
-			"gere o modelo base primeiro — a pose se apoia no personagem remoto",
+			"conclua o wizard do personagem primeiro — a pose se apoia no " +
+				"personagem remoto criado nas 8 direções",
 		);
 	}
-	const key = cellKey(character.id, pose.id);
 	const c = client();
 
 	const body: Record<string, unknown> = {
@@ -562,7 +276,7 @@ async function generatePose(character: Character, pose: Pose): Promise<void> {
 		// Free text. Costs ~1 gen/direction up to 96px and scales with size above.
 		body["mode"] = "v3";
 		body["action_description"] = pose.action;
-		body["frame_count"] = pose.frameCount;
+		body["frame_count"] = lock.frameCount;
 	} else {
 		throw new Error(
 			"pose de esqueleto é gerada pelo endpoint animate-with-skeleton, não por aqui",
@@ -577,9 +291,13 @@ async function generatePose(character: Character, pose: Pose): Promise<void> {
 	const ids = collectJobIds(res.data);
 	if (ids.length === 0) throw new Error("a API não devolveu nenhum job id");
 
+	// Poll das direções EM PARALELO: eram sequenciais, e cada direção leva
+	// minutos — a espera total era a soma dos tempos, agora é o máximo.
+	const polledAll = await Promise.all(
+		ids.map((id) => pollJob(c, id, { timeoutMs: 900_000 })),
+	);
 	const images: string[] = [];
-	for (const id of ids) {
-		const polled = await pollJob(c, id, { timeoutMs: 900_000 });
+	for (const polled of polledAll) {
 		if (!polled.ok) continue;
 		images.push(...extractImages(polled.job.last_response ?? polled.job));
 	}
@@ -596,12 +314,22 @@ async function generatePose(character: Character, pose: Pose): Promise<void> {
 	await save(cur);
 }
 
-/** Step 3: equipment, as a character state derived from the base body. */
+/** Equipment, as a character state derived from a finished body. */
 async function generateWardrobe(
 	character: Character,
 	item: WardrobeItem,
 ): Promise<void> {
-	if (!character.remoteId) throw new Error("gere o modelo base primeiro");
+	const key = wardrobeKey(character.id, item.id);
+	// Idempotency lock, same as generatePose: 'pronto' is terminal, return
+	// without calling the API — a double-click must not be charged twice.
+	const s = await load();
+	if (s.cells[key]?.status === "pronto") return;
+	if (!character.remoteId) {
+		throw new Error(
+			"conclua o wizard do personagem primeiro — a peça se apoia no " +
+				"personagem remoto criado nas 8 direções",
+		);
+	}
 	// Refuse before spending: a garment authored for one silhouette will not fit
 	// another, and the API will happily charge for the attempt.
 	if (item.silhouette !== character.silhouette) {
@@ -610,7 +338,6 @@ async function generateWardrobe(
 				`é ${character.silhouette}. Peça só vale dentro da mesma silhueta — gere uma variante.`,
 		);
 	}
-	const key = wardrobeKey(character.id, item.id);
 	const c = client();
 
 	const res = await c.submit<{
@@ -672,8 +399,21 @@ function collectJobIds(payload: unknown): string[] {
 	return [...new Set(ids)];
 }
 
-/** Runs a generation in the background and records its outcome. */
-function spawn(key: string, label: string, work: () => Promise<void>): void {
+/**
+ * Runs a generation in the background and records its outcome.
+ *
+ * `cellKeys` são as células canônicas que a UI lê (southKey, cardinalKey×3,
+ * directions8Key, cellKey de pose, wardrobeKey). O MÓDULO escreve as células
+ * de sucesso; o spawn escreve só na falha, e só nas que não estão 'pronto' —
+ * o progresso parcial (uma cardeal concluída, por exemplo) sobrevive à falha
+ * da irmã, e a re-execução refaz só o que faltou.
+ */
+function spawn(
+	key: string,
+	label: string,
+	work: () => Promise<void>,
+	cellKeys: readonly string[] = [key],
+): void {
 	jobs.set(key, { key, label, status: "gerando", startedAt: Date.now() });
 	void (async () => {
 		try {
@@ -689,12 +429,15 @@ function spawn(key: string, label: string, work: () => Promise<void>): void {
 				startedAt: Date.now(),
 			});
 			const s = await load();
-			s.cells[key] = {
-				key,
-				status: "falhou",
-				error: message,
-				updatedAt: new Date().toISOString(),
-			};
+			for (const ck of cellKeys) {
+				if (s.cells[ck]?.status === "pronto") continue;
+				s.cells[ck] = {
+					key: ck,
+					status: "falhou",
+					error: message,
+					updatedAt: new Date().toISOString(),
+				};
+			}
 			await save(s);
 		}
 	})();
@@ -707,6 +450,10 @@ const json = (res: ServerResponse, code: number, body: unknown): void => {
 	res.setHeader("content-type", "application/json; charset=utf-8");
 	res.end(JSON.stringify(body));
 };
+
+/** 400 com mensagem em pt-BR — erro do pedido, nunca do servidor. */
+const badRequest = (res: ServerResponse, error: string): void =>
+	json(res, 400, { error });
 
 async function readBody<T>(req: IncomingMessage): Promise<T> {
 	const chunks: Buffer[] = [];
@@ -721,6 +468,24 @@ const slug = (s: string): string =>
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "") || `id-${Date.now()}`;
+
+/** Valida characterId + existência + wizard state das rotas do wizard. */
+function resolveWizardCharacter(
+	s: Studio,
+	res: ServerResponse,
+	characterId: string,
+): Character | null {
+	const ch = s.characters.find((c) => c.id === characterId);
+	if (!ch) {
+		json(res, 404, { error: `personagem "${characterId}" não encontrado` });
+		return null;
+	}
+	if (!ch.wizard) {
+		badRequest(res, `o personagem "${ch.id}" não está no fluxo do wizard`);
+		return null;
+	}
+	return ch;
+}
 
 export async function handle(
 	req: IncomingMessage,
@@ -737,33 +502,369 @@ export async function handle(
 				...s,
 				jobs: Object.fromEntries([...jobs].map(([k, v]) => [k, v])),
 				hasToken: Boolean(process.env["PIXELLAB_SECRET"]),
+				// existsSync de propósito: validar os 12 PNGs do bundle a cada poll
+				// de 3s seria I/O jogado fora — a validação de verdade roda no import.
+				mannequinDefaultAvailable: existsSync(
+					join(MANNEQUIN_DEFAULT_DIR, "mannequin.json"),
+				),
 			});
 			return true;
 		}
 
-		if (url.pathname === "/api/balance" && req.method === "GET") {
-			const { usd } = await client().balance();
-			json(res, 200, { usd });
+		// ---- wizard: config -----------------------------------------------------
+		if (url.pathname === "/api/wizard/config" && req.method === "POST") {
+			const b = await readBody<{
+				characterId?: string;
+				frameCount?: number;
+				fps?: number;
+				size?: number;
+				silhouette?: Silhouette;
+			}>(req);
+
+			// Só o manequim trava a config; todo personagem derivado herda o lock.
+			if (b.characterId !== "manequim") {
+				badRequest(
+					res,
+					"só o manequim trava a configuração — os demais personagens herdam o lock do wizard",
+				);
+				return true;
+			}
+			const s = await load();
+			const ch = s.characters.find((c) => c.id === "manequim");
+			if (!ch) {
+				json(res, 404, { error: "manequim não encontrado" });
+				return true;
+			}
+			if (ch.wizard?.etapa === "pronto") {
+				badRequest(res, "a configuração é imutável depois do manequim pronto");
+				return true;
+			}
+			if ((ch.wizard?.southVersions.length ?? 0) > 0) {
+				badRequest(
+					res,
+					"já existe uma versão da sul gerada — a configuração só muda via reset do manequim",
+				);
+				return true;
+			}
+			if (b.frameCount !== 4 && b.frameCount !== 8 && b.frameCount !== 16) {
+				badRequest(
+					res,
+					"frameCount precisa ser 4, 8 ou 16 — a API rejeita qualquer outro valor",
+				);
+				return true;
+			}
+			if (typeof b.fps !== "number" || !Number.isFinite(b.fps) || b.fps <= 0) {
+				badRequest(res, "fps precisa ser um número positivo");
+				return true;
+			}
+			// Faixa do create-character-with-8-directions no spec vendorizado:
+			// image_size 16–128 (o bitforge aceita até 200; o elo fraco é a base).
+			if (
+				typeof b.size !== "number" ||
+				!Number.isInteger(b.size) ||
+				b.size < 16 ||
+				b.size > 128
+			) {
+				badRequest(
+					res,
+					"size precisa ser inteiro entre 16 e 128 (faixa do endpoint de 8 direções)",
+				);
+				return true;
+			}
+			if (b.silhouette !== undefined && !SILHOUETTES.includes(b.silhouette)) {
+				badRequest(
+					res,
+					`silhouette desconhecida: ${b.silhouette} (válidas: ${SILHOUETTES.join(", ")})`,
+				);
+				return true;
+			}
+
+			s.lock = { frameCount: b.frameCount, fps: b.fps, size: b.size };
+			const idx = s.characters.findIndex((c) => c.id === "manequim");
+			s.characters[idx] = {
+				...ch,
+				size: b.size,
+				...(b.silhouette !== undefined ? { silhouette: b.silhouette } : {}),
+			};
+			await save(s);
+			json(res, 200, { ok: true, lock: s.lock });
 			return true;
 		}
 
-		// ---- characters --------------------------------------------------------
+		// ---- wizard: sul por texto ----------------------------------------------
+		if (url.pathname === "/api/wizard/south" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string; description?: string }>(
+				req,
+			);
+			if (
+				typeof b.characterId !== "string" ||
+				typeof b.description !== "string" ||
+				b.description.trim() === ""
+			) {
+				badRequest(res, "characterId e description são obrigatórios");
+				return true;
+			}
+			const characterId = b.characterId;
+			const description = b.description;
+			const s = await load();
+			const ch = resolveWizardCharacter(s, res, characterId);
+			if (!ch) return true;
+			// Derivados levam a sul do manequim como color_image (paleta travada).
+			const reference =
+				ch.id === "manequim" ? undefined : await mannequinSouthB64(s);
+			const key = southKey(ch.id);
+			spawn(key, `${ch.label} · sul`, () =>
+				generateSouthFromText(
+					client(),
+					store,
+					ch.id,
+					description,
+					wizardOpts(reference),
+				),
+			);
+			json(res, 202, { key });
+			return true;
+		}
+
+		// ---- wizard: edição da sul ------------------------------------------------
+		if (url.pathname === "/api/wizard/south/edit" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string; prompt?: string }>(req);
+			if (
+				typeof b.characterId !== "string" ||
+				typeof b.prompt !== "string" ||
+				b.prompt.trim() === ""
+			) {
+				badRequest(res, "characterId e prompt são obrigatórios");
+				return true;
+			}
+			const characterId = b.characterId;
+			const prompt = b.prompt;
+			const s = await load();
+			const ch = resolveWizardCharacter(s, res, characterId);
+			if (!ch) return true;
+			const key = southKey(ch.id);
+			spawn(key, `${ch.label} · edição da sul`, () =>
+				editSouth(client(), store, ch.id, prompt, wizardOpts()),
+			);
+			json(res, 202, { key });
+			return true;
+		}
+
+		// ---- wizard: desfazer edição da sul -----------------------------------------
+		if (url.pathname === "/api/wizard/south/undo" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			const s = await load();
+			const ch = resolveWizardCharacter(s, res, b.characterId);
+			if (!ch) return true;
+			// Instantâneo (nenhuma chamada de API): roda na hora — não é job.
+			try {
+				await undoSouth(store, ch.id, wizardOpts());
+			} catch (err) {
+				badRequest(res, err instanceof Error ? err.message : String(err));
+				return true;
+			}
+			json(res, 200, { ok: true });
+			return true;
+		}
+
+		// ---- wizard: cardeais ---------------------------------------------------------
+		if (url.pathname === "/api/wizard/cardinals" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			const s = await load();
+			const ch = resolveWizardCharacter(s, res, b.characterId);
+			if (!ch) return true;
+			// mannequin.ts grava as três células cardinal-* uma a uma; o job usa a
+			// chave da primeira direção e o spawn marca falha só nas que não
+			// ficaram prontas (política documentada no cabeçalho do arquivo).
+			const key = cardinalKey(ch.id, "east");
+			spawn(
+				key,
+				`${ch.label} · cardeais`,
+				() => rotateCardinals(client(), store, ch.id, wizardOpts()),
+				[
+					cardinalKey(ch.id, "east"),
+					cardinalKey(ch.id, "north"),
+					cardinalKey(ch.id, "west"),
+				],
+			);
+			json(res, 202, { key });
+			return true;
+		}
+
+		// ---- wizard: oito direções -------------------------------------------------------
+		if (url.pathname === "/api/wizard/directions8" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			const s = await load();
+			const ch = resolveWizardCharacter(s, res, b.characterId);
+			if (!ch) return true;
+			// Derivados levam a sul do manequim como color_image (paleta travada).
+			const reference =
+				ch.id === "manequim" ? undefined : await mannequinSouthB64(s);
+			const key = directions8Key(ch.id);
+			spawn(key, `${ch.label} · 8 direções`, () =>
+				generateDirections8(client(), store, ch.id, wizardOpts(reference)),
+			);
+			json(res, 202, { key });
+			return true;
+		}
+
+		// ---- manequim default -------------------------------------------------------
+		if (url.pathname === "/api/mannequin/export" && req.method === "POST") {
+			try {
+				const bundle = await exportMannequin(store, MANNEQUIN_DEFAULT_DIR);
+				json(res, 200, bundle);
+			} catch (err) {
+				// Pré-condição não atendida (wizard não pronto, célula faltando…) é
+				// erro do pedido, não do servidor.
+				badRequest(res, err instanceof Error ? err.message : String(err));
+			}
+			return true;
+		}
+
+		if (url.pathname === "/api/mannequin/import" && req.method === "POST") {
+			const b = await readBody<{ source?: string; bundle?: unknown }>(req);
+			try {
+				if (b.source === "default") {
+					await importMannequin(
+						store,
+						{ kind: "default", defaultDir: MANNEQUIN_DEFAULT_DIR },
+						ASSETS,
+					);
+				} else if (b.bundle !== undefined) {
+					await importMannequin(store, { kind: "bundle", bundle: b.bundle }, ASSETS);
+				} else {
+					badRequest(res, 'informe { source: "default" } ou { bundle }');
+					return true;
+				}
+			} catch (err) {
+				// Erros de validação do bundle chegam nomeados — vão ao usuário como 400.
+				badRequest(res, err instanceof Error ? err.message : String(err));
+				return true;
+			}
+			json(res, 200, { ok: true });
+			return true;
+		}
+
+		if (url.pathname === "/api/mannequin/reset" && req.method === "POST") {
+			const s = await load();
+			const idx = s.characters.findIndex((c) => c.id === "manequim");
+			const ch = s.characters[idx];
+			if (!ch) {
+				json(res, 404, { error: "manequim não encontrado" });
+				return true;
+			}
+			// Reabre o wizard do zero: sul, cardeais, 8 direções, remoteId e lock
+			// caem. Poses, guarda-roupa e os demais personagens não são tocados.
+			// Um job do wizard ainda em voo pode regravar célula ao concluir —
+			// reset não aborta job em andamento.
+			const next: Character = {
+				...ch,
+				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
+			};
+			delete next.remoteId;
+			s.characters[idx] = next;
+			delete s.cells[southKey("manequim")];
+			delete s.cells[cardinalKey("manequim", "east")];
+			delete s.cells[cardinalKey("manequim", "north")];
+			delete s.cells[cardinalKey("manequim", "west")];
+			delete s.cells[directions8Key("manequim")];
+			delete s.lock;
+			await save(s);
+			json(res, 200, { ok: true });
+			return true;
+		}
+
+		// ---- laboratório de rotação -----------------------------------------------------
+		if (url.pathname === "/api/rotate-lab" && req.method === "POST") {
+			const b = await readBody<RotateLabInput>(req);
+			try {
+				const result = await runRotateLab(client(), b, {
+					assetsDir: ASSETS,
+					ledgerPath: LEDGER_PATH,
+					onLog: (m) => console.log(m),
+				});
+				// Cache hit vem sem `usage` — não é erro: nenhuma chamada saiu.
+				json(res, 200, result);
+			} catch (err) {
+				if (err instanceof RotateLabValidationError) {
+					json(res, 400, { error: err.message, code: err.code });
+					return true;
+				}
+				throw err;
+			}
+			return true;
+		}
+
+		// ---- characters ------------------------------------------------------------------
 		if (url.pathname === "/api/characters" && req.method === "POST") {
 			const b = await readBody<{
-				label: string;
-				description: string;
-				size?: number;
+				label?: string;
+				description?: string;
+				silhouette?: Silhouette;
 				seed?: number;
-				silhouette?: import("./model.ts").Silhouette;
 			}>(req);
 			const s = await load();
+			const mannequin = s.characters.find((c) => c.id === "manequim");
+			if (mannequin?.wizard?.etapa !== "pronto") {
+				badRequest(
+					res,
+					"personagens derivados exigem o manequim pronto — conclua o wizard do manequim primeiro",
+				);
+				return true;
+			}
+			const lock = s.lock;
+			if (!lock) {
+				badRequest(
+					res,
+					"trave a configuração do manequim primeiro (POST /api/wizard/config)",
+				);
+				return true;
+			}
+			if (
+				typeof b.label !== "string" ||
+				b.label.trim() === "" ||
+				typeof b.description !== "string"
+			) {
+				badRequest(res, "label e description são obrigatórios");
+				return true;
+			}
+			if (b.silhouette !== undefined && !SILHOUETTES.includes(b.silhouette)) {
+				badRequest(
+					res,
+					`silhouette desconhecida: ${b.silhouette} (válidas: ${SILHOUETTES.join(", ")})`,
+				);
+				return true;
+			}
+			const id = slug(b.label);
+			if (s.characters.some((c) => c.id === id)) {
+				badRequest(
+					res,
+					`já existe um personagem com o id "${id}" — escolha outro nome`,
+				);
+				return true;
+			}
 			const ch: Character = {
-				id: slug(b.label),
+				id,
 				label: b.label,
 				description: b.description,
-				silhouette: b.silhouette ?? "humano-medio",
-				size: b.size ?? 64,
+				// Sem silhueta informada, o derivado herda a do manequim: é o corpo
+				// de referência, e peça só vale dentro da mesma silhueta.
+				silhouette: b.silhouette ?? mannequin.silhouette,
+				size: lock.size,
 				seed: b.seed ?? Math.floor(Math.random() * 100000),
+				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
 				createdAt: new Date().toISOString(),
 			};
 			s.characters.push(ch);
@@ -772,25 +873,46 @@ export async function handle(
 			return true;
 		}
 
-		if (url.pathname === "/api/reference" && req.method === "POST") {
-			const b = await readBody<{ characterId: string; base64: string }>(req);
+		// ---- poses -------------------------------------------------------------------------
+		if (url.pathname === "/api/poses" && req.method === "POST") {
+			const b = await readBody<{
+				label?: string;
+				kind?: PoseKind;
+				templateId?: TemplateAnimation;
+				action?: string;
+				fps?: number;
+				skeleton?: readonly Keypoint[];
+				notes?: string;
+			}>(req);
 			const s = await load();
-			const ch = s.characters.find((c) => c.id === b.characterId);
-			if (!ch) {
-				json(res, 404, { error: "personagem não encontrado" });
+			// frameCount NÃO vem do cliente: é o lock do wizard que manda.
+			const lock = s.lock;
+			if (!lock) {
+				badRequest(
+					res,
+					"trave a configuração do manequim primeiro — o frameCount das poses vem do lock (POST /api/wizard/config)",
+				);
 				return true;
 			}
-			ch.referenceImage = b.base64.replace(/^data:image\/\w+;base64,/, "");
-			await save(s);
-			json(res, 200, { ok: true, bytes: ch.referenceImage.length });
-			return true;
-		}
-
-		// ---- poses -------------------------------------------------------------
-		if (url.pathname === "/api/poses" && req.method === "POST") {
-			const b = await readBody<Omit<Pose, "id"> & { label: string }>(req);
-			const s = await load();
-			const pose: Pose = { ...b, id: slug(b.label) };
+			if (
+				typeof b.label !== "string" ||
+				b.label.trim() === "" ||
+				b.kind === undefined
+			) {
+				badRequest(res, "label e kind são obrigatórios");
+				return true;
+			}
+			const pose: Pose = {
+				id: slug(b.label),
+				label: b.label,
+				kind: b.kind,
+				frameCount: lock.frameCount,
+				fps: b.fps ?? lock.fps,
+				...(b.templateId !== undefined ? { templateId: b.templateId } : {}),
+				...(b.action !== undefined ? { action: b.action } : {}),
+				...(b.skeleton !== undefined ? { skeleton: b.skeleton } : {}),
+				...(b.notes !== undefined ? { notes: b.notes } : {}),
+			};
 			s.poses.push(pose);
 			await save(s);
 			json(res, 200, pose);
@@ -806,7 +928,7 @@ export async function handle(
 			return true;
 		}
 
-		// ---- wardrobe ----------------------------------------------------------
+		// ---- wardrobe ------------------------------------------------------------------------
 		if (url.pathname === "/api/wardrobe" && req.method === "POST") {
 			const b = await readBody<Omit<WardrobeItem, "id" | "createdAt">>(req);
 			const s = await load();
@@ -821,37 +943,10 @@ export async function handle(
 			return true;
 		}
 
-		// ---- estimate ----------------------------------------------------------
-		if (url.pathname === "/api/estimate" && req.method === "GET") {
-			const charId = url.searchParams.get("characterId");
-			const poseId = url.searchParams.get("poseId");
-			const wardrobeId = url.searchParams.get("wardrobeId");
-			const s = await load();
-			const ch = s.characters.find((c) => c.id === charId);
-			if (!ch) {
-				json(res, 404, { error: "personagem não encontrado" });
-				return true;
-			}
-
-			const pose = poseId ? s.poses.find((p) => p.id === poseId) : undefined;
-			const item = wardrobeId
-				? s.wardrobe.find((w) => w.id === wardrobeId)
-				: undefined;
-
-			const estReq: import("../server/estimate.ts").EstimateRequest = {
-				character: ch,
-				...(pose ? { pose } : {}),
-				...(item ? { item } : {}),
-			};
-			const estimate = await getEstimateReport(estReq);
-			json(res, 200, estimate);
-			return true;
-		}
-
-		// ---- generation --------------------------------------------------------
+		// ---- generation ------------------------------------------------------------------------
 		if (url.pathname === "/api/generate" && req.method === "POST") {
 			const b = await readBody<{
-				characterId: string;
+				characterId?: string;
 				poseId?: string;
 				wardrobeId?: string;
 			}>(req);
@@ -862,13 +957,19 @@ export async function handle(
 				return true;
 			}
 
-			if (b.wardrobeId) {
+			if (b.wardrobeId !== undefined) {
 				const item = s.wardrobe.find((w) => w.id === b.wardrobeId);
 				if (!item) {
 					json(res, 404, { error: "peça não encontrada" });
 					return true;
 				}
 				const key = wardrobeKey(ch.id, item.id);
+				// 'pronto' is terminal: answer without pre-marking or spawning —
+				// overwriting the cell with 'gerando' would re-arm a paid generation.
+				if (s.cells[key]?.status === "pronto") {
+					json(res, 200, { key, status: "pronto" });
+					return true;
+				}
 				s.cells[key] = {
 					key,
 					status: "gerando",
@@ -882,16 +983,13 @@ export async function handle(
 				return true;
 			}
 
-			if (!b.poseId || b.poseId === "__base__") {
-				const key = cellKey(ch.id, "__base__");
-				s.cells[key] = {
-					key,
-					status: "gerando",
-					updatedAt: new Date().toISOString(),
-				};
-				await save(s);
-				spawn(key, `${ch.label} · modelo base`, () => generateBase(ch));
-				json(res, 202, { key });
+			// O fluxo v1 morreu: a base agora nasce no wizard, não nesta rota.
+			if (b.poseId === undefined || b.poseId === "__base__") {
+				badRequest(
+					res,
+					"o modelo base não é gerado por esta rota — use o wizard " +
+						"(POST /api/wizard/south, /api/wizard/cardinals e /api/wizard/directions8)",
+				);
 				return true;
 			}
 
@@ -900,14 +998,29 @@ export async function handle(
 				json(res, 404, { error: "pose não encontrada" });
 				return true;
 			}
+			const lock = s.lock;
+			if (!lock) {
+				badRequest(
+					res,
+					"trave a configuração do manequim primeiro — o frameCount das poses vem do lock (POST /api/wizard/config)",
+				);
+				return true;
+			}
 			const key = cellKey(ch.id, pose.id);
+			// 'pronto' is terminal, same as the wardrobe branch above.
+			if (s.cells[key]?.status === "pronto") {
+				json(res, 200, { key, status: "pronto" });
+				return true;
+			}
 			s.cells[key] = {
 				key,
 				status: "gerando",
 				updatedAt: new Date().toISOString(),
 			};
 			await save(s);
-			spawn(key, `${ch.label} · ${pose.label}`, () => generatePose(ch, pose));
+			spawn(key, `${ch.label} · ${pose.label}`, () =>
+				generatePose(ch, pose, lock),
+			);
 			json(res, 202, { key });
 			return true;
 		}

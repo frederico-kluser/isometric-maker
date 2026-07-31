@@ -62,7 +62,7 @@ Numeração reservada. A convenção 12 diz que doc de infra escrita antes de ex
 | Ferramenta | O que faz | Estado |
 | --- | --- | --- |
 | [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de custo e empacotador de atlas | **funcional** |
-| [`tools/character-builder`](../tools/character-builder/README.md) | Tela de autoria: corpo base nas 8 direções, poses, guarda-roupa. Evolui para o construtor de personagem | **funcional** |
+| [`tools/character-builder`](../tools/character-builder/README.md) | Sprite Studio: wizard do manequim nas 8 direções, poses, guarda-roupa e laboratório de rotação | **funcional** |
 | [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
 
 ## ADR — decisões registradas

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "palette": [
     "#0d0b0e",
     "#1c1a21",
@@ -28,13 +28,18 @@
   ],
   "characters": [
     {
-      "id": "base-humano",
-      "label": "Base — humano",
-      "description": "bald naked humanoid mannequin, neutral skin, no hair, no clothing, no equipment, plain body, medieval dark fantasy pixel art, top-down",
+      "id": "manequim",
+      "label": "Manequim base",
+      "silhouette": "humano-medio",
+      "description": "",
       "size": 64,
       "seed": 1,
-      "createdAt": "2026-07-30T09:13:04.227Z",
-      "silhouette": "humano-medio"
+      "wizard": {
+        "etapa": "sul",
+        "southVersions": [],
+        "activeSouth": 0
+      },
+      "createdAt": "2026-07-31T14:21:41.226Z"
     }
   ],
   "poses": [
@@ -87,27 +92,8 @@
       "fps": 12,
       "builtin": true,
       "notes": "Template nativo. Existem também attack-back, attack-left e attack-right."
-    },
-    {
-      "label": "Bloqueando com escudo",
-      "kind": "action",
-      "action": "raising a shield to block",
-      "frameCount": 8,
-      "fps": 8,
-      "id": "bloqueando-com-escudo"
     }
   ],
-  "wardrobe": [
-    {
-      "label": "Cota de malha",
-      "slot": "torso",
-      "editDescription": "wearing a rusted chainmail hauberk",
-      "keepPalette": true,
-      "seed": 42,
-      "id": "cota-de-malha",
-      "createdAt": "2026-07-30T09:13:04.251Z",
-      "silhouette": "humano-medio"
-    }
-  ],
+  "wardrobe": [],
   "cells": {}
 }

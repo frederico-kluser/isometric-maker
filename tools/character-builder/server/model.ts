@@ -134,6 +134,31 @@ export type Silhouette =
 	| "humano-esguio"
 	| "quadrupede";
 
+/**
+ * The wizard's steps, in order. "pronto" is terminal: from then on the frame
+ * contract (`Studio.lock`) is immutable and the mannequin is just a character.
+ */
+export type WizardStage = "sul" | "cardeais" | "direcoes8" | "pronto";
+
+/** One accepted version of the south face. The art itself lives in the cell
+ *  under `southKey(characterId)` — this history keeps the prompt that made it. */
+export interface SouthVersion {
+	readonly prompt: string;
+	readonly at: string;
+}
+
+/**
+ * Per-character wizard progress. The mannequin is born with one; characters
+ * derived from it walk the SAME wizard with their own state.
+ */
+export interface WizardState {
+	etapa: WizardStage;
+	/** Prompt history of the south face — undo walks this list backwards. */
+	southVersions: readonly SouthVersion[];
+	/** Index into `southVersions` of the version currently in use. */
+	activeSouth: number;
+}
+
 export interface Character {
 	readonly id: string;
 	readonly label: string;
@@ -144,10 +169,10 @@ export interface Character {
 	readonly size: number;
 	readonly seed: number;
 	/**
-	 * Reference art, south-facing, max 256×256. When present, the creation endpoint
-	 * freezes *this* as the south direction and generates the other 7 around it.
+	 * Wizard progress, when the character goes through the wizard. Absent on
+	 * characters authored the old way — v2 is additive, both shapes are valid.
 	 */
-	referenceImage?: string;
+	wizard?: WizardState;
 	/** Character id minted by the API. Everything downstream hangs off this. */
 	remoteId?: string;
 	/**
@@ -204,8 +229,23 @@ export interface Cell {
 	updatedAt?: string;
 }
 
+/**
+ * Frame contract the wizard locks BEFORE the base body is generated. Once
+ * `wizard.etapa` reaches "pronto" this is immutable: every pose, item and
+ * derived character inherits frameCount/fps/size, and the UI stops offering
+ * the choice.
+ */
+export interface MannequinLock {
+	/** 4, 8 or 16. The API rejects anything else. */
+	readonly frameCount: 4 | 8 | 16;
+	readonly fps: number;
+	readonly size: number;
+}
+
 export interface Studio {
-	readonly version: 1;
+	readonly version: 2;
+	/** Absent until the wizard fixes the frame contract; immutable after. */
+	lock?: MannequinLock;
 	characters: Character[];
 	poses: Pose[];
 	wardrobe: WardrobeItem[];
@@ -222,20 +262,37 @@ export const wardrobeKey = (characterId: string, itemId: string): string =>
 	`${characterId}::wardrobe::${itemId}`;
 
 /**
- * Seed state.
+ * Wizard cells share the cell namespace and the `cellKey` convention
+ * (`${characterId}::…`), so they ride the same status/frames machinery.
+ */
+export const southKey = (characterId: string): string =>
+	`${characterId}::__south__`;
+
+export const cardinalKey = (
+	characterId: string,
+	direction: "east" | "north" | "west",
+): string => `${characterId}::__cardinal-${direction}__`;
+
+export const directions8Key = (characterId: string): string =>
+	`${characterId}::__directions8__`;
+
+/**
+ * Seed state (studio.json v2).
  *
- * The base character is deliberately bald and unclothed: it is the mannequin
- * every piece of equipment is derived from, so it must carry no visual opinion
- * of its own.
+ * The mannequin is born with an EMPTY description on purpose: the wizard owns
+ * the south face from the first boot — the user describes it, iterates on it,
+ * and only then are the cardinals and the 8 directions derived. `lock` stays
+ * absent until the wizard fixes the frame contract.
  *
- * The four built-in poses are the ones the game needs first. Note that three of
- * them are `action`, not `template` — the template library has no walk, run or
- * jump, and pretending otherwise would silently produce the wrong animation.
+ * The five built-in poses are the ones the game needs first. Note that three
+ * of them are `action`, not `template` — the template library has no walk, run
+ * or jump, and pretending otherwise would silently produce the wrong
+ * animation.
  */
 export function seedStudio(): Studio {
 	const now = new Date().toISOString();
 	return {
-		version: 1,
+		version: 2,
 		palette: [
 			"#0d0b0e",
 			"#1c1a21",
@@ -264,14 +321,15 @@ export function seedStudio(): Studio {
 		],
 		characters: [
 			{
-				id: "base-humano",
-				label: "Base — humano",
+				id: "manequim",
+				label: "Manequim base",
 				silhouette: "humano-medio",
-				description:
-					"bald naked humanoid mannequin, neutral skin, no hair, no clothing, " +
-					"no equipment, plain body, medieval dark fantasy pixel art, top-down",
+				// Empty on purpose — the wizard's first step is describing the
+				// south face. Filling it here would pre-empt the wizard.
+				description: "",
 				size: 64,
 				seed: 1,
+				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
 				createdAt: now,
 			},
 		],
