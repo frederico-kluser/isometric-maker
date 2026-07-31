@@ -1684,13 +1684,18 @@ deps: [F0-02]
 critico: false
 gasta: nao
 worktree: sim
-estado: pendente
+estado: feito
 arquivos:
   - packages/iso-core/package.json
   - packages/iso-core/tsconfig.json
   - packages/iso-core/src/project.ts
   - packages/iso-core/src/project.test.ts
 faixa_ledger: AB-180..AB-189
+consideracoes: |
+  schemaVersion: 1 literal, geometria 64x32x16, atlas como caminhos relativos.
+  mapa opcional vazio (Record<string,never>). Escrita atómica tmp+rename no
+  mesmo filesystem. loadProject rejeita schemaVersion != 1. Zero dependências
+  runtime. Verificação: typecheck limpo, 6 testes passam, sem import de tools/.
 ```
 
 | | |
