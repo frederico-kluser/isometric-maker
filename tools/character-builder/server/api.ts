@@ -9,10 +9,21 @@
  * The transport itself (429/529/423 handling, backoff, poll) is reused from the
  * pipeline rather than reimplemented — it is already tested.
  */
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PixelLabClient, pollJob } from '../../pixellab-pipeline/src/api.ts';
+import {
+  COST_TABLE, estimateByArea, checkBudget,
+  type BudgetReport,
+} from '../../pixellab-pipeline/src/cost.ts';
+import {
+  rotateCardinals, estimateRotate,
+  type RotateInput,
+} from './rotate.ts';
+import { validateImport } from '../src/import.ts';
 import {
   DIRECTIONS, cellKey, seedStudio, wardrobeKey,
   type Cell, type Character, type Pose, type Studio, type WardrobeItem,
@@ -117,28 +128,299 @@ async function writeFrames(
   return frames;
 }
 
+// ---------------------------------------------------------------- helpers
+
+function sanitize(s: string): string {
+  return s.replace(/[^a-z0-9-]+/gi, '_');
+}
+
+function appendLedger(path: string, line: Record<string, unknown>): void {
+  mkdirSync(join(path, '..'), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(line)}\n`);
+}
+
+function logBudgetReport(label: string, report: BudgetReport): void {
+  const e = report.estimate;
+  const lines = [
+    `[guard] ${label}: ${e.point.toFixed(4)} USD ` +
+      `(faixa ${e.low.toFixed(4)}–${e.high.toFixed(4)}, confiança ${e.confidence})`,
+  ];
+  if (report.avisos.length > 0) {
+    for (const a of report.avisos) {
+      lines.push(`[guard]   aviso [${a.code}]: ${a.text}`);
+    }
+  }
+  // O guard informa e nunca recusa (F0-03). Logamos e seguimos.
+  for (const line of lines) console.log(line);
+}
+
+// ---------------------------------------------------------------- prova de congelamento
+
+/**
+ * Decodifica os pixels de um PNG 8 bpc RGB/RGBA usando só node:zlib.
+ * Retorna null se o PNG não estiver num formato suportado.
+ */
+function decodePNGPixels(b64: string): { width: number; height: number; pixels: Buffer } | null {
+  const buf = Buffer.from(b64, 'base64');
+  if (buf.length < 8) return null;
+  // Assinatura PNG
+  const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+  for (let i = 0; i < 8; i += 1) if (buf[i] !== SIG[i]) return null;
+
+  let pos = 8;
+  let width = 0, height = 0, bitDepth = 0, colorType = 0;
+  const idatChunks: Buffer[] = [];
+
+  while (pos + 12 <= buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString('ascii', pos + 4, pos + 8);
+
+    if (type === 'IHDR') {
+      width = buf.readUInt32BE(pos + 8);
+      height = buf.readUInt32BE(pos + 12);
+      bitDepth = buf[pos + 16]!;
+      colorType = buf[pos + 17]!;
+    } else if (type === 'IDAT') {
+      idatChunks.push(buf.subarray(pos + 8, pos + 8 + len));
+    } else if (type === 'IEND') {
+      break;
+    }
+    pos += 12 + len;
+  }
+
+  if (idatChunks.length === 0 || width === 0 || height === 0) return null;
+  if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) return null;
+
+  const channels = colorType === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(idatChunks));
+  const stride = 1 + width * channels; // 1 filter byte + scanline
+  const pixels = Buffer.alloc(width * height * channels);
+
+  // Desfiltra cada scanline (None, Sub, Up, Average, Paeth).
+  for (let y = 0; y < height; y += 1) {
+    const row = raw.subarray(y * stride, (y + 1) * stride);
+    const filter = row[0]!;
+    const scanline = row.subarray(1);
+    const outRow = pixels.subarray(y * width * channels, (y + 1) * width * channels);
+
+    for (let x = 0; x < scanline.length; x += 1) {
+      const left = x >= channels ? outRow[x - channels]! : 0;
+      const up = y > 0 ? pixels[(y - 1) * width * channels + x]! : 0;
+      const upLeft = (y > 0 && x >= channels) ? pixels[(y - 1) * width * channels + x - channels]! : 0;
+
+      let val = scanline[x]!;
+      switch (filter) {
+        case 0: break; // None
+        case 1: val = (val + left) & 0xff; break; // Sub
+        case 2: val = (val + up) & 0xff; break; // Up
+        case 3: val = (val + ((left + up) >> 1)) & 0xff; break; // Average
+        case 4: { // Paeth
+          const p = left + up - upLeft;
+          const pL = Math.abs(p - left);
+          const pU = Math.abs(p - up);
+          const pUL = Math.abs(p - upLeft);
+          const pr = (pL <= pU && pL <= pUL) ? left : (pU <= pUL) ? up : upLeft;
+          val = (val + pr) & 0xff;
+          break;
+        }
+        default: return null; // filtro desconhecido
+      }
+      outRow[x] = val;
+    }
+  }
+
+  return { width, height, pixels };
+}
+
+/**
+ * Compara os pixels decodificados de duas imagens PNG.
+ * Retorna true se forem idênticos, false se diferirem, e null se a decodificação
+ * falhar (formato não suportado).
+ */
+function pixelsIdenticos(sentB64: string, returnedB64: string): boolean | null {
+  // Atalho: buffers idênticos = congelamento byte-a-byte confirmado.
+  if (Buffer.from(sentB64, 'base64').equals(Buffer.from(returnedB64, 'base64'))) {
+    return true;
+  }
+  // Comparação pixel a pixel para o caso de recompressão sem alteração.
+  const sent = decodePNGPixels(sentB64);
+  const returned = decodePNGPixels(returnedB64);
+  if (!sent || !returned) return null;
+  if (sent.width !== returned.width || sent.height !== returned.height) return false;
+  return sent.pixels.equals(returned.pixels);
+}
+
+/**
+ * Verifica que as 4 cardeais devolvidas pela API têm os mesmos pixels das
+ * imagens enviadas no mapa `directions`. Esta é a prova de que o parâmetro
+ * `directions` de /create-character-with-8-directions congela as direções
+ * fornecidas em vez de regenerá-las.
+ */
+function verifyFreezing(
+  sent: Record<string, string>,
+  response: unknown,
+  imageSize: number,
+): void {
+  // O endpoint devolve um dicionário keyeado por nome de direção.
+  const returned = (response as Record<string, unknown> | null) ?? {};
+
+  const cardinals = ['south', 'north', 'east', 'west'] as const;
+  const results: string[] = [];
+
+  for (const dir of cardinals) {
+    const sentB64 = sent[dir];
+    const returnedVal = returned[dir];
+    if (!sentB64) {
+      results.push(`${dir}: ausente do mapa enviado — pulando`);
+      continue;
+    }
+    if (typeof returnedVal !== 'string') {
+      results.push(`${dir}: resposta não contém string base64 para esta direção`);
+      continue;
+    }
+    // Limpa prefixo data URI se presente.
+    const returnedB64 = returnedVal.replace(/^data:image\/\w+;base64,/, '');
+
+    const identical = pixelsIdenticos(sentB64, returnedB64);
+    if (identical === true) {
+      results.push(`${dir}: CONGELADA — pixels idênticos`);
+    } else if (identical === false) {
+      // Decodifica ambas mas difere — a API reprocessou.
+      const sDec = decodePNGPixels(sentB64);
+      const rDec = decodePNGPixels(returnedB64);
+      const sInfo = sDec ? `${sDec.width}×${sDec.height}` : '?';
+      const rInfo = rDec ? `${rDec.width}×${rDec.height}` : '?';
+      results.push(
+        `${dir}: REPROCESSADA — sent ${sInfo}, returned ${rInfo}. ` +
+        `O mapa directions não congelou esta direção.`,
+      );
+    } else {
+      results.push(`${dir}: não foi possível decodificar — verificação inconclusiva`);
+    }
+  }
+
+  console.log(`[freeze] Prova de congelamento (image_size=${imageSize}):`);
+  for (const r of results) console.log(`[freeze]   ${r}`);
+}
+
 // ---------------------------------------------------------------- generation
 
-/** Step 1: the base body, rotated into 8 directions. Everything derives from this. */
+/**
+ * Step 1: the base body, rotated into 8 directions via
+ * /create-character-with-8-directions (mode='standard').
+ *
+ * Este endpoint aceita um mapa `directions` que congela as 4 cardeais
+ * fornecidas e gera apenas as 4 diagonais — ao contrário do endpoint v3
+ * que gera todas as 8 direções a partir de uma única imagem de referência.
+ *
+ * Fluxo:
+ *   1. Valida a imagem de referência (south) e suas dimensões.
+ *   2. Obtém north/east/west via /rotate (com guard e ledger).
+ *   3. Submete as 4 cardeais no mapa `directions` (com guard e ledger).
+ *   4. Prova de congelamento: compara pixels devolvidos com os enviados.
+ *
+ * Idempotente: mesma (arte-base, seed, isometric) → nenhuma requisição sai.
+ */
 async function generateBase(character: Character): Promise<void> {
   const s = await load();
   const key = cellKey(character.id, '__base__');
+
+  // Idempotência: célula pronta = não gasta.
+  const existing = s.cells[key];
+  if (existing?.status === 'pronto') return;
+
+  // Validação: arte de referência é obrigatória.
+  if (!character.referenceImage) {
+    throw new Error(
+      'é preciso enviar uma imagem de referência (virada para o sul) antes de gerar. ' +
+        'O endpoint /create-character-with-8-directions requer ao menos a direção south.',
+    );
+  }
+
+  // Validação: dimensões da referência batem com image_size.
+  // PROIBIDO enviar imagem de directions cujas dimensões não batam com image_size.
+  const refBuf = Buffer.from(character.referenceImage, 'base64');
+  const validation = validateImport(
+    refBuf.buffer.slice(refBuf.byteOffset, refBuf.byteOffset + refBuf.byteLength),
+    character.size,
+  );
+  if (!validation.ok) {
+    throw new Error(`imagem de referência inválida: ${validation.error}`);
+  }
+  if (validation.width !== character.size) {
+    throw new Error(
+      `a imagem de referência tem ${validation.width}×${validation.height} px, ` +
+        `mas o personagem espera ${character.size}×${character.size}. ` +
+        `O mapa directions exige que todas as imagens tenham as mesmas dimensões de image_size.`,
+    );
+  }
+
   const c = client();
+  const outputDir = join(ASSETS, 'characters', sanitize(key));
+  const ledgerPath = join(ASSETS, 'ledger.ndjson');
+
+  // --- Cardeais via /rotate (south→north, south→east, south→west) ---
+
+  const rotateInput: RotateInput = {
+    fromImage: character.referenceImage,
+    seed: character.seed,
+    imageSize: { width: character.size, height: character.size },
+    outputDir,
+    // isometric: OMITIDO quando undefined (F0-09). Com exactOptionalPropertyTypes
+    // não podemos passar `undefined` — só incluímos quando o valor é boolean.
+    ...(character.isometric !== undefined ? { isometric: character.isometric } : {}),
+  };
+
+  // Guard do rotate: informa, não recusa.
+  const rotateReport = estimateRotate(rotateInput);
+  logBudgetReport('rotate (3× south→N/E/W)', rotateReport);
+
+  const cards = await rotateCardinals(c, rotateInput, { ledgerPath });
+
+  // Ler as PNGs geradas como base64 para o mapa directions.
+  const northB64 = (await readFile(cards.north)).toString('base64');
+  const eastB64 = (await readFile(cards.east)).toString('base64');
+  const westB64 = (await readFile(cards.west)).toString('base64');
+
+  // --- Criação do personagem com 8 direções ---
+
+  const directions: Record<string, string> = {
+    south: character.referenceImage,
+    north: northB64,
+    east: eastB64,
+    west: westB64,
+  };
+
+  // Guard da criação: informa, não recusa.
+  const area = character.size * character.size;
+  const creationEstimate = estimateByArea(
+    COST_TABLE['create-character-with-8-directions'], area,
+  );
+  const creationReport = checkBudget({
+    estimate: creationEstimate,
+    maxSingleAssetUsd: creationEstimate.point,
+    spentThisMonthUsd: 0,
+    spentThisSessionUsd: 0,
+    balanceUsd: undefined,
+  });
+  logBudgetReport('create-character-with-8-directions', creationReport);
 
   const body: Record<string, unknown> = {
     description: character.description,
     image_size: { width: character.size, height: character.size },
     view: 'low top-down',
+    mode: 'standard',
     seed: character.seed,
-    no_background: true,
+    directions,
   };
-  // Reference art wins over the prompt: the v3 model rotates the supplied
-  // south-facing image instead of inventing a body. Max 256x256.
-  if (character.referenceImage) body['reference_image'] = character.referenceImage;
+  // isometric: OMITIDO quando false (F0-09).
+  if (character.isometric) body['isometric'] = true;
 
   const res = await c.submit<{ background_job_id?: string; character_id?: string }>(
-    'create-character-v3', body,
+    'create-character-with-8-directions', body,
   );
+
+  // Persistir character_id IMEDIATAMENTE — o dinheiro já saiu na submissão.
   const jobId = res.data?.background_job_id;
   const remoteId = res.data?.character_id;
   if (remoteId) {
@@ -148,16 +430,37 @@ async function generateBase(character: Character): Promise<void> {
   }
   if (!jobId) throw new Error('a API não devolveu background_job_id');
 
-  const polled = await pollJob(c, jobId, { timeoutMs: 900_000 });
-  if (!polled.ok) throw new Error(polled.reason === 'timeout' ? 'tempo esgotado' : (polled.detail ?? 'falhou'));
+  // Ledger da criação.
+  const usage = res.usage;
+  appendLedger(ledgerPath, {
+    at: new Date().toISOString(),
+    endpoint: 'create-character-with-8-directions',
+    usd: usage?.usd ?? null,
+    generations: usage?.generations ?? null,
+    unit: usage?.type ?? 'unknown',
+  });
 
-  const images = extractImages(polled.job.last_response ?? polled.job);
+  // Poll.
+  const polled = await pollJob(c, jobId, { timeoutMs: 900_000 });
+  if (!polled.ok) {
+    throw new Error(
+      polled.reason === 'timeout' ? 'tempo esgotado' : (polled.detail ?? 'falhou'),
+    );
+  }
+
+  // --- Prova de congelamento ---
+  const response = polled.job.last_response ?? polled.job;
+  verifyFreezing(directions, response, character.size);
+
+  // Extrair imagens e salvar.
+  const images = extractImages(response);
   if (images.length === 0) throw new Error('resposta sem imagem');
 
   const frames = await writeFrames('characters', key, images);
   const cell: Cell = {
     key, status: 'pronto', frames, updatedAt: new Date().toISOString(),
     ...(jobId ? { jobId } : {}), ...(remoteId ? { remoteId } : {}),
+    ...(usage?.usd != null ? { costUsd: usage.usd } : {}),
   };
   const cur = await load();
   cur.cells[key] = cell;
