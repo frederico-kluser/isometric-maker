@@ -83,7 +83,7 @@ Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da
 ```bash
 cd tools/pixellab-pipeline && npm test         # node --test src/*.test.ts
 cd tools/pixellab-pipeline && npm run typecheck
-cd tools/sprite-studio     && npm run typecheck
+cd tools/character-builder && npm run typecheck
 bash scripts/check-docs.sh                     # convenções de doc + endpoints + termos proibidos + links
 node .agents/skills/scripts/lint-skills.mjs    # formato das skills
 node .agents/skills/scripts/run-skill-evals.mjs

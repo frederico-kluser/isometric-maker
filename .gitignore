@@ -12,7 +12,7 @@ tools/pixellab-pipeline/.cache/
 tools/pixellab-pipeline/.pixellab/queue-state.json
 
 # arte gerada pelo estúdio: reconstruível a partir de studio.json
-tools/sprite-studio/assets/
+tools/character-builder/assets/
 
 # tokens de validação das skills: efêmeros por design (TTL de 30 min).
 # Versioná-los transformaria "eu validei agora" em "alguém validou um dia".

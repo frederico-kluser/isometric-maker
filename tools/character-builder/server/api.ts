@@ -1,5 +1,5 @@
 /**
- * Local API for the sprite studio, mounted as Vite middleware.
+ * Local API for the character builder, mounted as Vite middleware.
  *
  * Two responsibilities that must not leak into the browser:
  *   1. The PixelLab token. Every call to the API goes through here.

@@ -5,7 +5,7 @@
 > Um **editor de jogos isométricos** local, de usuário único: constrói o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Sem servidor, sem multiplayer, sem netcode. Este documento existe para que o MMORPG que este repositório era **não volte a crescer**.
 >
 > ```bash
-> cd /home/ondokai/Projects/isometric-maker/tools/sprite-studio && npm run dev
+> cd /home/ondokai/Projects/isometric-maker/tools/character-builder && npm run dev
 > ```
 
 ## O produto em um parágrafo

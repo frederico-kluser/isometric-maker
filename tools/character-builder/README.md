@@ -1,11 +1,11 @@
-# Sprite Studio
+# Character Builder
 
 > **Quick Start (TL;DR)**
 >
 > Tela de autoria: modelo base nu e careca nas 8 direções, poses, e guarda-roupa que vale para todos os personagens. O token nunca chega ao navegador.
 >
 > ```bash
-> cd /home/ondokai/Projects/isometric-maker/tools/sprite-studio
+> cd /home/ondokai/Projects/isometric-maker/tools/character-builder
 > export PIXELLAB_SECRET="..."
 > npm run dev        # http://localhost:5174
 > ```

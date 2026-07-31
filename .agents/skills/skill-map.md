@@ -30,7 +30,7 @@ if merged, or *never retrieved* if split".
 
 **Minimal-set discipline.** The reference minimal set is router + style + 2–3 domains + testing =
 six or seven. This map lands at seven functional skills plus the two mandated meta-skills. Nothing
-was added "for completeness": there is no skill for the sprite-studio UI (its README already carries
+was added "for completeness": there is no skill for the character-builder UI (its README already carries
 that knowledge and it is a leaf tool), none for git workflow (three rules, they live in `AGENTS.md`),
 and none for cloud/infra (`AGENTS.md:73@e451cfee` forbids documenting infra that does not exist).
 
@@ -93,14 +93,14 @@ its global counterpart and defers to it rather than restating it.
 ### 2.4 `writing-repo-typescript` — knowledge
 
 - **Type:** knowledge · **Verification signal:**
-  `cd tools/pixellab-pipeline && npm run typecheck && cd ../sprite-studio && npm run typecheck`
+  `cd tools/pixellab-pipeline && npm run typecheck && cd ../character-builder && npm run typecheck`
 - **Triggers:** writing or editing any `.ts` under `tools/`; adding an import; adding a dependency;
   wondering why a construct is rejected.
 - **Why it exists:** the execution model is unusual (Node 24 type-stripping, no build step) and it
   makes two normally-cosmetic choices load-bearing: the `.ts` extension on relative imports and the
   `node:` prefix on builtins are what let the same file resolve under `NodeNext` and `bundler` at once.
 - **Must carry:** the tooling-guaranteed table (pointing at `typecheck`, never restating the rules);
-  the cross-package import at `tools/sprite-studio/server/api.ts:15@c243f115` and the constraint it
+  the cross-package import at `tools/character-builder/server/api.ts:15@8fb78ce5` and the constraint it
   creates; that there is no workspace and no root manifest.
 - **Explicitly must NOT carry:** prose restating `strict`, `verbatimModuleSyntax`, `erasableSyntaxOnly`
   or `noUncheckedIndexedAccess`. Those are compiler flags; the compiler is the documentation.

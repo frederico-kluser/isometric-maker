@@ -101,10 +101,10 @@ stage "pixellab-pipeline · npm run typecheck" \
   "-"
 
 # ═══════════════════════════════════════════════════════════════════════
-header "sprite-studio / character-builder"
+header "character-builder"
 
-nao_exercitado_stage "sprite-studio · npm run typecheck" \
-  "cd tools/sprite-studio 2>/dev/null && npm run typecheck || cd tools/character-builder 2>/dev/null && npm run typecheck"
+nao_exercitado_stage "character-builder · npm run typecheck" \
+  "cd tools/character-builder 2>/dev/null && npm run typecheck"
 
 # ═══════════════════════════════════════════════════════════════════════
 header "documentação"

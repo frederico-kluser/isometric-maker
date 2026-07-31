@@ -53,7 +53,7 @@ Numeração reservada, **sem arquivo em disco**. A convenção 12 diz que doc de
 | Ferramenta | O que faz | Estado |
 |---|---|---|
 | [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de custo e empacotador de atlas | **funcional** |
-| [`tools/sprite-studio`](../tools/sprite-studio/README.md) | Tela de autoria: corpo base nas 8 direções, poses, guarda-roupa. Evolui para o construtor de personagem | **funcional** |
+| [`tools/character-builder`](../tools/character-builder/README.md) | Tela de autoria: corpo base nas 8 direções, poses, guarda-roupa. Evolui para o construtor de personagem | **funcional** |
 | [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
 
 ## ADR — decisões registradas

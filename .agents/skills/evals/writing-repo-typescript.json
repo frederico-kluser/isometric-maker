@@ -21,7 +21,7 @@
     },
     {
       "must_contain": "across package",
-      "why": "the sprite-studio to pipeline coupling is why the stricter tsconfig wins on shared files"
+      "why": "the character-builder to pipeline coupling is why the stricter tsconfig wins on shared files"
     },
     {
       "must_contain": "no linter and no formatter",

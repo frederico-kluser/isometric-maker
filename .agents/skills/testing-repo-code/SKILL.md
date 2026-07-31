@@ -29,7 +29,7 @@ node --test --test-name-pattern="extrusion" src/*.test.ts   # one test
 Tests are co-located as `src/<module>.test.ts` and import from `node:test` and
 `node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@d28e4f8a`).
 
-`tools/sprite-studio` has **no test script at all** (`tools/sprite-studio/package.json:8@ee3664ec`).
+`tools/character-builder` has **no test script at all** (`tools/character-builder/package.json:8@47dd51fc`).
 Its only automated signal is `npm run typecheck`.
 
 ### What is covered, and what is not

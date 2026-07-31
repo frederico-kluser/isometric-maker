@@ -16,7 +16,7 @@ export default defineConfig({
   publicDir: 'assets',
   plugins: [
     {
-      name: 'sprite-studio-api',
+      name: 'character-builder-api',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
           const handled = await handle(req, res).catch((err: unknown) => {

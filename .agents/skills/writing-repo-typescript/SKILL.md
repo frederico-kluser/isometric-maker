@@ -3,7 +3,7 @@ name: writing-repo-typescript
 description: Explains how TypeScript actually runs in this repo - Node 24 strips types and executes .ts directly, with no build step and no workspace - and the few conventions that are load-bearing rather than cosmetic. Use whenever writing, editing or reviewing any .ts file under tools/, adding an import, adding a dependency, or wondering why the compiler rejected something - including Portuguese phrasings like "criar um arquivo ts", "adicionar um import", "por que o compilador reclama", "o tsc esta reclamando", "instalar um pacote", "rodar o typecheck", "erro de tipo". Triggers on tsconfig, typecheck, import, ESM, node:, enum, namespace, decorator, .ts extension, erasableSyntaxOnly, verbatimModuleSyntax, noUncheckedIndexedAccess.
 metadata:
   type: knowledge
-  verification_signal: cd tools/pixellab-pipeline && npm run typecheck && cd ../sprite-studio && npm run typecheck
+  verification_signal: cd tools/pixellab-pipeline && npm run typecheck && cd ../character-builder && npm run typecheck
 ---
 
 # Writing TypeScript in this repo
@@ -30,10 +30,10 @@ Two consequences that look like style and are not:
 
 ### Why those two are load-bearing
 
-`tools/sprite-studio/server/api.ts:15@c243f115` imports the pipeline's client **across package
+`tools/character-builder/server/api.ts:15@8fb78ce5` imports the pipeline's client **across package
 boundaries by relative path**: `'../../pixellab-pipeline/src/api.ts'`. There is no dependency
-declared for it in `tools/sprite-studio/package.json@ee3664ec` — the coupling is a filesystem path,
-which is why `server.fs.allow` is widened in `tools/sprite-studio/vite.config.ts:12@eb395849`.
+declared for it in `tools/character-builder/package.json@47dd51fc` — the coupling is a filesystem path,
+which is why `server.fs.allow` is widened in `tools/character-builder/vite.config.ts:12@6a436967`.
 
 So the same file has to resolve under **two different module resolutions at once**: `NodeNext` for
 the pipeline and `bundler` for Vite. Explicit `.ts` extensions and `node:` prefixes are what make
@@ -42,12 +42,12 @@ that work. Dropping either breaks one consumer and not the other, which is the w
 It also means anything added to `tools/pixellab-pipeline/src/api.ts` or its transitive imports must
 satisfy the **stricter** of the two configs: the pipeline additionally sets `noImplicitOverride` and
 `noFallthroughCasesInSwitch` (`tools/pixellab-pipeline/tsconfig.json:13@e8e110a2`), which
-sprite-studio does not.
+character-builder does not.
 
 ### What the compiler already enforces — do not restate it as a rule
 
 Run `npm run typecheck` in each tool. The flags below are on in both
-(`tools/pixellab-pipeline/tsconfig.json@e8e110a2`, `tools/sprite-studio/tsconfig.json@0e018a20`), so
+(`tools/pixellab-pipeline/tsconfig.json@e8e110a2`, `tools/character-builder/tsconfig.json@0e018a20`), so
 the compiler is the convention document:
 
 | Flag | What it makes illegal |
@@ -90,7 +90,7 @@ npm run typecheck      # tsc -p tsconfig.json --noEmit
 npm test               # node --test src/*.test.ts
 npm run cli -- plan    # node src/cli.ts
 
-cd tools/sprite-studio
+cd tools/character-builder
 npm run typecheck      # tsc -p tsconfig.json   (no --noEmit; noEmit is in the config)
 npm run dev            # vite, port 5174
 ```

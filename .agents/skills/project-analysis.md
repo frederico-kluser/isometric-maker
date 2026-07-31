@@ -103,11 +103,11 @@ check instead.
 |---|---|---|
 | One `# H1`; `> **Quick Start (TL;DR)**` blockquote; `## Referências`; `**Última atualização:** YYYY-MM-DD` | `scripts/check-docs.sh:14-17@45c21969` | Do not describe the format. Say "run the checker." |
 | Every backticked `/endpoint` in `docs/**` exists in the vendored spec | `scripts/check-docs.sh:28-44@45c21969` | Same. Note the `DELIBERATE_V1` allowlist. |
-| No `enum`, no `namespace`, no constructor parameter properties | `erasableSyntaxOnly` — `tools/pixellab-pipeline/tsconfig.json:16@e8e110a2`, `tools/sprite-studio/tsconfig.json:13@0e018a20` | Do not write a style rule. `npm run typecheck` is the rule. |
+| No `enum`, no `namespace`, no constructor parameter properties | `erasableSyntaxOnly` — `tools/pixellab-pipeline/tsconfig.json:16@e8e110a2`, `tools/character-builder/tsconfig.json:13@0e018a20` | Do not write a style rule. `npm run typecheck` is the rule. |
 | `import type` mandatory for type-only imports | `verbatimModuleSyntax` — same files, `:15` / `:12` | Same. |
 | Indexed reads are `T \| undefined` | `noUncheckedIndexedAccess` — `:11` / `:10` | Explains why `process.env['X']` bracket access is everywhere. |
 | Optional properties are not assignable from `undefined` | `exactOptionalPropertyTypes` — `:12` / `:11` | Explains the conditional-spread idiom at `tools/pixellab-pipeline/src/cli.ts:240@8d21d33a`. |
-| Switch fallthrough and missing `override` rejected — **pipeline only** | `noFallthroughCasesInSwitch`, `noImplicitOverride` — `tools/pixellab-pipeline/tsconfig.json:13-14@e8e110a2` | Scope matters: sprite-studio does not set these. |
+| Switch fallthrough and missing `override` rejected — **pipeline only** | `noFallthroughCasesInSwitch`, `noImplicitOverride` — `tools/pixellab-pipeline/tsconfig.json:13-14@e8e110a2` | Scope matters: character-builder does not set these. |
 | Atlas packing is byte-deterministic | `tools/pixellab-pipeline/src/atlas.test.ts:35@d28e4f8a` (6 tests) | The one existing regression net. |
 
 **Not guaranteed by anything, currently prose only** (`AGENTS.md:55@e451cfee`): absolute paths,
@@ -134,7 +134,7 @@ power-abuse/
 │   ├── openapi/              vendored spec + PROVENIENCIA.txt (source of truth for the API)
 │   ├── assets/catalog.ts     17 assets; code that evaluates to data
 │   └── src/                  api, catalog, cost, endpoints, generate, queue, atlas, util, cli
-├── tools/sprite-studio/      1.5k LoC. Vite middleware; token stays server-side.
+├── tools/character-builder/      1.5k LoC. Vite middleware; token stays server-side.
 └── packages/game-assets/atlas/   empty. Nothing has ever been generated.
 ```
 
@@ -177,9 +177,9 @@ one — which `AGENTS.md:20@e451cfee` forbids.
 ### C. TypeScript execution model
 `.ts` extension on every relative import and `node:` prefix on every builtin are not style — they
 are what makes the same file resolve under both `NodeNext` (pipeline) and `bundler` (Vite). This
-matters because `tools/sprite-studio/server/api.ts:15@c243f115` imports the pipeline's client across
+matters because `tools/character-builder/server/api.ts:15@8fb78ce5` imports the pipeline's client across
 package boundaries by relative path, with no dependency declared in
-`tools/sprite-studio/package.json@7406282e`. Code added to the pipeline's `api.ts` must satisfy the
+`tools/character-builder/package.json@47dd51fc`. Code added to the pipeline's `api.ts` must satisfy the
 stricter of the two tsconfigs.
 
 ### D. Testing as the verification backbone
@@ -261,7 +261,7 @@ use para …" shape, and both are validated by a `validate.sh` that vendors Anth
 `quick_validate.py`.
 
 They cover general PixelLab API lore and general engine design. They do **not** know that
-`tools/pixellab-pipeline` and `tools/sprite-studio` exist — both landed after their
+`tools/pixellab-pipeline` and `tools/character-builder` exist — both landed after their
 `last-reviewed` date — and they cover none of the repo's doc conventions, ADR workflow, or
 build/test commands.
 

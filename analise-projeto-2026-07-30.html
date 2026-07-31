@@ -171,7 +171,7 @@
           <thead><tr><th>Peça</th><th>Por que sobrevive</th></tr></thead>
           <tbody>
             <tr><td><code>tools/pixellab-pipeline</code></td><td>2,6k linhas de geração idempotente, transporte com retry, fila retomável e empacotador de atlas. Um editor precisa exatamente disso</td></tr>
-            <tr><td><code>tools/sprite-studio</code></td><td>Já gera personagem em 8 direções com o token preso no Node. <strong>Vira o construtor de personagem</strong>, não é reescrito</td></tr>
+            <tr><td><code>tools/character-builder</code></td><td>Já gera personagem em 8 direções com o token preso no Node. <strong>Vira o construtor de personagem</strong>, não é reescrito</td></tr>
             <tr><td><code>tools/pixi-reference</code></td><td><code>pixi.js</code> 8.19.0 vendorizado com tipos e as 26 skills oficiais, com proveniência e verificador</td></tr>
             <tr><td>Manual do PixelLab</td><td>Custo, limites, modelo assíncrono, licença — zero conteúdo de jogo. A licença fica <em>mais</em> relevante: o usuário final gera arte</td></tr>
             <tr><td>ADRs 0002, 0006, 0008, 0009</td><td>Cliente REST sobre spec vendorizado, <code>mode='template'</code>, idioma por eixo, conhecimento do PixiJS vendorizado</td></tr>
@@ -229,7 +229,7 @@
             <div class="accordion-body">
               <p><strong>Critério de entrada da W1.</strong> Cada item está aqui porque fazê-lo depois custa dinheiro real ou quebra identidade de cache.</p>
               <ul>
-                <li><strong>Rename.</strong> <code>@isometric-maker/*</code> → <code>@isometric-maker/*</code>; <code>tools/sprite-studio</code> → <code>tools/character-builder</code>. E o <code>ATLAS_OUT</code> em <code>cli.ts:28</code>, que hoje aponta para <code>packages/game-assets/atlas</code> — um diretório que <strong>não existe</strong>.</li>
+                <li><strong>Rename (concluído).</strong> <code>@isometric-maker/*</code> → <code>@isometric-maker/*</code>; <code>tools/character-builder</code> renomeado em F0-02. E o <code>ATLAS_OUT</code> em <code>cli.ts:28</code>, que hoje aponta para <code>packages/game-assets/atlas</code> — um diretório que <strong>não existe</strong>.</li>
                 <li><strong>Guard informativo.</strong> <code>GuardVerdict</code> perde a variante <code>refuse</code>. Vira um relatório com <code>requiresConfirmation: true</code> como <strong>tipo literal</strong>, que é o que faz o compilador impedir alguém de criar um caminho "gera sem perguntar".</li>
                 <li><strong>Os testes que não existem.</strong> <code>catalog</code>, <code>cost</code>, <code>queue</code>, <code>generate</code>. O teste de manchete: plano → generate simulado contra cliente falso que conta submits → plano de novo → <strong><code>submits === 0</code></strong>.</li>
                 <li><strong>As três mentiras pequenas.</strong> <code>schema.d.ts</code> gerado e importado por ninguém; <code>zod</code> declarado e nunca importado; <code>refresh-openapi</code> apontando para script inexistente. Cada uma vira decisão, não pendência.</li>

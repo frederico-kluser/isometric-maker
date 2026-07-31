@@ -138,7 +138,7 @@ topológico é condição necessária; conjuntos de arquivos escritos disjuntos 
 | --- | --- |
 | `G-plan` | `/home/ondokai/Projects/isometric-maker/PLANO-DE-EXECUCAO.md`, `scripts/**` |
 | `G-pipeline` | `tools/pixellab-pipeline/**` |
-| `G-builder` | `tools/character-builder/**` (hoje `tools/sprite-studio/**`) |
+| `G-builder` | `tools/character-builder/**` (hoje `tools/character-builder/**`) |
 | `G-core` | `packages/iso-core/**` |
 | `G-map` | `tools/map-builder/**` (a criar) |
 | `G-runtime` | `tools/runtime/**` (a criar) |
@@ -291,7 +291,7 @@ no replanejamento e continua verdadeira contra o código de hoje:
    depois invalida cada personagem e cobra tudo de novo.
 2. **Fase 1 sobre `create-character-v3`** → confirmado no spec vendorizado: `create-character-v3`
    **não tem** `isometric` nem `directions`. Só `/create-character-with-8-directions` tem os dois.
-   O estúdio usa o v3 hoje (`tools/sprite-studio/server/api.ts`, `generateBase`).
+   O estúdio usa o v3 hoje (`tools/character-builder/server/api.ts`, `generateBase`).
 3. **Fase 1 antes do guard informativo** → o `POST /api/generate` do estúdio submete direto, sem
    passar por `cost.ts` e sem escrever no ledger. A primeira sessão gasta dinheiro que o teto mensal
    não enxerga.
@@ -331,7 +331,7 @@ Estado de hoje, medido em 2026-07-30:
 etapa                                        estado
 pixellab-pipeline · npm test                 PASS  (6 testes)
 pixellab-pipeline · npm run typecheck        PASS
-sprite-studio     · npm run typecheck        NÃO-EXERCITADO (nunca rodado neste plano)
+character-builder     · npm run typecheck        NÃO-EXERCITADO (nunca rodado neste plano)
 scripts/check-docs.sh                        PASS
 lint-skills.mjs                              NÃO-EXERCITADO
 run-skill-evals.mjs                          NÃO-EXERCITADO
@@ -511,7 +511,7 @@ crédito, e nenhuma dessas coisas existe dentro de uma worktree. Faça-o na mão
 #### Armadilhas que já estão no código, e valem saber antes
 
 - **O token nunca chega ao navegador, por construção.** O estúdio monta a API como middleware do
-  Vite (`tools/sprite-studio/vite.config.ts`) exatamente para isso. Se algum dia um `fetch` do
+  Vite (`tools/character-builder/vite.config.ts`) exatamente para isso. Se algum dia um `fetch` do
   browser for direto para `api.pixellab.ai`, o segredo aparece no devtools.
 - **O hook de segurança de `.claude/settings.json` torna `.env` e `secrets/` ilegíveis para
   agentes.** Isso é proposital. Não tente contorná-lo pedindo o token a um agente: exporte-o você,
@@ -729,7 +729,7 @@ faixa_ledger: AB-100..AB-109
 
 ## Onda W1 — o neck
 
-### `F0-02` — Renomear `sprite-studio` para `character-builder` e purgar o nome antigo residual
+### `F0-02` — Rename para `character-builder` e purga do nome residual
 
 ```yaml
 id: F0-02
@@ -740,7 +740,7 @@ deps: [F0-01]
 critico: true
 gasta: nao
 worktree: sim
-estado: pendente
+estado: feito
 arquivos:
   - tools/character-builder/**
   - tools/pixellab-pipeline/src/cli.ts
@@ -751,9 +751,27 @@ faixa_ledger: AB-110..AB-119
 
 | | |
 | --- | --- |
-| **Objetivo** | `tools/sprite-studio` passa a ser `tools/character-builder`, e o nome do produto anterior some do código — hoje ele ainda está em dois lugares. |
-| **Entradas** | `git mv` · `tools/sprite-studio/index.html` · `tools/pixellab-pipeline/src/cli.ts` (banner do `usage`) · as citações `arquivo:linha@hash` das skills. |
-| **Saídas** | árvore renomeada · zero ocorrências do nome antigo fora do arquivo da ADR 0011 · skills revalidadas. |
+| **Objetivo** | O estúdio de autoria (`sprite-studio`) é renomeado para `tools/character-builder`, e o nome do produto anterior some do código — hoje ele ainda estava em dois lugares. |
+| **Entradas** | `git mv` · `tools/character-builder/index.html` · `tools/pixellab-pipeline/src/cli.ts` (banner do `usage`) · as citações `arquivo:linha@hash` das skills. |
+| **Saídas** | árvore renomeada · zero ocorrências do nome antigo fora do arquivo da ADR 0015 · skills reancoradas. |
+
+**Considerações para cards futuros:**
+
+- Skills com citações reancoradas (paths atualizados, hashes recalculados para os arquivos modificados):
+  - `testing-repo-code` — 1 citação (`package.json:8@47dd51fc`)
+  - `writing-repo-typescript` — 6 citações (`api.ts:15@8fb78ce5`, `package.json@47dd51fc`, `vite.config.ts:12@6a436967`, `tsconfig.json@0e018a20`)
+  - `project-analysis` — 6 citações (incluindo `api.ts:15@8fb78ce5`, `package.json@47dd51fc`, `tsconfig.json:13@0e018a20`)
+  - `skill-map` — 3 citações (`api.ts:15@8fb78ce5`)
+  - `evals/writing-repo-typescript.json` — 1 referência textual
+- Skills com AVISO de hash desatualizado (stale, não erro) devido a mudanças colaterais neste card:
+  - `guarding-generation-cost` — 7 avisos em `cli.ts` (banner alterado: `8d21d33a → 681e566d`)
+  - `writing-repo-typescript` — 1 aviso em `cli.ts` (mesma causa)
+  - `writing-project-docs` — 5 avisos em `docs/README.md` (tabela alterada: `62ab10c3 → 7ddecb2d`)
+  - `animating-pixi-sprites` — 7 avisos em `docs/02-personagem/guarda-roupa-e-silhueta.md` (cd path alterado: `be1e5781 → 55ec273b`)
+  - Diversas skills com avisos em `AGENTS.md` (comando typecheck alterado: `eb529ae5 → e4c21896`)
+  - Diversas skills com avisos em `docs/00-produto/visao.md` (cd path alterado: `613eaec7 → 1feb166b`)
+- **docs/adr/0015-low-top-down-8-direcoes-isometrico.md:56** contém `tools/sprite-studio/server/api.ts` como referência histórica ao estado pré-rename. A restrição do card proíbe editar docs/adr/**, portanto esta ocorrência sobrevive intencionalmente.
+- `scripts/gate.sh` — removida a lógica de fallback `|| cd tools/character-builder`; o gate agora aponta exclusivamente para `character-builder`.
 | **Considerações** | — |
 
 **Por que este card corre sozinho numa onda.** Ele toca uma árvore inteira e as citações de nove
@@ -761,7 +779,7 @@ skills. Qualquer card paralelo escreveria contra caminhos que deixam de existir 
 não teria em que conflitar — mergearia limpo e quebraria depois.
 
 **A armadilha que este card existe para não repetir:** o `check-docs.sh` só varre `docs/`. Por isso
-a purga da ADR 0017 alcançou as docs e **deixou passar** `tools/sprite-studio/index.html` e o banner
+a purga da ADR 0017 alcançou as docs e **deixou passar** `tools/character-builder/index.html` e o banner
 do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
 
 ```xml
@@ -778,7 +796,7 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
   </ultrathink>
 
   <contexto>
-    tools/sprite-studio é a tela de autoria que já gera um personagem em 8 direções com o token preso
+    tools/character-builder é a tela de autoria que já gera um personagem em 8 direções com o token preso
     no Node. Ela não vai ser reescrita — ela VIRA o construtor de personagem da Fase 1. O rename é a
     primeira metade dessa promoção; a segunda é a troca de endpoint, que é o card F1-03.
     A ADR 0017 já purgou o nome do produto anterior de caminhos e escopos npm, mas a varredura dela
@@ -799,9 +817,9 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
   </skills_obrigatorias>
 
   <entradas>
-    - tools/sprite-studio/** — a árvore inteira. Use `git mv`, não copiar e apagar: o histórico do
+    - tools/character-builder/** — a árvore inteira. Use `git mv`, não copiar e apagar: o histórico do
       arquivo é o que permite auditar a promoção depois.
-    - grep -rn "sprite-studio" --exclude-dir=node_modules --exclude-dir=.git . — a lista de trabalho
+    - grep -rn "character-builder" --exclude-dir=node_modules --exclude-dir=.git . — a lista de trabalho
       literal. Rode ANTES de mexer em nada e guarde a saída; ela é o seu inventário.
     - grep -rn "Power Abuse\|power-abuse" --exclude-dir=node_modules --exclude-dir=.git . — hoje
       devolve ocorrências legítimas (o arquivo da ADR 0011, o índice, a lista de termos do
@@ -809,7 +827,7 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
   </entradas>
 
   <o_que_fazer>
-    1. `git mv tools/sprite-studio tools/character-builder`. Ajuste, no mínimo: o campo `name` de
+    1. `git mv tools/character-builder tools/character-builder`. Ajuste, no mínimo: o campo `name` de
        tools/character-builder/package.json para @isometric-maker/character-builder; o import
        relativo `../../pixellab-pipeline/src/api.ts` em server/api.ts (a profundidade não muda, mas
        confira); e o `<title>` de index.html, que hoje diz "Sprite Studio — Power Abuse".
@@ -817,7 +835,7 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
        Power Abuse". Troque por "pipeline de assets do isometric-maker". É a única linha do CLI que
        este card toca — o resto do cli.ts pertence a F0-03, na onda seguinte.
     3. Varra as citações das skills. Para cada `arquivo:linha@hash` que aponte para
-       tools/sprite-studio/**, reancore para o caminho novo E RECONFIRA A LINHA: o comando de geração
+       tools/character-builder/**, reancore para o caminho novo E RECONFIRA A LINHA: o comando de geração
        de citação imprime a citação e o conteúdo da linha, justamente para você confirmar que ela diz
        o que você vai afirmar. Editar um SKILL.md existente exige token fresco de
        `node .agents/skills/scripts/run-skill-evals.mjs --skill <nome> --write-token`, com TTL de 30
@@ -853,8 +871,8 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
     <worktree>G-builder — bash scripts/new-task-worktree.sh F0-02</worktree>
     <revisao_adversarial>
       Subagente de contexto fresco, recebendo só o diff e este card:
-        - sobrou alguma citação de skill apontando para tools/sprite-studio?
-          (comando: grep -rn "sprite-studio" .agents/skills/ — tem de sair vazio)
+        - sobrou alguma citação de skill apontando para tools/character-builder?
+          (comando: grep -rn "character-builder" .agents/skills/ — tem de sair vazio)
         - `node .agents/skills/scripts/lint-skills.mjs` está verde por CONFERIR ou por não achar
           nada para conferir?
         - o estúdio ainda SOBE depois do rename? (npm run dev no diretório novo)
@@ -863,13 +881,13 @@ do `usage` em `tools/pixellab-pipeline/src/cli.ts`. Verificado em 2026-07-30.
   </swarm>
 
   <criterios_aceitacao>
-    test -d tools/character-builder && test ! -d tools/sprite-studio
+    test -d tools/character-builder && test ! -d tools/character-builder
     cd tools/character-builder && npm run typecheck                          # exit 0
     node .agents/skills/scripts/lint-skills.mjs                              # exit 0
     bash scripts/check-docs.sh                                               # exit 0
     node scripts/validate-plan.mjs                                           # exit 0
     # falha por AUSÊNCIA:
-    ! grep -rn "sprite-studio" --exclude-dir=node_modules --exclude-dir=.git .
+    ! grep -rn "character-builder" --exclude-dir=node_modules --exclude-dir=.git .
     ! grep -rln "Power Abuse" tools/ packages/
     # controle positivo do grep acima — prova que o detector enxerga alguma coisa:
     grep -rq "isometric-maker" tools/character-builder/package.json
@@ -5419,7 +5437,7 @@ Cada linha foi verificada em 2026-07-30, contra este código.
 | `npm test` com `src/*.test.ts` sem casar arquivo | o glob não expande; conte os testes, não o exit code |
 | `node src/cli.ts plan` com catálogo vazio | "0 jobs a submeter · US$ 0,00". Idêntico a "tudo em cache". **Precisa de denominador** |
 | `lint-skills.mjs` verde com citação de hash desatualizado | hash mudado é **aviso**; só arquivo ausente é erro. A skill pode atestar texto que não existe mais |
-| `check-docs.sh` verde | ele confere **4** das 12 convenções, e só em `docs/`, `README.md` e `tools/*/README.md`. Foi assim que o nome antigo sobreviveu em `tools/sprite-studio/index.html` |
+| `check-docs.sh` verde | ele confere **4** das 12 convenções, e só em `docs/`, `README.md` e `tools/*/README.md`. Foi assim que o nome antigo sobreviveu em `tools/character-builder/index.html` |
 | Diálogo de custo dizendo "US$ 0,00" | verdade quando o cache funcionou **e** quando não há nada a gerar |
 | Um atlas que carrega mas desenha nada | "o smoke passaria com uma página em branco?" — exija um caso positivo |
 | `git diff --exit-code` num diretório de saída | **não enxerga arquivo não rastreado** |
