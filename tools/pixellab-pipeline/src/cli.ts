@@ -3,7 +3,7 @@
  * pixellab — build-time asset pipeline CLI.
  *
  * Exit codes are part of the contract:
- *   0 ok · 1 error · 2 refused by budget · 3 API drift (strict)
+ *   0 ok · 1 error · 2 user did not confirm · 3 API drift (strict)
  *   4 paid jobs pending, run `resume` · 5 artifact verification failed
  */
 import { access, readFile, stat } from 'node:fs/promises';
@@ -16,7 +16,7 @@ import { QueueStore } from './queue.ts';
 import {
   buildPlan, emptyLockfile, loadLockfile, type Lockfile, type PlanItem, type AssetSpec,
 } from './catalog.ts';
-import { COST_TABLE, DEFAULT_LIMITS, TIER_CONCURRENCY, checkBudget, type Tier } from './cost.ts';
+import { COST_TABLE, DEFAULT_THRESHOLDS, TIER_CONCURRENCY, checkBudget, type Tier } from './cost.ts';
 import { formatUsd, readJsonIfExists, shortDigest } from './util.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -25,7 +25,13 @@ const LOCKFILE = join(ROOT, 'pixellab-lock.json');
 const CACHE_DIR = join(ROOT, '.cache');
 const LEDGER = join(ROOT, '.pixellab', 'ledger.ndjson');
 const QUEUE = join(ROOT, '.pixellab', 'queue-state.json');
-const ATLAS_OUT = resolve(ROOT, '..', '..', 'packages', 'game-assets', 'atlas');
+// ATLAS_OUT lives inside the pipeline tool directory so that `atlas` output
+// is versioned alongside the code that produced it.  A path outside the repo
+// (the old `packages/game-assets/atlas`) vanishes on a fresh clone and makes
+// `atlas` write into a directory no other checkout has — invisible to git
+// and invisible to every other developer.  Versioning atlas output here means
+// a clone gets the exact spritesheet the lockfile expects without regenerating.
+const ATLAS_OUT = resolve(ROOT, 'atlas');
 const OPENAPI = join(ROOT, 'openapi', 'openapi-v2.json');
 
 const exists = async (p: string): Promise<boolean> => {
@@ -147,22 +153,37 @@ async function cmdPlan(): Promise<number> {
 async function cmdEstimate(): Promise<number> {
   const [catalog, lock] = await Promise.all([loadCatalog(), currentLock()]);
   const plan = await buildPlan(catalog, lock, exists);
-  const client = PixelLabClient.fromEnv();
-  const balance = await client.balance().catch(() => ({ usd: undefined as number | undefined }));
+  let client: PixelLabClient | null = null;
+  try { client = PixelLabClient.fromEnv(); } catch { /* sem credenciais — sem saldo */ }
+  const balance = client
+    ? await client.balance().catch(() => ({ usd: undefined as number | undefined }))
+    : { usd: undefined as number | undefined };
+  const monthSpent = await spentThisMonth();
 
-  const verdict = checkBudget({
+  const report = checkBudget({
     estimate: plan.estimate,
     maxSingleAssetUsd: plan.maxSingleAssetUsd,
-    spentThisMonthUsd: await spentThisMonth(),
+    spentThisMonthUsd: monthSpent,
+    spentThisSessionUsd: 0, // session tracking not yet implemented
     balanceUsd: balance.usd,
   });
 
   console.log(`Estimativa: ${formatUsd(plan.estimate.point)} (pior caso ${formatUsd(plan.estimate.high)})`);
-  console.log(`Asset mais caro: ${formatUsd(plan.maxSingleAssetUsd)} (teto ${formatUsd(DEFAULT_LIMITS.maxAssetUsd)})`);
-  console.log(`Mês corrente: ${formatUsd(await spentThisMonth())} de ${formatUsd(DEFAULT_LIMITS.hardCapMonthlyUsd)}`);
-  console.log(`\nGuard: ${verdict.kind}`);
-  if (verdict.kind !== 'allow') console.log(`  ${verdict.kind === 'refuse' ? `[${verdict.code}] ` : ''}${verdict.reason}`);
-  return verdict.kind === 'refuse' ? 2 : 0;
+  console.log(`Asset mais caro: ${formatUsd(plan.maxSingleAssetUsd)} (limiar ${formatUsd(DEFAULT_THRESHOLDS.maxAssetUsd)})`);
+  console.log(`Mês corrente: ${formatUsd(monthSpent)} (limiar ${formatUsd(DEFAULT_THRESHOLDS.hardCapMonthlyUsd)})`);
+
+  if (report.avisos.length > 0) {
+    console.log(`\n${report.avisos.length} aviso(s):`);
+    for (const a of report.avisos) {
+      console.log(`  [${a.code}] medido ${a.measured.toFixed(4)}, limiar ${a.threshold.toFixed(2)}`);
+      console.log(`         ${a.text}`);
+    }
+  } else {
+    console.log('\nNenhum aviso.');
+  }
+
+  // `estimate` never refuses. The guard informs; the human decides.
+  return 0;
 }
 
 async function cmdVerify(): Promise<number> {
@@ -253,33 +274,40 @@ async function cmdGenerate(): Promise<number> {
   }
 
   const dryRun = flag('dry-run');
-  const client = dryRun ? null : PixelLabClient.fromEnv();
+  let client: PixelLabClient | null = null;
+  if (!dryRun) {
+    try { client = PixelLabClient.fromEnv(); } catch { /* sem credenciais — vai falhar no submit */ }
+  }
   const balance: { usd: number | undefined } = client
     ? await client.balance().catch(() => ({ usd: undefined }))
     : { usd: undefined };
+  const monthSpent = await spentThisMonth();
 
-  const verdict = checkBudget({
+  const report = checkBudget({
     estimate: plan.estimate,
     maxSingleAssetUsd: plan.maxSingleAssetUsd,
-    spentThisMonthUsd: await spentThisMonth(),
+    spentThisMonthUsd: monthSpent,
+    spentThisSessionUsd: 0, // session tracking not yet implemented
     balanceUsd: balance.usd,
   });
 
   console.log(`A gerar: ${plan.toGenerate.length} asset(s) · estimado ${formatUsd(plan.estimate.point)}`);
+  console.log(`Mês corrente: ${formatUsd(monthSpent)}`);
+
+  // Print warnings before the confirmation gate.
+  for (const a of report.avisos) {
+    console.log(`  [aviso: ${a.code}] ${a.text}`);
+  }
 
   if (dryRun) {
     const res = await runGenerate(plan.items, lock, null, genOptions(true));
-    console.log(`\nGuard diria: ${verdict.kind}${verdict.kind === 'allow' ? '' : ` — ${verdict.reason}`}`);
+    console.log(`\nGuard: requer confirmação${report.requiresConfirmation ? '' : ' (não)'}`);
+    for (const a of report.avisos) console.log(`  [${a.code}] ${a.text}`);
     return res.generated === 0 ? 0 : 0;
   }
 
-  if (verdict.kind === 'refuse') {
-    console.error(`\nRECUSADO [${verdict.code}]: ${verdict.reason}`);
-    return 2;
-  }
-  if (verdict.kind === 'confirm' && !flag('yes')) {
-    console.error(`\nCONFIRMAÇÃO NECESSÁRIA: ${verdict.reason}`);
-    console.error('Repita com --yes se for isso mesmo.');
+  if (report.requiresConfirmation && !flag('yes')) {
+    console.error('\nConfirmação necessária — repita com --yes para gerar.');
     return 2;
   }
   if (!process.stdout.isTTY && !flag('yes') && !dryRun) {
@@ -392,7 +420,7 @@ pixellab — pipeline de assets do isometric-maker
 Variáveis: PIXELLAB_SECRET (obrigatório) · PIXELLAB_TIER=free|t1|t2|t3
 
 Sempre rode 'plan' e 'estimate' antes de gerar. 'generate' gasta dinheiro real.
-Exit: 0 ok · 1 erro · 2 recusado pelo orçamento · 4 jobs pagos pendentes · 5 artefato inválido
+Exit: 0 ok · 1 erro · 2 usuário não confirmou · 3 API drift · 4 jobs pagos pendentes · 5 artefato inválido
 `);
 }
 

@@ -279,37 +279,40 @@ export function sumEstimates(list: readonly CostEstimate[]): CostEstimate {
 export const TIER_CONCURRENCY = { free: 1, t1: 2, t2: 4, t3: 20 } as const;
 export type Tier = keyof typeof TIER_CONCURRENCY;
 
-export interface BudgetLimits {
-  /** Refuse a single run above this. */
+/** Thresholds that trigger warnings. Same numbers as before, different meaning. */
+export interface BudgetThresholds {
+  /** Warn when a single run's worst-case estimate passes this. */
   readonly maxRunUsd: number;
-  /** Refuse any single asset above this — catches an accidental `mode: 'pro'`. */
+  /** Warn when any single asset passes this — catches an accidental `mode: 'pro'`. */
   readonly maxAssetUsd: number;
-  /** Ask for confirmation above this. */
+  /** Warn when the point estimate passes this. */
   readonly promptAboveUsd: number;
-  /** Inviolable monthly ceiling, measured against the local ledger. */
+  /** Warn when the month (ledger + this run) would pass this. */
   readonly hardCapMonthlyUsd: number;
 }
 
-export const DEFAULT_LIMITS: BudgetLimits = {
+export const DEFAULT_THRESHOLDS: BudgetThresholds = {
   maxRunUsd: 15,
   maxAssetUsd: 0.3,
   promptAboveUsd: 5,
   hardCapMonthlyUsd: 60,
 };
 
-export type GuardVerdict =
-  | { readonly kind: 'allow' }
-  | { readonly kind: 'confirm'; readonly reason: string }
-  | { readonly kind: 'refuse'; readonly code: RefusalCode; readonly reason: string };
+export type WarningCode = 'asset-cap' | 'run-cap' | 'monthly-cap' | 'balance';
 
-export type RefusalCode = 'run-cap' | 'asset-cap' | 'monthly-cap' | 'balance';
+export interface Aviso {
+  readonly code: WarningCode;
+  readonly measured: number;
+  readonly threshold: number;
+  readonly text: string;
+}
 
-export interface GuardInput {
+interface BudgetReportBase {
   readonly estimate: CostEstimate;
-  /** Highest single-asset point estimate in the run. */
-  readonly maxSingleAssetUsd: number;
-  /** Sum from the local ledger for the current month. */
-  readonly spentThisMonthUsd: number;
+  /** Total from the local ledger for this CLI session. */
+  readonly sessionSpentUsd: number;
+  /** Total from the local ledger for the current month. */
+  readonly monthSpentUsd: number;
   /**
    * Remaining account balance, or undefined when unreadable.
    *
@@ -320,55 +323,97 @@ export interface GuardInput {
   readonly balanceUsd: number | undefined;
 }
 
-export function checkBudget(input: GuardInput, limits: BudgetLimits = DEFAULT_LIMITS): GuardVerdict {
-  const { estimate, maxSingleAssetUsd, spentThisMonthUsd, balanceUsd } = input;
+/**
+ * A report, never a decision. The guard informs; the human decides.
+ *
+ * The discriminated union on the literal `requiresConfirmation` is load-bearing:
+ * it forces every call site to handle both branches, and a new code path that
+ * forgets to ask for confirmation does not compile.
+ */
+export type BudgetReport =
+  & BudgetReportBase
+  & (
+    | { readonly avisos: readonly Aviso[]; readonly requiresConfirmation: true }
+    | { readonly avisos: readonly Aviso[]; readonly requiresConfirmation: false }
+  );
 
-  if (maxSingleAssetUsd > limits.maxAssetUsd) {
-    return {
-      kind: 'refuse',
+export interface GuardInput {
+  readonly estimate: CostEstimate;
+  /** Highest single-asset point estimate in the run. */
+  readonly maxSingleAssetUsd: number;
+  /** Sum from the local ledger for the current month. */
+  readonly spentThisMonthUsd: number;
+  /** Sum from the local ledger for this CLI session. */
+  readonly spentThisSessionUsd: number;
+  /**
+   * Remaining account balance, or undefined when unreadable.
+   *
+   * Treated as an opaque number: under a subscription the unit may be
+   * generations rather than USD, so we only ever compare it loosely and never
+   * let it be the sole gate. `hardCapMonthlyUsd` is the real defence.
+   */
+  readonly balanceUsd: number | undefined;
+}
+
+export function checkBudget(
+  input: GuardInput,
+  thresholds: BudgetThresholds = DEFAULT_THRESHOLDS,
+): BudgetReport {
+  const { estimate, maxSingleAssetUsd, spentThisMonthUsd, spentThisSessionUsd, balanceUsd } = input;
+
+  const avisos: Aviso[] = [];
+
+  if (maxSingleAssetUsd > thresholds.maxAssetUsd) {
+    avisos.push({
       code: 'asset-cap',
-      reason:
-        `um asset custa ${maxSingleAssetUsd.toFixed(4)} USD, acima do teto por asset ` +
-        `(${limits.maxAssetUsd.toFixed(2)}). Isso quase sempre é um mode='pro' acidental.`,
-    };
+      measured: maxSingleAssetUsd,
+      threshold: thresholds.maxAssetUsd,
+      text:
+        `um asset custa ${maxSingleAssetUsd.toFixed(4)} USD, acima do limiar por asset ` +
+        `(${thresholds.maxAssetUsd.toFixed(2)}). Isso quase sempre é um mode='pro' acidental.`,
+    });
   }
 
-  if (estimate.high > limits.maxRunUsd) {
-    return {
-      kind: 'refuse',
+  if (estimate.high > thresholds.maxRunUsd) {
+    avisos.push({
       code: 'run-cap',
-      reason:
-        `pior caso do run é ${estimate.high.toFixed(2)} USD, acima do teto de ` +
-        `${limits.maxRunUsd.toFixed(2)}. Reduza o escopo com --filter ou eleve --max-usd.`,
-    };
+      measured: estimate.high,
+      threshold: thresholds.maxRunUsd,
+      text:
+        `pior caso do run é ${estimate.high.toFixed(2)} USD, acima do limiar de ` +
+        `${thresholds.maxRunUsd.toFixed(2)}.`,
+    });
   }
 
-  if (spentThisMonthUsd + estimate.point > limits.hardCapMonthlyUsd) {
-    return {
-      kind: 'refuse',
+  if (spentThisMonthUsd + estimate.point > thresholds.hardCapMonthlyUsd) {
+    avisos.push({
       code: 'monthly-cap',
-      reason:
+      measured: spentThisMonthUsd + estimate.point,
+      threshold: thresholds.hardCapMonthlyUsd,
+      text:
         `o mês já gastou ${spentThisMonthUsd.toFixed(2)} USD; somando ` +
-        `${estimate.point.toFixed(2)} passa do teto mensal de ${limits.hardCapMonthlyUsd.toFixed(2)}.`,
-    };
+        `${estimate.point.toFixed(2)} passa do limiar mensal de ${thresholds.hardCapMonthlyUsd.toFixed(2)}.`,
+    });
   }
 
   if (balanceUsd !== undefined && estimate.point > balanceUsd * 0.9) {
-    return {
-      kind: 'refuse',
+    avisos.push({
       code: 'balance',
-      reason:
+      measured: estimate.point,
+      threshold: balanceUsd * 0.9,
+      text:
         `estimativa ${estimate.point.toFixed(2)} USD consome mais de 90% do saldo ` +
-        `(${balanceUsd.toFixed(2)}). Recarregue ou reduza o escopo.`,
-    };
+        `(${balanceUsd.toFixed(2)}).`,
+    });
   }
 
-  if (estimate.point > limits.promptAboveUsd) {
-    return {
-      kind: 'confirm',
-      reason: `este run deve gastar ~${estimate.point.toFixed(2)} USD (pior caso ${estimate.high.toFixed(2)}).`,
-    };
-  }
+  const base: BudgetReportBase = {
+    estimate,
+    sessionSpentUsd: spentThisSessionUsd,
+    monthSpentUsd: spentThisMonthUsd,
+    balanceUsd,
+  };
 
-  return { kind: 'allow' };
+  // Confirmation is required on every generation. The guard informs; the human decides.
+  return { ...base, avisos, requiresConfirmation: true as const };
 }

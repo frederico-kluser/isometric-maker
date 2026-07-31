@@ -209,8 +209,7 @@ export async function buildPlan(
     }
     if (spec.params['seed'] === undefined || spec.params['seed'] === null) {
       validationErrors.push(
-        `${spec.id}: seed não travado — sem seed a geração não é reprodutível ` +
-          `(use --allow-unpinned para aceitar e gravar o seed sorteado)`,
+        `${spec.id}: seed não travado — sem seed a geração não é reprodutível`,
       );
     }
 
