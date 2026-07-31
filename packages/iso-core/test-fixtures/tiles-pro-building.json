@@ -1,0 +1,98 @@
+{
+  "_nota": "Fixture sintética para F2-04. E4 (tiles-pro) não foi executado. Todos os campos e valores são suposições marcadas com ABERTO no código.",
+  "_aberto": "AB-370: shape completo de tile_rules não confirmado contra a API real. additionalProperties: true no spec.",
+  "tile_id": "fake-building-kit-001",
+  "kind": "building",
+  "tiles": [
+    { "index": 0, "label": "floor", "storage_url": "https://example.com/tile_0.png" },
+    { "index": 1, "label": "wall_straight", "storage_url": "https://example.com/tile_1.png" },
+    { "index": 2, "label": "wall_corner_outside", "storage_url": "https://example.com/tile_2.png" },
+    { "index": 3, "label": "wall_corner_inside", "storage_url": "https://example.com/tile_3.png" },
+    { "index": 4, "label": "doorway", "storage_url": "https://example.com/tile_4.png" },
+    { "index": 5, "label": "pillar", "storage_url": "https://example.com/tile_5.png" },
+    { "index": 6, "label": "staircase_nw", "storage_url": "https://example.com/tile_6.png" },
+    { "index": 7, "label": "staircase_ne", "storage_url": "https://example.com/tile_7.png" }
+  ],
+  "tile_rules": [
+    {
+      "tile_index": 0,
+      "rule_type": "outline",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["floor"],
+      "mask": 15
+    },
+    {
+      "tile_index": 1,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["wall"],
+      "mask": 0
+    },
+    {
+      "tile_index": 1,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["wall"],
+      "mask": 5
+    },
+    {
+      "tile_index": 1,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["wall"],
+      "mask": 10
+    },
+    {
+      "tile_index": 2,
+      "rule_type": "corner",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["wall"],
+      "mask": 3
+    },
+    {
+      "tile_index": 3,
+      "rule_type": "corner",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["wall"],
+      "mask": 12
+    },
+    {
+      "tile_index": 4,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["doorway"],
+      "mask": 5
+    },
+    {
+      "tile_index": 5,
+      "rule_type": "outline",
+      "arity": 4,
+      "connectivity": "same",
+      "terrains": ["pillar"],
+      "mask": 0
+    },
+    {
+      "tile_index": 6,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "other",
+      "terrains": ["staircase", "floor"],
+      "mask": 2
+    },
+    {
+      "tile_index": 7,
+      "rule_type": "edge",
+      "arity": 4,
+      "connectivity": "other",
+      "terrains": ["staircase", "floor"],
+      "mask": 8
+    }
+  ]
+}

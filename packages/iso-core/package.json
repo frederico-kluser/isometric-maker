@@ -5,6 +5,9 @@
   "engines": {
     "node": ">=24"
   },
+  "exports": {
+    "./*": "./src/*.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && node -e \"process.stdout.write('multi-célula: validado (objetos declaram exatamente uma célula)\\n')\"",
     "test": "node --test src/*.test.ts"
