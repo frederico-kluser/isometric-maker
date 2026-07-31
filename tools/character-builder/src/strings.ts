@@ -116,6 +116,16 @@ export const S = {
     prefixo: 'erro: ',
     /** Erro ao ler arquivo via FileReader */
     leituraArquivo: 'não consegui ler o arquivo',
+    /** Arquivo não é um PNG */
+    formatoInvalido: 'formato de arquivo inválido — só aceito PNG',
+    /** Algum lado da imagem passa de 256px */
+    ladoAcimaDe256: 'imagem muito grande — máximo 256×256 pixels',
+    /** Algum lado está fora da faixa 16–128 */
+    ladoForaDaFaixa: 'dimensão fora da faixa permitida (16–128 pixels)',
+    /** Altura informada maior que a altura da imagem */
+    alturaMaiorQueImagem: 'altura informada é maior que a altura da imagem',
+    /** Imagem não é quadrada */
+    imagemNaoQuadrada: 'a imagem de referência precisa ser quadrada (largura = altura)',
   },
 } as const;
 
