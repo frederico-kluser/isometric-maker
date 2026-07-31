@@ -7,7 +7,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { ENDPOINTS, validateSize, type EndpointId, type ImageSize } from './endpoints.ts';
+import { DIRECTION_KEYS, ENDPOINTS, QUADRUPED_TEMPLATES, validateSize, type DirectionKey, type EndpointId, type ImageSize } from './endpoints.ts';
 import { COST_TABLE, estimateByArea, sumEstimates, type CostEstimate } from './cost.ts';
 import { canonicalJson, digest, readJsonIfExists, writeFileAtomic } from './util.ts';
 
@@ -213,6 +213,49 @@ export async function buildPlan(
       );
     }
 
+    // Validate directions map before submission — a 422 arrives after the charge.
+    if (
+      spec.endpoint === 'create-character-with-8-directions' &&
+      spec.params['directions'] &&
+      typeof spec.params['directions'] === 'object' &&
+      !Array.isArray(spec.params['directions'])
+    ) {
+      const directions = spec.params['directions'] as Partial<Record<DirectionKey, string>>;
+      const allowed = new Set<string>(DIRECTION_KEYS);
+      for (const [dir, imgPath] of Object.entries(directions)) {
+        if (!allowed.has(dir)) {
+          validationErrors.push(
+            `${spec.id}: direção '${dir}' não é válida. Permitidas: ${DIRECTION_KEYS.join(', ')}`,
+          );
+        }
+        if (typeof imgPath === 'string' && size) {
+          try {
+            const meta = await sharp(await readFile(imgPath as string)).metadata();
+            if (meta.width !== size.width || meta.height !== size.height) {
+              validationErrors.push(
+                `${spec.id}: imagem da direção '${dir}' tem ${meta.width}x${meta.height}, esperado ${size.width}x${size.height}`,
+              );
+            }
+          } catch {
+            validationErrors.push(`${spec.id}: não foi possível ler a imagem da direção '${dir}' em '${imgPath}'`);
+          }
+        }
+      }
+
+      const templateId = (spec.params['template_id'] as string) || 'mannequin';
+      const isQuadruped = (QUADRUPED_TEMPLATES as readonly string[]).includes(templateId);
+      if (!isQuadruped && !directions['south']) {
+        validationErrors.push(
+          `${spec.id}: templates bípedes exigem 'south' quando directions é fornecido`,
+        );
+      }
+      if (isQuadruped && (!directions['south'] || !directions['east'])) {
+        validationErrors.push(
+          `${spec.id}: templates quadrúpedes (${templateId}) exigem 'south' e 'east' quando directions é fornecido`,
+        );
+      }
+    }
+
     const specHash = await computeSpecHash(spec, ctx);
     const postHash = computePostHash(spec);
     const asset: ResolvedAsset = { ...spec, specHash, postHash, estimate: estimateAsset(spec) };
@@ -303,7 +346,15 @@ function topologicalSort(specs: readonly AssetSpec[]): AssetSpec[] {
 export function character8dir(args: {
   id: AssetId; out: string; description: string; size: number; seed: number;
   budgetGroup?: string; inputs?: readonly string[];
+  /** Generate in isometric view (default: omitted = API default `false`). */
+  isometric?: boolean;
+  /** Reference images per direction. Keys must be from `DIRECTION_KEYS`;
+   *  values are local file paths (base64-encoded at submit time).
+   *  Bipedal templates require `south` when any reference is given;
+   *  quadrupeds require both `south` and `east`. */
+  directions?: Partial<Record<DirectionKey, string>>;
 }): AssetSpec {
+  const directionPaths = args.directions ? Object.values(args.directions).filter((v): v is string => !!v) : [];
   return {
     id: args.id,
     endpoint: 'create-character-with-8-directions',
@@ -314,8 +365,10 @@ export function character8dir(args: {
       view: 'low top-down',
       mode: 'standard',
       seed: args.seed,
+      ...(args.isometric ? { isometric: args.isometric } : {}),
+      ...(args.directions ? { directions: args.directions } : {}),
     },
-    ...(args.inputs ? { inputs: args.inputs } : {}),
+    inputs: [...(args.inputs ?? []), ...directionPaths],
     ...(args.budgetGroup ? { budgetGroup: args.budgetGroup } : {}),
   };
 }

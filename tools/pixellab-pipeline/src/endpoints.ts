@@ -20,6 +20,10 @@ export const ENDPOINT_IDS = [
   'animate-with-skeleton',
   'animate-with-text-v3',
   'estimate-skeleton',
+  // `/generate-8-rotations-v2` also exists in the spec (32–168 px, method enum,
+  // concept/reference/description inputs) but we model only v3 because v3 is the
+  // strictly-a-rotator we actually call. v2 can also create characters from scratch
+  // and its return-order documentation is what DIRECTIONS_8 encodes below.
   'generate-8-rotations-v3',
   'rotate',
   'create-image-pixflux',
@@ -47,6 +51,28 @@ export const DIRECTIONS_8 = [
   'north', 'north-east', 'east', 'south-east',
 ] as const;
 export type Direction8 = (typeof DIRECTIONS_8)[number];
+
+/**
+ * Allowed keys for the `directions` map on `/create-character-with-8-directions`.
+ * From the spec's `propertyNames.enum` — clockwise from south (the *layout* order).
+ * This is the mirror of DIRECTIONS_8: the spec draws S→SE→E→NE→N→NW→W→SW, while
+ * DIRECTIONS_8 (the v2 return order) runs S→SW→W→NW→N→NE→E→SE.
+ *
+ * Index by key name, never by position — the endpoint returns a dictionary.
+ *
+ *Quadruped templates (`bear`, `cat`, `dog`, `horse`, `lion`) additionally require
+ * `east` when any reference is given.
+ *
+ * @see spec `CreateCharacterWith8DirectionsRequest.directions.propertyNames.enum`
+ */
+export const DIRECTION_KEYS = [
+  'south', 'south-east', 'east', 'north-east',
+  'north', 'north-west', 'west', 'south-west',
+] as const;
+export type DirectionKey = (typeof DIRECTION_KEYS)[number];
+
+/** Templates the spec classifies as quadrupeds for directions validation. */
+export const QUADRUPED_TEMPLATES = ['bear', 'cat', 'dog', 'horse', 'lion'] as const;
 
 export const OUTLINES = [
   'single color black outline', 'single color outline', 'selective outline', 'lineless',
