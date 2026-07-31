@@ -72,6 +72,8 @@ export interface PixiSpritesheet {
 export interface Sidecar {
   readonly generatedAt: string;
   readonly anchor: { x: number; y: number };
+  readonly anchorSource: 'medida' | 'padrao';
+  readonly anchorCanvas?: { w: number; h: number };
   readonly fps: Record<string, number>;
   readonly specHashes: Record<string, string>;
   readonly note: string;
@@ -191,6 +193,60 @@ export interface PackResult {
 }
 
 /**
+ * Measures a sprite anchor from the opaque bounding box of the rest frame.
+ *
+ * The rest frame is the first frame (index 0) of the south direction — the
+ * standing pose. Its opaque bounding box gives the character's true footprint,
+ * which is what the isometric grid means by "which cell it stands on."
+ *
+ * Returns the anchor as a fraction of the frame canvas, plus the real canvas
+ * dimensions observed, or `null` when no suitable frame exists or the frame is
+ * fully transparent.
+ */
+export async function measureAnchor(
+  frames: readonly FrameInput[],
+): Promise<{ anchor: { x: number; y: number }; canvasW: number; canvasH: number } | null> {
+  const REST_REGEX = /_(S|SW|W|NW|N|NE|E|SE)_(\d{2})$/;
+  const restFrame = frames.find((f) => {
+    const m = REST_REGEX.exec(f.name);
+    return m && m[1] === 'S' && m[2] === '00';
+  });
+  if (!restFrame) return null;
+
+  const img = sharp(restFrame.file).ensureAlpha();
+  const meta = await img.metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (w === 0 || h === 0) return null;
+
+  const { data } = await img.raw().toBuffer({ resolveWithObject: true });
+  const pixels = new Uint8Array(data);
+
+  let minX = w, maxX = -1, minY = h, maxY = -1;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const alpha = pixels[(y * w + x) * 4 + 3];
+      if (alpha !== undefined && alpha > 0) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX === -1) return null; // fully transparent
+
+  const cx = (minX + maxX + 1) / 2;
+  const base = maxY + 1;
+  return {
+    anchor: { x: cx / w, y: base / h },
+    canvasW: w,
+    canvasH: h,
+  };
+}
+
+/**
  * Packs a uniform grid.
  *
  * A grid rather than maxrects because character frames are all the same size,
@@ -213,7 +269,31 @@ export async function packGrid(
   const extrude = opts.extrude ?? 1;
   const padding = opts.padding ?? 2;
   const maxPage = opts.maxPage ?? 2048;
-  const anchor = opts.anchor ?? { x: 0.5, y: 0.875 };
+
+  // Anchor: explicit caller choice wins (tiles pass {0,0}), otherwise measure
+  // from the rest frame. Fall back to the old constant with a warning.
+  let anchor: { x: number; y: number };
+  let anchorSource: Sidecar['anchorSource'];
+  let anchorCanvas: Sidecar['anchorCanvas'];
+
+  if (opts.anchor) {
+    anchor = opts.anchor;
+    anchorSource = 'padrao';
+  } else {
+    const measured = await measureAnchor(frames);
+    if (measured) {
+      anchor = measured.anchor;
+      anchorSource = 'medida';
+      anchorCanvas = { w: measured.canvasW, h: measured.canvasH };
+    } else {
+      anchor = { x: 0.5, y: 0.875 };
+      anchorSource = 'padrao';
+      console.warn(
+        `atlas ${name}: sem frame de repouso (S_00) ou frame transparente; ` +
+        `usando âncora padrão {x:0.5, y:0.875}.`,
+      );
+    }
+  }
 
   const ordered = sortFrames(frames);
   const prepared = await Promise.all(
@@ -309,6 +389,8 @@ export async function packGrid(
   const sidecar: Sidecar = {
     generatedAt: new Date().toISOString(),
     anchor,
+    anchorSource,
+    ...(anchorCanvas ? { anchorCanvas } : {}),
     fps: Object.fromEntries(Object.keys(animations).map((a) => [a, 8])),
     specHashes: {},
     note:

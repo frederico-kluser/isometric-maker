@@ -16,7 +16,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { packGrid, sortFrames, frameName, shortDir, type FrameInput } from './atlas.ts';
+import { measureAnchor, packGrid, sortFrames, frameName, shortDir, type FrameInput, type Sidecar } from './atlas.ts';
 import { canonicalJson, digest } from './util.ts';
 import { validateSize, validateFrameBudget } from './endpoints.ts';
 
@@ -29,6 +29,30 @@ async function makeFrame(dir: string, name: string, size: number, rgb: [number, 
       background: { r: rgb[0], g: rgb[1], b: rgb[2], alpha: 255 },
     },
   }).png().toFile(path);
+  return path;
+}
+
+/** A PNG with an opaque rectangle at a known position on a transparent canvas. */
+async function makePartialFrame(
+  dir: string, name: string,
+  canvasW: number, canvasH: number,
+  rect: { x: number; y: number; w: number; h: number } | null,
+  rgb: [number, number, number] = [200, 100, 50],
+) {
+  const path = join(dir, `${name}.png`);
+  const pixels = Buffer.alloc(canvasW * canvasH * 4, 0);
+  if (rect) {
+    for (let y = rect.y; y < rect.y + rect.h && y < canvasH; y += 1) {
+      for (let x = rect.x; x < rect.x + rect.w && x < canvasW; x += 1) {
+        const i = (y * canvasW + x) * 4;
+        pixels[i] = rgb[0];
+        pixels[i + 1] = rgb[1];
+        pixels[i + 2] = rgb[2];
+        pixels[i + 3] = 255;
+      }
+    }
+  }
+  await sharp(pixels, { raw: { width: canvasW, height: canvasH, channels: 4 } }).png().toFile(path);
   return path;
 }
 
@@ -161,4 +185,150 @@ test('size validation catches the constraints that cost money after submit', () 
   assert.deepEqual(validateFrameBudget({ width: 128, height: 128 }, 16), []);
   assert.ok(validateFrameBudget({ width: 256, height: 256 }, 16).length > 0);
   assert.ok(validateFrameBudget({ width: 64, height: 64 }, 6).length > 0, 'frame_count 6 é inválido');
+});
+
+// ── anchor measurement ──────────────────────────────────────────────────────
+
+test('measureAnchor returns correct anchor for a known opaque bounding box', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-1-'));
+  try {
+    const name = frameName('hero', 'idle', 'south', 0);
+    // 20×20 canvas, opaque rect at x:[4,9] y:[3,12] (6×10)
+    const file = await makePartialFrame(dir, name, 20, 20, { x: 4, y: 3, w: 6, h: 10 });
+    const frames: FrameInput[] = [{ name, file }];
+
+    const result = await measureAnchor(frames);
+    assert.ok(result, 'deve encontrar a âncora');
+    // cx = (4+9+1)/2 = 7, base = 12+1 = 13
+    assert.equal(result!.anchor.x, 7 / 20, 'centro horizontal da caixa');
+    assert.equal(result!.anchor.y, 13 / 20, 'base da caixa');
+    assert.equal(result!.canvasW, 20);
+    assert.equal(result!.canvasH, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('measureAnchor returns null for a fully transparent frame', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-2-'));
+  try {
+    const name = frameName('hero', 'idle', 'south', 0);
+    // 16×16 fully transparent
+    const file = await makePartialFrame(dir, name, 16, 16, null);
+    const frames: FrameInput[] = [{ name, file }];
+
+    const result = await measureAnchor(frames);
+    assert.equal(result, null, 'frame transparente deve devolver null');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('measureAnchor returns null when no south frame with index 0 exists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-3-'));
+  try {
+    const nameN = frameName('hero', 'idle', 'north', 0);
+    const nameW = frameName('hero', 'idle', 'west', 1);
+    const file = await makePartialFrame(dir, nameN, 16, 16, { x: 0, y: 0, w: 16, h: 16 });
+    const frames: FrameInput[] = [
+      { name: nameN, file },
+      { name: nameW, file: await makePartialFrame(dir, nameW, 16, 16, { x: 0, y: 0, w: 16, h: 16 }) },
+    ];
+
+    const result = await measureAnchor(frames);
+    assert.equal(result, null, 'sem frame S_00 deve devolver null');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('measured anchor differs from default when opaque region has transparent base', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-4-'));
+  try {
+    const name = frameName('hero', 'idle', 'south', 0);
+    // 16×16 canvas, opaque from y=0 to y=7 (top half), transparent bottom.
+    // maxY = 7, base = 8, anchor.y = 8/16 = 0.5
+    const file = await makePartialFrame(dir, name, 16, 16, { x: 0, y: 0, w: 16, h: 8 });
+    const frames: FrameInput[] = [{ name, file }];
+
+    const result = await measureAnchor(frames);
+    assert.ok(result, 'deve encontrar a âncora');
+    assert.equal(result!.anchor.y, 8 / 16, 'base no meio do canvas');
+    // Must differ from the default constant.
+    assert.notDeepEqual(
+      result!.anchor,
+      { x: 0.5, y: 0.875 },
+      'âncora medida deve diferir da constante {0.5, 0.875}',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('packGrid sidecar records anchorSource "medida" when rest frame exists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-5-'));
+  try {
+    const frames: FrameInput[] = [];
+    for (const d of ['south', 'west'] as const) {
+      const name = frameName('hero', 'idle', d, 0);
+      frames.push({
+        name,
+        file: await makePartialFrame(dir, name, 16, 16, { x: 2, y: 4, w: 12, h: 8 }),
+        animation: `hero_idle_${shortDir(d)}`,
+      });
+    }
+
+    const res = await packGrid(frames, join(dir, 'out'), 'hero');
+    const sidecar: Sidecar = JSON.parse(await readFile(res.sidecarPath, 'utf8'));
+
+    assert.equal(sidecar.anchorSource, 'medida', 'deve medir quando há frame S_00');
+    assert.ok(sidecar.anchorCanvas, 'deve registrar o tamanho de canvas');
+    assert.equal(sidecar.anchorCanvas!.w, 16);
+    assert.equal(sidecar.anchorCanvas!.h, 16);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('packGrid sidecar records anchorSource "padrao" when no rest frame', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-6-'));
+  try {
+    const frames: FrameInput[] = [];
+    for (const d of ['north', 'west'] as const) {
+      const name = frameName('hero', 'idle', d, 0);
+      frames.push({
+        name,
+        file: await makePartialFrame(dir, name, 16, 16, { x: 0, y: 0, w: 16, h: 16 }),
+        animation: `hero_idle_${shortDir(d)}`,
+      });
+    }
+
+    const res = await packGrid(frames, join(dir, 'out'), 'hero');
+    const sidecar: Sidecar = JSON.parse(await readFile(res.sidecarPath, 'utf8'));
+
+    assert.equal(sidecar.anchorSource, 'padrao', 'sem frame S_00 deve usar padrão');
+    assert.equal(sidecar.anchorCanvas, undefined, 'sem medida, sem canvas');
+    assert.deepEqual(sidecar.anchor, { x: 0.5, y: 0.875 }, 'âncora padrão');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('packGrid with explicit opts.anchor never measures', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'atlas-anchor-7-'));
+  try {
+    const name = frameName('tile', 'grass', 'south', 0);
+    const frames: FrameInput[] = [{
+      name,
+      file: await makePartialFrame(dir, name, 16, 16, { x: 0, y: 0, w: 16, h: 16 }),
+    }];
+
+    const res = await packGrid(frames, join(dir, 'out'), 'tile', { anchor: { x: 0, y: 0 } });
+    const sidecar: Sidecar = JSON.parse(await readFile(res.sidecarPath, 'utf8'));
+
+    assert.deepEqual(sidecar.anchor, { x: 0, y: 0 }, 'tile usa âncora {0,0}');
+    assert.equal(sidecar.anchorSource, 'padrao', 'opts.anchor explícito vence');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
