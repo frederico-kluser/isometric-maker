@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-07-30**: **22 arquivos, e todos existem**. Esta tabela não lista documento que não foi escrito — a versão anterior deste índice prometia 57 entradas e entregava 15, e a correção foi tirar a promessa, não apressar a escrita.
+Estado em **2026-07-30**: **23 arquivos, e todos existem**. Esta tabela não lista documento que não foi escrito — a versão anterior deste índice prometia 57 entradas e entregava 15, e a correção foi tirar a promessa, não apressar a escrita.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -79,6 +79,7 @@ Nunca editadas. Uma decisão revista gera ADR novo que substitui a anterior, e a
 | [`0015`](./adr/0015-low-top-down-8-direcoes-isometrico.md) | `low top-down`, 8 direções, e o endpoint que o isométrico obriga | vigente |
 | [`0016`](./adr/0016-ui-ptbr-strings-centralizadas.md) | UI em pt-BR com strings centralizadas desde o primeiro commit | vigente |
 | [`0017`](./adr/0017-nome-unico-isometric-maker.md) | Um nome só: `isometric-maker` no repositório, na pasta e nos pacotes | vigente |
+| [`0018`](./adr/0018-artefato-de-exportacao.md) | O artefato de exportação: `project.json` v1 | vigente |
 
 ## Skills
 
