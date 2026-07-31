@@ -43,7 +43,7 @@ nivel(c) = 1 + max(nivel(d))  para toda dependência d
 As duas convivem, e cada card carrega as duas. As cinco fases herdadas do HTML:
 
 | Fase | Nome | O que ela protege |
-|---|---|---|
+| --- | --- | --- |
 | `F0` | Fundação | fazer depois custa dinheiro real ou quebra identidade de cache |
 | `F1` | Construtor de personagem | o fluxo de arte, endpoint por endpoint |
 | `F2` | Construtor de mapa XYZ | a geometria, o modelo de dados e o desenho |
@@ -88,7 +88,7 @@ Três atributos, três eixos independentes, e confundi-los é o erro que faz uma
 sem estar:
 
 | campo | eixo |
-|---|---|
+| --- | --- |
 | `deps` | **grafo** — de onde saem as ondas |
 | `id` + `estado` | **identidade e progresso** |
 | `onda` | **escalonamento** — decisão, restrita pelo grafo, não derivada dele |
@@ -135,7 +135,7 @@ O DAG diz **quando**; a propriedade de arquivo diz **se**. Dois filtros, nessa o
 topológico é condição necessária; conjuntos de arquivos escritos disjuntos é condição suficiente.
 
 | Grupo | Diretórios que ele possui |
-|---|---|
+| --- | --- |
 | `G-plan` | `/home/ondokai/Projects/isometric-maker/PLANO-DE-EXECUCAO.md`, `scripts/**` |
 | `G-pipeline` | `tools/pixellab-pipeline/**` |
 | `G-builder` | `tools/character-builder/**` (hoje `tools/sprite-studio/**`) |
@@ -156,7 +156,7 @@ O teto de paralelismo não é o modelo nem a CPU: é o número de recursos únic
 Enumerados **antes** de dimensionar qualquer onda:
 
 | Singleton | Dono exclusivo ou sequência |
-|---|---|
+| --- | --- |
 | `tools/pixellab-pipeline/pixellab-lock.json` | nunca em worktree — é estado local, gitignorado na prática |
 | `tools/pixellab-pipeline/.pixellab/ledger.ndjson` | idem. **Só `I-02` escreve nele.** |
 | `PLANO-DE-EXECUCAO.md` (checkbox e Considerações) | cada card escreve **só as suas próprias linhas** |
@@ -184,7 +184,7 @@ Escalonamento ASAP com barreira: todo mundo que pode começar, começa; ninguém
 inteira fechar. A tabela abaixo é **derivada** dos blocos `yaml` dos cards.
 
 | Onda | Cards | Tipo |
-|---|---|---|
+| --- | --- | --- |
 | `W0` | `I-01` · `F0-01` | raiz — entrega conta e vocabulário, não funcionalidade |
 | `W1` | `F0-02` · `T-01` | **neck**: o rename atravessa três árvores |
 | `W2` | `F0-03` `F0-04` `F0-05` `F0-06` `F0-07` `F0-11` | a mais larga da fundação — fan-out do rename |
@@ -221,7 +221,7 @@ anterior**, em vez de N fatias independentes. Detecção mecânica: um card com 
 consumidores estão todos na onda seguinte. Neste plano são três:
 
 | Onda | Por quê | Dispositivo obrigatório |
-|---|---|---|
+| --- | --- | --- |
 | `W2` | seis cards sobre a árvore recém-renomeada por `F0-02` | mapa `arquivo → dono` publicado no commit PREP |
 | `W7` | cinco cards sobre `packages/iso-core` e sobre o `character-builder` | faixas de id disjuntas; `iso-core` só recebe acréscimo |
 | `W10` | quatro cards convergindo em `project.json` e nos testes | ordem de merge declarada: `F2-07` por último |
@@ -399,7 +399,7 @@ Os limiares continuam com os mesmos números e mudam de significado — de "recu
 acima":
 
 | Limiar | Valor | Depois da `F0-03` |
-|---|---|---|
+| --- | --- | --- |
 | `maxAssetUsd` | US$ 0,30 | aviso: "isso quase sempre é um `mode:'pro'` acidental" |
 | `promptAboveUsd` | US$ 5,00 | pede confirmação |
 | `maxRunUsd` | US$ 15,00 | aviso |
@@ -413,7 +413,7 @@ que prova isso não existe hoje. Escrevê-lo é o card `F0-08`, e é o critério
 Custo estimado do plano inteiro, somando só o que está planejado:
 
 | Bloco | Card | Gerações | USD estimado |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Crédito inicial | `I-01` | — | **decisão sua** (mínimo sugerido: US$ 10) |
 | `isometric` com e sem, 64×64 | `I-02` | 2 | ~0,034 |
 | Um template id, `directions:['south']` | `I-02` | 1 | ~0,014 |
@@ -451,7 +451,7 @@ faixa_ledger: AB-001..AB-019
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Sair de "não existe conta" para `node src/cli.ts doctor` verde e `node src/cli.ts balance` imprimindo um número. |
 | **Entradas** | Um navegador, um cartão, e `/home/ondokai/Projects/isometric-maker/docs/01-pixellab/custos-e-limites.md`. |
 | **Saídas** | Conta criada · crédito comprado · `PIXELLAB_SECRET` e `PIXELLAB_TIER` exportados na shell · `doctor` sem `ERRO`. |
@@ -493,7 +493,7 @@ crédito, e nenhuma dessas coisas existe dentro de uma worktree. Faça-o na mão
    (`TIER_CONCURRENCY`, `tools/pixellab-pipeline/src/cost.ts`):
 
    | `PIXELLAB_TIER` | Jobs simultâneos |
-   |---|---|
+   | --- | --- |
    | `free` | 1 |
    | `t1` *(default do código)* | 2 |
    | `t2` | 4 |
@@ -553,22 +553,23 @@ deps: []
 critico: true
 gasta: nao
 worktree: sim
-estado: pendente
+estado: feito
 arquivos:
   - scripts/validate-plan.mjs
   - scripts/gate.sh
   - scripts/new-task-worktree.sh
+  - scripts/validate-ledger.mjs
   - docs/plano/ledger.json
   - docs/plano/README.md
 faixa_ledger: AB-100..AB-109
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Entregar a **máquina** do plano, não funcionalidade: o validador do grafo, o gate local, o criador de worktree com preflight e o ledger de incerteza vazio mas já validado. |
 | **Entradas** | `/home/ondokai/Projects/isometric-maker/PLANO-DE-EXECUCAO.md` (este arquivo) · `scripts/check-docs.sh` como modelo de estilo de verificador. |
-| **Saídas** | os cinco arquivos acima. |
-| **Considerações** | — |
+| **Saídas** | os seis arquivos acima. |
+| **Considerações** | Formato do bloco yaml que o validador espera: keys no topo (coluna 1) dentro de \`\`\`yaml. Keys obrigatórias: `id`, `fase`, `onda`, `grupo`, `deps`, `critico`, `gasta`, `worktree`, `estado`, `arquivos`, `faixa_ledger`. `deps` pode ser `[]` (array vazio) ou `[ID1, ID2]`. `arquivos` usa block array com `  - caminho`. `estado` é `pendente`, `em-andamento` ou `feito`. `gasta` é `nao`, `sim` ou `possivel`. Adicionei o campo `faixa_ledger` como obrigatório (o plano já o declara em todos os cards) e criei `scripts/validate-ledger.mjs` como sexto arquivo (o validador do ledger estava inline no gate.sh e foi extraído para script próprio). O validador lê APENAS blocos \`\`\`yaml cuja primeira chave começa na coluna 1 — o exemplo indentado na seção 1.2, marcado \`\`\`text, é ignorado de propósito. Destinatário: todos os cards seguintes. |
 
 ```xml
 <task id="F0-01" nome="Vocabulário, validador do plano, gate local e ledger"
@@ -749,7 +750,7 @@ faixa_ledger: AB-110..AB-119
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | `tools/sprite-studio` passa a ser `tools/character-builder`, e o nome do produto anterior some do código — hoje ele ainda está em dois lugares. |
 | **Entradas** | `git mv` · `tools/sprite-studio/index.html` · `tools/pixellab-pipeline/src/cli.ts` (banner do `usage`) · as citações `arquivo:linha@hash` das skills. |
 | **Saídas** | árvore renomeada · zero ocorrências do nome antigo fora do arquivo da ADR 0011 · skills revalidadas. |
@@ -906,7 +907,7 @@ faixa_ledger: AB-120..AB-129
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Impedir que um card se declare feito com um critério que já passava antes de a tarefa começar. |
 | **Entradas** | os blocos `criterios_aceitacao` de todos os cards deste plano. |
 | **Saídas** | `scripts/check-acceptance.mjs`, ligado como etapa do `gate.sh`. |
@@ -1025,7 +1026,7 @@ abaixo.
 #### Um dono por arquivo — onda W2
 
 | Arquivo | Dono | Os outros |
-|---|---|---|
+| --- | --- | --- |
 | `tools/pixellab-pipeline/src/cost.ts` | **F0-03** | não editam |
 | `tools/pixellab-pipeline/src/cli.ts` | **F0-03** | não editam |
 | `tools/pixellab-pipeline/src/catalog.ts` | **F0-03** | não editam |
@@ -1059,7 +1060,7 @@ faixa_ledger: AB-130..AB-139
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Transformar a ADR 0012 em código: `GuardVerdict` perde a variante `refuse`. E o CLI para de citar três flags que não existem e um diretório que ninguém escreve. |
 | **Entradas** | `docs/adr/0012-guard-de-orcamento-informativo.md` · `src/cost.ts` · `src/cli.ts` · `src/catalog.ts`. |
 | **Saídas** | guard informativo com `requiresConfirmation` como tipo literal · `ATLAS_OUT` corrigido · zero flags fantasma. |
@@ -1068,7 +1069,7 @@ faixa_ledger: AB-130..AB-139
 **Os quatro defeitos, verificados no código de hoje:**
 
 | Onde | O que está lá | Por que é defeito |
-|---|---|---|
+| --- | --- | --- |
 | `src/cost.ts`, `checkBudget` | devolve `kind: 'refuse'` em 4 casos | a ADR 0012 diz que o guard informa e nunca recusa |
 | `src/cli.ts`, `ATLAS_OUT` | `packages/game-assets/atlas` | o diretório existe em disco, **vazio e fora do git** — `git ls-files packages` sai vazio |
 | `src/catalog.ts`, validação de `seed` | a mensagem manda usar `--allow-unpinned` | a flag **não existe**: o CLI só lê `--dry-run`, `--limit` e `--yes` |
@@ -1214,7 +1215,7 @@ faixa_ledger: AB-140..AB-149
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Três promessas do `package.json` que não se cumprem viram decisão, não pendência. |
 | **Entradas** | `tools/pixellab-pipeline/package.json` · `openapi/PROVENIENCIA.txt`. |
 | **Saídas** | `package.json` verdadeiro · `scripts/refresh-openapi.mjs` existindo ou o script removido. |
@@ -1223,7 +1224,7 @@ faixa_ledger: AB-140..AB-149
 **As três, verificadas em 2026-07-30:**
 
 | Promessa | Realidade |
-|---|---|
+| --- | --- |
 | `"codegen": "openapi-typescript ... -o openapi/schema.d.ts"` | `openapi/schema.d.ts` **não existe em disco**, e nenhum arquivo o importa |
 | `"zod": "^3.24.1"` em `dependencies` | **nunca importado**: `grep -rn "from 'zod'" tools/` sai vazio |
 | `"refresh-openapi": "node scripts/refresh-openapi.mjs"` | `tools/pixellab-pipeline/scripts/` **não existe** |
@@ -1338,7 +1339,7 @@ faixa_ledger: AB-150..AB-159
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | O renderizador entra no projeto, na versão **exata** que já está vendorizada — e um verificador falha se os dois pinos divergirem. |
 | **Entradas** | `tools/pixi-reference/package.json` (pin `8.19.0`) · `tools/pixi-reference/vendor/manifest.json` (`pixiVersion`). |
 | **Saídas** | `pixi.js@8.19.0` como dependência do builder · `scripts/check-pixi-pin.mjs` no gate. |
@@ -1447,7 +1448,7 @@ faixa_ledger: AB-160..AB-169
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | O catálogo de exemplo passa a descrever **um projeto de demonstração do editor**, e para de citar uma pasta de docs que foi apagada. |
 | **Entradas** | `tools/pixellab-pipeline/assets/catalog.ts`. |
 | **Saídas** | catálogo mínimo, coerente com o editor, com seeds pinados. |
@@ -1564,7 +1565,7 @@ faixa_ledger: AB-170..AB-179
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Implementar a ADR 0016: todo texto que o usuário lê sai de um objeto congelado, acessado por **propriedade direta**, nunca por `t('chave')`. |
 | **Entradas** | `docs/adr/0016-ui-ptbr-strings-centralizadas.md` · as strings hoje inline em `tools/character-builder/src/main.ts`. |
 | **Saídas** | `src/strings.ts` com o objeto congelado e as strings de hoje migradas. |
@@ -1675,7 +1676,7 @@ faixa_ledger: AB-180..AB-189
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Criar o terceiro lugar — o núcleo compartilhado — e fazer o primeiro `project.json` ser escrito e relido, para que a ADR do formato seja escrita **contra evidência**. |
 | **Entradas** | `docs/adr/0013-geometria-isometrica-64x32-z16.md`. |
 | **Saídas** | `packages/iso-core` com schema v1, `saveProject`/`loadProject` e um teste de ida e volta. |
@@ -1808,7 +1809,7 @@ faixa_ledger: AB-020..AB-039
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Fechar as quatro incógnitas que nenhuma leitura de spec resolve — o spec já foi lido inteiro — e a quinta, que é grátis. |
 | **Entradas** | conta com crédito (`I-01`) · guard informativo (`F0-03`) · o spec vendorizado. |
 | **Saídas** | `docs/plano/experimentos/*.md` com pergunta, corpo enviado, resposta crua, `usage` medido e veredicto · itens do ledger fechados **com evidência**. |
@@ -1933,7 +1934,7 @@ Zero geração. Faça sempre, e faça primeiro entre as leituras.
 #### Ordem, e o total
 
 | # | Experimento | Gerações | USD estimado |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | E1 | `isometric` com e sem | 2 | ~0,035 |
 | E5 | `GET /characters/{character_id}` | 0 | **0,000** |
 | E2 | template id + id inválido | 1 + ? | ~0,014 + ? |
@@ -2001,7 +2002,7 @@ faixa_ledger: AB-190..AB-199
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | O teste de manchete: **plano → generate simulado contra cliente falso que conta submits → plano de novo → `submits === 0`**. Mais a cobertura dos outros três módulos que decidem dinheiro. |
 | **Entradas** | `src/catalog.ts` · `src/cost.ts` · `src/queue.ts` · `src/generate.ts` · o catálogo de `F0-06`. |
 | **Saídas** | quatro arquivos de teste. |
@@ -2152,7 +2153,7 @@ faixa_ledger: AB-200..AB-209
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Fixar `isometric` **antes** de qualquer arte existir, e trocar o helper de personagem para o único endpoint que aceita o mapa `directions`. |
 | **Entradas** | o veredicto de `I-02/E1` · `docs/adr/0015-low-top-down-8-direcoes-isometrico.md` · o spec vendorizado. |
 | **Saídas** | `character8dir` com `isometric` e `directions` · `endpoints.ts` com as restrições conferidas contra o spec. |
@@ -2161,7 +2162,7 @@ faixa_ledger: AB-200..AB-209
 **O fato que decide este card, confirmado no spec vendorizado em 2026-07-30:**
 
 | Endpoint | tem `isometric`? | tem `directions`? |
-|---|---|---|
+| --- | --- | --- |
 | `/create-character-with-8-directions` | **sim** | **sim** (mapa de imagens por direção) |
 | `/create-character-v3` | **não** | **não** |
 | `/create-character-pro` | **não** | **não** |
@@ -2300,7 +2301,7 @@ faixa_ledger: AB-210..AB-219
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Trocar a âncora constante `{ x: 0.5, y: 0.875 }` por uma âncora **derivada dos pixels** de cada frame, e gravá-la no sidecar. |
 | **Entradas** | os PNGs reais que `I-02/E1` produziu · `src/atlas.ts`, `packGrid`. |
 | **Saídas** | âncora medida por família, com o método escrito. |
@@ -2437,7 +2438,7 @@ faixa_ledger: AB-220..AB-229
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Registrar a decisão do formato de projeto **depois** que algo já serializou e releu — nunca antes. |
 | **Entradas** | `packages/iso-core/src/project.ts` e o arquivo de exemplo que `F0-11` deixou em disco. |
 | **Saídas** | ADR 0018 · linha nova na tabela do `docs/README.md`. |
@@ -2570,7 +2571,7 @@ refazer o que a primeira produziu com a identidade errada.
 #### Pré-requisitos — nenhum card da Fase 1 começa antes destes
 
 | # | Pré-requisito | Onde se confere | Quem assina |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | P1 | **Idempotência provada.** O teste "mesmo spec 2× → 0 submits" existe e reprova quando quebrado | `F0-08`, Considerações | quem executou `F0-08` |
 | P2 | **Guard informa e não recusa.** `estimate` sai 0 acima de todos os limiares | `F0-03` | quem executou `F0-03` |
 | P3 | **`isometric` fixado com evidência.** `E1` respondido e o campo dentro do `specHash` | `docs/plano/experimentos/E1.md` | você |
@@ -2666,7 +2667,7 @@ faixa_ledger: AB-240..AB-249
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Aceitar um PNG virado para o sul e uma altura em px, e **reprovar localmente** tudo que a API cobraria para depois devolver 422. |
 | **Entradas** | `docs/plano/experimentos/E1.md` (o canvas real) · `src/strings.ts` de `F0-07`. |
 | **Saídas** | validação local com mensagens em pt-BR e testes. |
@@ -2771,7 +2772,7 @@ faixa_ledger: AB-250..AB-259
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Produzir norte, leste e oeste a partir do sul fornecido, com `isometric` conforme `E1`, passando pelo guard e pelo ledger. |
 | **Entradas** | o `from_image` de `F1-01` · o veredicto de `E1`. |
 | **Saídas** | três PNGs cardeais, gravados e registrados. |
@@ -2885,7 +2886,7 @@ faixa_ledger: AB-260..AB-269
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | O passo central: as 4 cardeais entram congeladas pelo mapa `directions`, e as 4 diagonais são geradas — por **1 geração**. |
 | **Entradas** | os PNGs de `F1-02` · `server/api.ts`, função `generateBase`. |
 | **Saídas** | 8 direções, com as 4 cardeais **idênticas** ao que foi fornecido. |
@@ -3007,7 +3008,7 @@ faixa_ledger: AB-270..AB-279
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Substituir o fatiamento por índice por leitura por chave, e matar o bug que não estoura. |
 | **Entradas** | `GET /characters/{character_id}` · `server/api.ts`, função `writeFrames`. |
 | **Saídas** | leitura por nome, com teste que reprova o fatiamento por índice. |
@@ -3129,7 +3130,7 @@ faixa_ledger: AB-280..AB-289
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Arrastar 18 keypoints, mover o slider de altura, reescalar e aprovar — **sem uma única chamada de API**. |
 | **Entradas** | `skeletons` de `F1-04` (ou `estimate-skeleton`, se `E5` disser que não vem) · `SKELETON_LABELS`. |
 | **Saídas** | editor local, transformada afim testada, e um estado "aprovado" que destrava a animação. |
@@ -3250,7 +3251,7 @@ faixa_ledger: AB-290..AB-299
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Antes de cada geração, na tela: quantas gerações, quanto estimado, quanto a sessão já gastou, quanto o mês já gastou. E, quando já existe, **zero**. |
 | **Entradas** | o relatório do guard publicado por `F0-03` · `src/strings.ts`. |
 | **Saídas** | diálogo em pt-BR, com os quatro números. |
@@ -3354,7 +3355,7 @@ faixa_ledger: AB-300..AB-309
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Produzir as três animações do editor sabendo **quanto custam**, e não descobrindo depois. |
 | **Entradas** | o veredicto de `I-02/E2` e `E3` · o `character_id` de `F1-03`. |
 | **Saídas** | as três animações × 8 direções, com o custo medido registrado. |
@@ -3490,7 +3491,7 @@ faixa_ledger: AB-310..AB-319
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Ver o personagem andando, nas oito direções, com controle de reprodução. |
 | **Entradas** | os atlas de `F1-07` · a âncora medida de `F0-10` · `strings.ts`. |
 | **Saídas** | prévia funcional. |
@@ -3606,7 +3607,7 @@ faixa_ledger: AB-320..AB-329
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Provar, no fluxo inteiro do builder, que repetir os passos 2 e 3 produz **0 gerações, US$ 0,00 e nenhuma requisição HTTP**. |
 | **Entradas** | todo o caminho de `F1-02` a `F1-07`. |
 | **Saídas** | um teste que conta requisições. |
@@ -3704,7 +3705,7 @@ faixa_ledger: AB-330..AB-339
 Os sete passos do critério de saída, executados na tela, **nesta ordem**:
 
 | # | Passo | O que tem de acontecer |
-|---|---|---|
+| --- | --- | --- |
 | 1 | Anexar o PNG sul e informar a altura | validação de dimensão **antes** de qualquer chamada |
 | 2 | "Gerar 4 cardeais" | diálogo `3 gerações · ~US$ 0,032 · sessão US$ 0,00` → Confirmar |
 | 3 | "Gerar 8 direções" | as 4 cardeais aparecem **idênticas** ao anexado — prova de que `directions` congelou |
@@ -4642,7 +4643,7 @@ faixa_ledger: AB-430..AB-439
 ```
 
 | # | Pré-requisito | Onde se confere |
-|---|---|---|
+| --- | --- | --- |
 | P1 | `tile_rules` parseado contra resposta **real**, não inferida | `F2-04`, e a fixture versionada |
 | P2 | As 16 combinações de autoladrilhamento cobertas | `F2-08` |
 | P3 | Projeto exportado abre depois de copiado para outro caminho | `F2-09` |
@@ -5240,7 +5241,7 @@ faixa_ledger: AB-520..AB-529
 ```
 
 | | |
-|---|---|
+| --- | --- |
 | **Objetivo** | Transformar "o artefato de exportação não é ficção" numa verificação que **é capaz de reprovar**. |
 | **Entradas** | a lista de imports publicada por `F4-01`. |
 | **Saídas** | `scripts/check-runtime-boundary.sh`, no gate. |
@@ -5366,7 +5367,7 @@ cd tools/runtime && npm run play -- /tmp/prova-final/demo.json
 ```
 
 | # | Pré-requisito | Onde |
-|---|---|---|
+| --- | --- | --- |
 | P1 | Fronteira do runtime verificada **e o verificador provado capaz de reprovar** | `F4-03` |
 | P2 | Projeto de demonstração roda a partir de um diretório fora do repositório | comando acima |
 | P3 | Todo item do ledger fechado tem evidência citável, ou está `ABERTO`, ou está `INVIÁVEL` com ADR | `validate-plan.mjs --ledger` |
@@ -5388,7 +5389,7 @@ Estes itens nascem `ABERTO`, hoje, com a informação que existe. `docs/plano/le
 esta tabela é a versão legível.
 
 | id | Pergunta | Por que a base de código não responde | O que se assumiu | O que fecha | Quem responde |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | `AB-001` | O que `isometric: true` faz de fato? | o spec descreve em quatro palavras | que muda a projeção | `I-02/E1` | a API |
 | `AB-002` | Quais são TODOS os `template_animation_id`? | o `...` está literalmente dentro da string do spec — truncagem do fornecedor | que os 10 visíveis são tudo | `I-02/E2` | a API |
 | `AB-003` | Id de template inválido dá 422 antes ou depois de cobrar? | não documentado | que cobra depois | `I-02/E2` | a API |
@@ -5410,7 +5411,7 @@ quando não dá para verificar: **`INVIÁVEL`, com ADR**.
 Cada linha foi verificada em 2026-07-30, contra este código.
 
 | O que parece verde | Por quê |
-|---|---|
+| --- | --- |
 | `grep -rn "x" dir/ \| wc -l # 0` com `dir/` inexistente | erro vai para stderr, stdout fica vazio, `wc` conta 0, pipeline sai 0. **É o critério publicado da Fase 4** |
 | `grep -rn "kind: 'refuse'"` | não casa `kind: "refuse"` nem `kind:'refuse'`. Aspas e espaço decidem o veredicto |
 | `node src/cli.ts verify` com lockfile vazio | imprime "0 artefato(s) conferido(s), 0 problema(s)" e sai 0. Verde por vacuidade |
@@ -5444,7 +5445,7 @@ trabalho**. *"Está bom?"* não é pergunta. *"O smoke passaria com uma tela em 
 Calibragem, por domínio deste projeto:
 
 | Domínio | Pergunta |
-|---|---|
+| --- | --- |
 | pipeline de custo | *existe caminho do argv até `client.submit` que não passe pelo guard?* |
 | idempotência | *o teste passaria se `generate` não fizesse nada? onde está o contador?* |
 | leitura de payload | *monte o payload na ordem inversa: o resultado muda? leste e oeste trocam?* |
@@ -5540,7 +5541,7 @@ plano isso está declarado em `W2` (`F0-03` antes dos demais) e em `W10` (`F2-07
 Vai acontecer. É o mecanismo funcionando, não falhando. Classifique **antes** de agir:
 
 | A premissa é… | Exemplo possível aqui | O que fazer |
-|---|---|---|
+| --- | --- | --- |
 | um **fato sobre a API** | `isometric` não muda a projeção | cumpra o card **pelo que ele quis**, entregue menos e **nomeie a diferença** |
 | uma **entrada** | a fixture de `E4` não tem o caso da escada | **estenda a entrada**, anunciando quem mais depende dela |
 | uma **restrição de ancestral** | `iso-core` proíbe o que o card pede | **o contrato vence, o card cede**; a dívida vira card futuro nomeado |
