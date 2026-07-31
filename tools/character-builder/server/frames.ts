@@ -73,9 +73,20 @@ export async function parseAndWriteFrames(
     throw new Error('resposta da API não é um objeto');
   }
 
-  const rotationUrls = obj['rotation_urls'];
-  if (!rotationUrls || typeof rotationUrls !== 'object') {
-    throw new Error('resposta da API não contém o campo rotation_urls');
+  // Try new format (images dict) first, fallback to old format (rotation_urls).
+  let rotationUrls: Record<string, unknown> | null = null;
+  const images = obj['images'];
+  if (images && typeof images === 'object') {
+    rotationUrls = images as Record<string, unknown>;
+  } else {
+    const ru = obj['rotation_urls'];
+    if (ru && typeof ru === 'object') {
+      rotationUrls = ru as Record<string, unknown>;
+    }
+  }
+
+  if (!rotationUrls) {
+    throw new Error('resposta da API não contém images nem rotation_urls');
   }
 
   // --- skeletons (E5) ---
@@ -100,25 +111,47 @@ export async function parseAndWriteFrames(
     }
   }
 
-  // --- escreve frames ---
+  // --- download frames from storage_urls or decode from images ---
   const safe = key.replace(/[^a-z0-9-]+/gi, '_');
   const outDir = join(assetsDir, scope, safe);
   await mkdir(outDir, { recursive: true });
 
   const frames: Record<string, string[]> = {};
 
-  // Iterar pelas direcções canónicas para produzir ordem determinística,
-  // independentemente da ordem das chaves no payload.
+  // Prefer storage_urls: downloadable PNG URLs.
+  const storageUrls = obj['storage_urls'] as Record<string, string> | undefined;
+  if (storageUrls) {
+    for (const dir of DIRECTIONS) {
+      const url = storageUrls[dir];
+      if (!url) throw new MissingDirectionError(dir);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`download ${dir} falhou: HTTP ${response.status}`);
+      const buf = Buffer.from(await response.arrayBuffer());
+      const name = `${dir}-00.png`;
+      await writeFile(join(outDir, name), buf);
+      frames[dir] = [`/assets/${scope}/${safe}/${name}`];
+    }
+    return { frames, hasSkeletons };
+  }
+
+  // Fallback: decode from images/rotation_urls dict (raw RGBA or base64 strings).
+  const fallbackRot = rotationUrls;
+  if (!fallbackRot) throw new Error('resposta da API não contém images nem rotation_urls');
+
   for (const dir of DIRECTIONS) {
-    const frameList = rot[dir];
+    const frameList = fallbackRot[dir];
     if (!Array.isArray(frameList)) continue;
 
     const list: string[] = [];
     for (let f = 0; f < frameList.length; f++) {
       const entry = frameList[f];
-      if (typeof entry !== 'string') continue;
-      // Remove prefixo data URI se presente
-      const b64 = entry.replace(/^data:image\/\w+;base64,/, '');
+      let b64: string | undefined;
+      if (typeof entry === 'string') {
+        b64 = entry.replace(/^data:image\/\w+;base64,/, '');
+      } else if (entry && typeof entry === 'object' && 'base64' in entry) {
+        b64 = (entry as Record<string, unknown>)['base64'] as string | undefined;
+      }
+      if (!b64) continue;
       const name = `${dir}-${String(f).padStart(2, '0')}.png`;
       await writeFile(join(outDir, name), Buffer.from(b64, 'base64'));
       list.push(`/assets/${scope}/${safe}/${name}`);

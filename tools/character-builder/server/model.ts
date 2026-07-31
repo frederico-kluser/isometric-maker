@@ -230,16 +230,70 @@ export interface Cell {
 }
 
 /**
+ * Quality knobs of the generation endpoints, verified against the vendored
+ * spec on 2026-07-31 (tools/pixellab-pipeline/openapi/openapi-v2.json):
+ *
+ * - `/create-image-bitforge` declares these as strict string enums — exactly
+ *   the values below.
+ * - `/create-character-with-8-directions` declares them as free strings with
+ *   a prose list in the description ("soft guidance — the model may not
+ *   follow exactly"); the prose drifts slightly ("high detail" there vs
+ *   "highly detailed" in bitforge). The bitforge enums below are valid for
+ *   both schemas, so they are the single source for the client.
+ * - mode 'pro' of the 8-directions endpoint IGNORES detail/shading/outline
+ *   and text_guidance_scale — the wizard always uses mode 'standard'.
+ *
+ * The client imports these arrays to render the selector — do not rename.
+ */
+export const DETAIL_OPTIONS = [
+	"low detail",
+	"medium detail",
+	"highly detailed",
+] as const;
+export type DetailOption = (typeof DETAIL_OPTIONS)[number];
+
+export const SHADING_OPTIONS = [
+	"flat shading",
+	"basic shading",
+	"medium shading",
+	"detailed shading",
+	"highly detailed shading",
+] as const;
+export type ShadingOption = (typeof SHADING_OPTIONS)[number];
+
+export const OUTLINE_OPTIONS = [
+	"single color black outline",
+	"single color outline",
+	"selective outline",
+	"lineless",
+] as const;
+export type OutlineOption = (typeof OUTLINE_OPTIONS)[number];
+
+/**
  * Frame contract the wizard locks BEFORE the base body is generated. Once
  * `wizard.etapa` reaches "pronto" this is immutable: every pose, item and
  * derived character inherits frameCount/fps/size, and the UI stops offering
  * the choice.
+ *
+ * The quality fields are OPTIONAL and ride the same lock: when present they
+ * are threaded into the south (bitforge) and 8-directions requests; when
+ * absent they are OMITTED from the request body (F0-09) so the API defaults
+ * apply and no specHash-style invalidation can sneak in.
  */
 export interface MannequinLock {
 	/** 4, 8 or 16. The API rejects anything else. */
 	readonly frameCount: 4 | 8 | 16;
 	readonly fps: number;
 	readonly size: number;
+	readonly detail?: DetailOption;
+	readonly shading?: ShadingOption;
+	readonly outline?: OutlineOption;
+	/**
+	 * Sent as `text_guidance_scale` — integer 1–20 in this tool (the spec
+	 * models number 1–20, default 8). NOT `extra_guidance_scale`, which the
+	 * spec marks deprecated.
+	 */
+	readonly guidanceScale?: number;
 }
 
 export interface Studio {
@@ -275,6 +329,9 @@ export const cardinalKey = (
 
 export const directions8Key = (characterId: string): string =>
 	`${characterId}::__directions8__`;
+
+export const cardinalsBatchKey = (characterId: string): string =>
+	`${characterId}::__cardinals__`;
 
 /**
  * Seed state (studio.json v2).
@@ -327,7 +384,9 @@ export function seedStudio(): Studio {
 				// Empty on purpose — the wizard's first step is describing the
 				// south face. Filling it here would pre-empt the wizard.
 				description: "",
-				size: 64,
+				// 128×128 por decisão do projeto (qualidade máxima): é o teto do
+				// create-character-with-8-directions, o elo fraco da cadeia.
+				size: 128,
 				seed: 1,
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
 				createdAt: now,

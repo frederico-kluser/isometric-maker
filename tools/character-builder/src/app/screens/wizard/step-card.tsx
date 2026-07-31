@@ -4,10 +4,14 @@
  * inteira fica visível antes de ser alcançada, sem expor controles que
  * ainda não podem funcionar.
  *
+ * A mensagem de falha NÃO aparece aqui: cada passo renderiza a sua caixa
+ * (FailureNotice) com a mensagem do servidor e o botão "Tentar de novo" —
+ * erro acionável no corpo, não texto solto no cabeçalho.
+ *
  * Código novo porque o registry @motion não tem stepper/card-de-passo com
  * este contrato; o visual é 100% tokens shadcn sobre o Card instalado.
  */
-import { Check } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -26,6 +30,7 @@ const STATUS_LABEL: Record<StepStatus, string> = {
 	done: wizard.trilha.concluido,
 	active: wizard.trilha.atual,
 	todo: wizard.trilha.pendente,
+	failed: wizard.trilha.falhou,
 };
 
 export interface StepCardProps {
@@ -47,13 +52,17 @@ export function StepCard({ title, note, status, children }: StepCardProps) {
 						variant={
 							status === 'done'
 								? 'secondary'
-								: status === 'active'
-									? 'default'
-									: 'outline'
+								: status === 'failed'
+									? 'destructive'
+									: status === 'active'
+										? 'default'
+										: 'outline'
 						}
 					>
 						{status === 'done' ? (
 							<Check aria-hidden className="size-3" />
+						) : status === 'failed' ? (
+							<X aria-hidden className="size-3" />
 						) : null}
 						{STATUS_LABEL[status]}
 					</Badge>

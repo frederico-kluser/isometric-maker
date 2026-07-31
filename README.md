@@ -44,7 +44,7 @@ Este repositório já foi um MMORPG hardcore. O pivô aconteceu em 2026-07-30, a
 
 | Requisito | Detalhe |
 | --- | --- |
-| `PIXELLAB_SECRET` | **Obrigatório.** Token de `https://pixellab.ai/account`. Fica só no processo Node, nunca chega ao navegador. **Não há dotenv** — exporte na shell |
+| `PIXELLAB_SECRET` | **Obrigatório.** Token de `https://pixellab.ai/account`. Fica só no processo Node, nunca chega ao navegador. Ponte no `.env` do estúdio ou exporte na shell |
 | `PIXELLAB_TIER` | `free` \| `t1` \| `t2` \| `t3`, default `t1`. Define quantos jobs correm em paralelo (1 / 2 / 4 / 20) |
 | Node.js | **≥ 24.** Executa `.ts` direto, sem passo de build |
 | Crédito na PixelLab | 1 crédito = US$ 1,00. Todo asset gerado gasta dinheiro real, e o preço é sempre **estimado** |

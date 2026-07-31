@@ -2,13 +2,16 @@
  * Testes da derivação do progresso do wizard (node --test, sem DOM).
  *
  * O que está sob verificação é a regra "primeiro passo não concluído é o
- * ativo", incluindo os dois casos de borda que a tela encontra de verdade:
- * sul gerada antes da config travar, e personagem sem wizard state.
+ * ativo", os casos de borda que a tela encontra de verdade (sul gerada
+ * antes da config travar, personagem sem wizard state) e a leitura dos
+ * JOBS: o servidor nunca marca célula do wizard como `gerando`, então
+ * andamento e erro chegam por `studio.jobs` — com a célula de fallback.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	cardinalKey,
+	cardinalsBatchKey,
 	directions8Key,
 	seedStudio,
 	southKey,
@@ -173,4 +176,116 @@ test('células gerando marcam os flags de progresso', () => {
 	assert.equal(p.southGenerating, true);
 	assert.equal(p.southReady, false);
 	assert.equal(p.activeStep, 'sul');
+});
+
+test('job-based generating flags work when cells are not gerando', () => {
+	const s = withLock(seedStudio());
+	const jobs = {
+		[southKey('manequim')]: { status: 'gerando' },
+		[directions8Key('manequim')]: { status: 'gerando' },
+	};
+	const p = deriveWizard(s, mannequin(s), jobs);
+
+	assert.equal(p.southGenerating, true);
+	assert.equal(p.dir8Generating, true);
+	assert.equal(p.cardinalsGenerating, false);
+	assert.equal(p.southReady, false);
+});
+
+test('failed cells produce failed step status with error', () => {
+	const errorMsg = 'Rate limit exceeded — tente novamente em 30s';
+	let s = withLock(seedStudio());
+	s = withCell(s, southKey('manequim'), {
+		key: southKey('manequim'),
+		status: 'falhou',
+		error: errorMsg,
+	});
+	const p = deriveWizard(s, mannequin(s));
+
+	assert.equal(statusMap(p)['sul'], 'failed');
+	assert.equal(p.stepErrors['sul'], errorMsg);
+	assert.equal(p.stepErrors['cardeais'], undefined);
+	assert.equal(p.stepErrors['direcoes8'], undefined);
+	assert.equal(p.activeStep, 'sul');
+});
+
+test('cardinals batch key in jobs drives cardinalsGenerating', () => {
+	const s = withLock(seedStudio());
+	const jobs = {
+		[cardinalsBatchKey('manequim')]: { status: 'gerando' },
+	};
+	const p = deriveWizard(s, mannequin(s), jobs);
+
+	assert.equal(p.cardinalsGenerating, true);
+	assert.equal(p.southGenerating, false);
+});
+
+test('job falhou produz erro com a mensagem, mesmo sem célula falhou', () => {
+	// O spawn registra o job falhou ANTES de gravar a célula — nesta janela a
+	// tela já deve mostrar o erro (e marcar o passo como falhou).
+	const s = withLock(seedStudio());
+	const jobs = {
+		[southKey('manequim')]: { status: 'falhou', message: 'tempo esgotado' },
+	};
+	const p = deriveWizard(s, mannequin(s), jobs);
+
+	assert.equal(p.southError, 'tempo esgotado');
+	assert.equal(p.stepErrors['sul'], 'tempo esgotado');
+	assert.equal(statusMap(p)['sul'], 'failed');
+	assert.equal(p.firstRun, false);
+});
+
+test('job falhou do lote de cardeais e das 8 direções alimentam os erros', () => {
+	const s = withLock(seedStudio());
+	const jobs = {
+		[cardinalsBatchKey('manequim')]: {
+			status: 'falhou',
+			message: '529 — API sobrecarregada',
+		},
+		[directions8Key('manequim')]: {
+			status: 'falhou',
+			message: 'resposta sem imagem',
+		},
+	};
+	const p = deriveWizard(s, mannequin(s), jobs);
+
+	assert.equal(p.cardinalsError, '529 — API sobrecarregada');
+	assert.equal(p.dir8Error, 'resposta sem imagem');
+	assert.equal(p.stepErrors['cardeais'], '529 — API sobrecarregada');
+	assert.equal(p.stepErrors['direcoes8'], 'resposta sem imagem');
+	assert.equal(statusMap(p)['cardeais'], 'failed');
+	assert.equal(statusMap(p)['direcoes8'], 'failed');
+	assert.equal(p.southError, undefined);
+});
+
+test('erro da célula é o fallback quando o job não está falhou', () => {
+	// Depois de um restart do servidor os jobs somem — a célula falhou é o
+	// que resta, e o erro tem que continuar visível.
+	let s = withLock(seedStudio());
+	s = withCell(s, southKey('manequim'), {
+		key: southKey('manequim'),
+		status: 'falhou',
+		error: 'erro persistido',
+	});
+	const p = deriveWizard(s, mannequin(s), {});
+
+	assert.equal(p.southError, 'erro persistido');
+	assert.equal(p.stepErrors['sul'], 'erro persistido');
+});
+
+test('job falhou com célula pronta: erro no passo, trilha continua concluída', () => {
+	// Caso real: a EDIÇÃO da sul falhou — a versão anterior continua pronta.
+	// O erro tem que aparecer no corpo do passo (southError), mas marcar a
+	// trilha como falha seria mentira: a face sul existe.
+	let s = withLock(seedStudio());
+	s = withCell(s, southKey('manequim'));
+	const jobs = {
+		[southKey('manequim')]: { status: 'falhou', message: 'edição falhou' },
+	};
+	const p = deriveWizard(s, mannequin(s), jobs);
+
+	assert.equal(p.southReady, true);
+	assert.equal(p.southError, 'edição falhou');
+	assert.equal(p.stepErrors['sul'], undefined);
+	assert.equal(statusMap(p)['sul'], 'done');
 });

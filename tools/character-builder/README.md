@@ -6,7 +6,8 @@
 >
 > ```bash
 > cd /home/ondokai/Projects/isometric-maker/tools/character-builder
-> export PIXELLAB_SECRET="..."
+> # O token fica no .env — não precisa exportar na shell.
+> # Se quiser sobrescrever, export PIXELLAB_SECRET="..." prevalece.
 > npm run dev        # http://localhost:5174
 > ```
 

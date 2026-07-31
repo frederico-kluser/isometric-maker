@@ -1,13 +1,29 @@
 /**
- * Passo 1 — configuração da base (frameCount/fps/size/silhueta).
+ * Passo 1 — configuração da base: preset de qualidade (tamanho + estilo),
+ * frames, fps e silhueta. Travam juntos antes da primeira geração; depois
+ * vira o badge travado. O lock é global: vale para o manequim e para todo
+ * personagem derivado. O pai monta este componente com key={character.id}
+ * para o formulário reiniciar na troca de personagem.
  *
- * Editável enquanto studio.lock não existe; depois vira o badge travado.
- * O lock é global: vale para o manequim e para todo personagem derivado.
- * O pai monta este componente com key={character.id} para o formulário
- * reiniciar na troca de personagem.
+ * Os presets são atalhos que preenchem tamanho + detail/shading/outline/
+ * guidance de uma vez (valores em quality.ts); mexer no Avançado depois
+ * desbanca o preset — o toggle fica sem seleção, porque nenhum preset
+ * representa mais os valores. O Avançado mostra o valor EXATO do spec em
+ * texto miúdo sob cada select, e a nota repete o aviso do vendor: os
+ * controles de estilo são inclinação fraca, não garantia.
+ *
+ * O POST envia os campos de qualidade junto — o servidor que não os
+ * conhece os ignora (readBody tipado), então a tela não quebra enquanto a
+ * integração do lock novo não chega.
  */
 import { Lock } from 'lucide-react';
 import { useState } from 'react';
+import {
+	Accordion,
+	AccordionItem,
+	AccordionPanel,
+	AccordionTrigger,
+} from '@/components/motion-ui/accordion';
 import {
 	SegmentedToggle,
 	SegmentedToggleOption,
@@ -22,15 +38,35 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from '@/components/ui/select';
-import type { MannequinLock, Silhouette } from '../../../../server/model.ts';
+import {
+	DETAIL_OPTIONS,
+	type DetailOption,
+	type MannequinLock,
+	OUTLINE_OPTIONS,
+	type OutlineOption,
+	SHADING_OPTIONS,
+	type ShadingOption,
+	type Silhouette,
+} from '../../../../server/model.ts';
 import { configTravada, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
+import {
+	GUIDANCE_MAX,
+	GUIDANCE_MIN,
+	matchPreset,
+	QUALITY_PRESETS,
+	QUALITY_PRESET_IDS,
+	type QualityPresetId,
+	type QualityValues,
+} from './quality.ts';
 import { useAction } from './use-action.ts';
 import type { WizardProgress } from './wizard-progress.ts';
 
 const FRAME_COUNTS = ['4', '8', '16'] as const;
 type FrameCountKey = (typeof FRAME_COUNTS)[number];
+
+type PresetValue = QualityPresetId | '';
 
 const SILHOUETTES: readonly Silhouette[] = [
 	'humano-medio',
@@ -52,7 +88,7 @@ export function ConfigStep({
 		return (
 			<Badge variant="secondary" className="w-fit gap-1.5 px-3 py-1.5 text-sm">
 				<Lock aria-hidden className="size-3.5" />
-				{configTravada(lock.frameCount, lock.fps, lock.size)}
+				{configTravada(lock.frameCount, lock.fps, lock.size, lock.detail)}
 			</Badge>
 		);
 	}
@@ -68,38 +104,54 @@ function ConfigForm({
 }) {
 	const [frameCount, setFrameCount] = useState<FrameCountKey>('8');
 	const [fps, setFps] = useState('8');
-	const [size, setSize] = useState(String(progress.character.size));
+	// Default Máxima (decisão do usuário, TASK_PLAN): 128px, qualidade máxima.
+	const [quality, setQuality] = useState<QualityValues>(QUALITY_PRESETS.maxima);
 	const [silhouette, setSilhouette] = useState<Silhouette>(
 		progress.character.silhouette,
 	);
 	const action = useAction(refresh);
 
 	const fpsNum = Number(fps);
-	const sizeNum = Number(size);
-	const canSubmit =
-		Number.isFinite(fpsNum) &&
-		fpsNum > 0 &&
-		Number.isInteger(sizeNum) &&
-		sizeNum >= 16 &&
-		sizeNum <= 128;
+	const guidanceOk =
+		Number.isInteger(quality.guidanceScale) &&
+		quality.guidanceScale >= GUIDANCE_MIN &&
+		quality.guidanceScale <= GUIDANCE_MAX;
+	const canSubmit = Number.isFinite(fpsNum) && fpsNum > 0 && guidanceOk;
+	const preset = matchPreset(quality);
 
 	return (
 		<>
 			<div className="flex flex-col gap-2">
-				<span className="text-sm font-medium">{wizard.config.frames}</span>
+				<span className="text-sm font-medium">{wizard.config.qualidade}</span>
 				<SegmentedToggle
-					value={frameCount}
-					onChange={(v: FrameCountKey) => setFrameCount(v)}
-					ariaLabel={wizard.config.framesAria}
+					value={preset ?? ''}
+					onChange={(v: PresetValue) => {
+						if (v !== '') setQuality(QUALITY_PRESETS[v]);
+					}}
+					ariaLabel={wizard.config.qualidadeAria}
 				>
-					{FRAME_COUNTS.map((n) => (
-						<SegmentedToggleOption key={n} value={n}>
-							{n}
+					{QUALITY_PRESET_IDS.map((id) => (
+						<SegmentedToggleOption key={id} value={id}>
+							{wizard.config.presets[id]}
 						</SegmentedToggleOption>
 					))}
 				</SegmentedToggle>
 			</div>
 			<div className="flex flex-wrap gap-4">
+				<div className="flex flex-col gap-2">
+					<span className="text-sm font-medium">{wizard.config.frames}</span>
+					<SegmentedToggle
+						value={frameCount}
+						onChange={(v: FrameCountKey) => setFrameCount(v)}
+						ariaLabel={wizard.config.framesAria}
+					>
+						{FRAME_COUNTS.map((n) => (
+							<SegmentedToggleOption key={n} value={n}>
+								{n}
+							</SegmentedToggleOption>
+						))}
+					</SegmentedToggle>
+				</div>
 				<div className="flex flex-col gap-2">
 					<Label htmlFor="wizard-config-fps">{wizard.config.fps}</Label>
 					<Input
@@ -109,18 +161,6 @@ function ConfigForm({
 						max={60}
 						value={fps}
 						onChange={(e) => setFps(e.target.value)}
-						className="w-28"
-					/>
-				</div>
-				<div className="flex flex-col gap-2">
-					<Label htmlFor="wizard-config-size">{wizard.config.tamanho}</Label>
-					<Input
-						id="wizard-config-size"
-						type="number"
-						min={16}
-						max={128}
-						value={size}
-						onChange={(e) => setSize(e.target.value)}
 						className="w-28"
 					/>
 				</div>
@@ -145,6 +185,63 @@ function ConfigForm({
 					</Select>
 				</div>
 			</div>
+			<Accordion className="rounded-xl border border-border bg-card">
+				<AccordionItem value="avancado">
+					<AccordionTrigger className="px-4 py-3 text-sm font-medium" inset>
+						{wizard.config.avancadoTitulo}
+					</AccordionTrigger>
+					<AccordionPanel className="flex flex-col gap-4 px-4 pb-4">
+						<div className="flex flex-wrap gap-4">
+							<StyleSelect
+								id="wizard-config-detail"
+								label={wizard.config.detail}
+								value={quality.detail}
+								options={DETAIL_OPTIONS}
+								labels={wizard.config.detailRotulos}
+								onChange={(detail) => setQuality({ ...quality, detail })}
+							/>
+							<StyleSelect
+								id="wizard-config-shading"
+								label={wizard.config.shading}
+								value={quality.shading}
+								options={SHADING_OPTIONS}
+								labels={wizard.config.shadingRotulos}
+								onChange={(shading) => setQuality({ ...quality, shading })}
+							/>
+							<StyleSelect
+								id="wizard-config-outline"
+								label={wizard.config.outline}
+								value={quality.outline}
+								options={OUTLINE_OPTIONS}
+								labels={wizard.config.outlineRotulos}
+								onChange={(outline) => setQuality({ ...quality, outline })}
+							/>
+							<div className="flex flex-col gap-2">
+								<Label htmlFor="wizard-config-guidance">
+									{wizard.config.guidance}
+								</Label>
+								<Input
+									id="wizard-config-guidance"
+									type="number"
+									min={GUIDANCE_MIN}
+									max={GUIDANCE_MAX}
+									value={String(quality.guidanceScale)}
+									onChange={(e) =>
+										setQuality({
+											...quality,
+											guidanceScale: Number(e.target.value),
+										})
+									}
+									className="w-28"
+								/>
+							</div>
+						</div>
+						<p className="max-w-prose text-xs text-muted-foreground">
+							{wizard.config.estiloNota}
+						</p>
+					</AccordionPanel>
+				</AccordionItem>
+			</Accordion>
 			<ActionButton
 				state={action.state}
 				message={action.message}
@@ -159,13 +256,59 @@ function ConfigForm({
 								characterId: progress.character.id,
 								frameCount: Number(frameCount),
 								fps: fpsNum,
-								size: sizeNum,
+								size: quality.size,
 								silhouette,
+								detail: quality.detail,
+								shading: quality.shading,
+								outline: quality.outline,
+								guidanceScale: quality.guidanceScale,
 							}),
 						}),
 					)
 				}
 			/>
 		</>
+	);
+}
+
+/** Select de estilo do Avançado: rótulo amigável na opção, valor exato do
+ *  spec em texto miúdo sob o campo — é o valor que vai no lock e na API. */
+function StyleSelect<T extends string>({
+	id,
+	label,
+	value,
+	options,
+	labels,
+	onChange,
+}: {
+	readonly id: string;
+	readonly label: string;
+	readonly value: T;
+	readonly options: readonly T[];
+	readonly labels: Record<T, string>;
+	readonly onChange: (value: T) => void;
+}) {
+	return (
+		<div className="flex flex-col gap-2">
+			<Label htmlFor={id}>{label}</Label>
+			<Select
+				value={value}
+				onValueChange={(v) => {
+					if (typeof v === 'string') onChange(v as T);
+				}}
+			>
+				<SelectTrigger id={id} className="w-48">
+					<SelectValue />
+				</SelectTrigger>
+				<SelectContent>
+					{options.map((o) => (
+						<SelectItem key={o} value={o}>
+							{labels[o]}
+						</SelectItem>
+					))}
+				</SelectContent>
+			</Select>
+			<span className="text-xs text-muted-foreground">{value}</span>
+		</div>
 	);
 }

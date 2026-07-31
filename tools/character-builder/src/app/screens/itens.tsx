@@ -32,9 +32,35 @@ import {
 import { wardrobeKey } from '../../../server/model.ts';
 import { api, useSelectedCharacter, useStudio } from '../studio-store.tsx';
 import { S } from '../../strings.ts';
+import {
+  geracoesEmAndamento,
+  progressoGeracoes,
+  resumoDisparoPecas,
+} from '../../strings/itens.ts';
 import { WardrobeCard } from './itens/wardrobe-card.tsx';
 import { ItemDetail } from './itens/item-detail.tsx';
 import { CreateItemSheet } from './itens/create-item-sheet.tsx';
+import {
+  GenerateAllItemsButton,
+  type DispatchOutcome,
+} from './itens/generate-all-button.tsx';
+import {
+  countGenerating,
+  fittingWardrobeItems,
+  mergeBatch,
+  pendingWardrobeItems,
+  type BatchDispatch,
+} from './itens/generation-batch.ts';
+
+/** Resumo do último disparo em lote — exibido até o personagem trocar. */
+interface BatchSummary {
+  readonly characterId: string;
+  readonly dispatched: number;
+  readonly alreadyReady: number;
+  readonly alreadyRunning: number;
+  readonly failed: number;
+  readonly firstError?: string;
+}
 
 function ShirtGlyph() {
   return (
@@ -97,6 +123,8 @@ export function ItensScreen() {
   const { characterId, setCharacterId } = useSelectedCharacter();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [batch, setBatch] = useState<BatchDispatch | null>(null);
+  const [summary, setSummary] = useState<BatchSummary | null>(null);
 
   if (!studio) return <ItensLoading />;
 
@@ -106,6 +134,11 @@ export function ItensScreen() {
     studio.characters.find((c) => c.id === characterId) ?? studio.characters[0];
   if (!character) return null; // o seed sempre traz o manequim
 
+  /** POST solto (Gerar/Tentar de novo) também entra no lote rastreado. */
+  const trackDispatch = (key: string): void => {
+    setBatch((prev) => mergeBatch(prev, character.id, [key], studio.jobs));
+  };
+
   const generate = async (itemId: string): Promise<void> => {
     setActionError(null);
     try {
@@ -113,6 +146,7 @@ export function ItensScreen() {
         method: 'POST',
         body: JSON.stringify({ characterId: character.id, wardrobeId: itemId }),
       });
+      trackDispatch(wardrobeKey(character.id, itemId));
       // O 202 já marcou a célula "gerando" — recarrega para o card virar
       // skeleton na hora; o poll de 3s do store cuida do resto.
       await refresh();
@@ -121,6 +155,82 @@ export function ItensScreen() {
       setActionError(`${S.itens.erroGerar} ${message}`);
     }
   };
+
+  // O lote só conhece peças que SERVEM na silhueta — incompatível nunca
+  // entra, nem no disparo nem nas contagens do resumo.
+  const fitting = fittingWardrobeItems(studio.wardrobe, character);
+  const pending = pendingWardrobeItems(studio.wardrobe, character, studio.cells);
+
+  /**
+   * Dispara todas as peças pendentes EM PARALELO — um POST /api/generate por
+   * peça, Promise.allSettled no cliente e spawn independente por rota no
+   * servidor. Célula pronta nunca entra: idempotência não se fura pela UI.
+   */
+  const generateAllPending = async (): Promise<DispatchOutcome> => {
+    const keys = pending.map((w) => wardrobeKey(character.id, w.id));
+    setBatch((prev) => mergeBatch(prev, character.id, keys, studio.jobs));
+    const alreadyReady = fitting.filter(
+      (w) => studio.cells[wardrobeKey(character.id, w.id)]?.status === 'pronto',
+    ).length;
+    const alreadyRunning = fitting.length - pending.length - alreadyReady;
+    const results = await Promise.allSettled(
+      pending.map((w) =>
+        api<{ key: string }>('generate', {
+          method: 'POST',
+          body: JSON.stringify({ characterId: character.id, wardrobeId: w.id }),
+        }),
+      ),
+    );
+    const rejected = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    const first = rejected[0];
+    const firstError =
+      first === undefined
+        ? undefined
+        : first.reason instanceof Error
+          ? first.reason.message
+          : String(first.reason);
+    setSummary({
+      characterId: character.id,
+      dispatched: results.length - rejected.length,
+      alreadyReady,
+      alreadyRunning,
+      failed: rejected.length,
+      ...(firstError !== undefined ? { firstError } : {}),
+    });
+    await refresh();
+    return { total: results.length, failed: rejected.length };
+  };
+
+  // Contador de progresso: o lote rastreado dá o "X de Y"; sem lote (página
+  // recarregada no meio, por exemplo) cai na contagem simples dos jobs de
+  // peça do personagem que ainda estão gerando.
+  const tracked = batch !== null && batch.characterId === character.id ? batch : null;
+  const trackedRunning =
+    tracked !== null ? countGenerating(tracked.keys, studio.jobs) : 0;
+  const allRunning = countGenerating(
+    studio.wardrobe.map((w) => wardrobeKey(character.id, w.id)),
+    studio.jobs,
+  );
+  const running = trackedRunning > 0 ? trackedRunning : allRunning;
+  const progressText =
+    running === 0
+      ? null
+      : tracked !== null && trackedRunning > 0 && tracked.keys.length > running
+        ? progressoGeracoes(running, tracked.keys.length)
+        : geracoesEmAndamento(running);
+
+  const summaryText =
+    summary !== null && summary.characterId === character.id
+      ? resumoDisparoPecas(
+          summary.dispatched,
+          summary.alreadyReady,
+          summary.alreadyRunning,
+          summary.failed,
+          summary.firstError,
+        )
+      : null;
 
   const screenError = actionError ?? error;
 
@@ -166,11 +276,29 @@ export function ItensScreen() {
             <Badge variant="outline">
               {S.itens.silhuetas[character.silhouette]}
             </Badge>
+            {studio.wardrobe.length > 0 && (
+              <GenerateAllItemsButton
+                hasRemoteId={character.remoteId !== undefined}
+                pendingCount={pending.length}
+                onGenerateAll={generateAllPending}
+              />
+            )}
             <Button onClick={() => setSheetOpen(true)}>
               {S.itens.novaPeca}
             </Button>
           </StaggerRevealItem>
         </div>
+
+        {progressText !== null && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {progressText}
+          </p>
+        )}
+        {summaryText !== null && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {summaryText}
+          </p>
+        )}
 
         {studio.wardrobe.length === 0 ? (
           <StaggerRevealItem>

@@ -20,7 +20,11 @@ import {
   cardinalKey,
   directions8Key,
   seedStudio,
+  DETAIL_OPTIONS,
+  SHADING_OPTIONS,
+  OUTLINE_OPTIONS,
   type Character,
+  type MannequinLock,
 } from './model.ts';
 
 // ------------------------------------------------------------------ seed v2
@@ -37,7 +41,7 @@ test('seedStudio — v2: manequim com wizard na etapa sul', () => {
   assert.equal(m.label, 'Manequim base');
   assert.equal(m.silhouette, 'humano-medio');
   assert.equal(m.description, '', 'description vazia — o wizard preenche');
-  assert.equal(m.size, 64);
+  assert.equal(m.size, 128, 'manequim nasce 128×128 (decisão: qualidade máxima)');
   assert.equal(m.seed, 1);
 
   assert.ok(m.wizard, 'manequim nasce com wizard');
@@ -127,4 +131,72 @@ test('Character sem wizard continua válido (v2 é aditivo)', () => {
   assert.equal(southKey(legacy.id), 'base-humano::__south__');
 
   console.log('✓ Character sem wizard: válido e chaveável');
+});
+
+// ------------------------------------------------------------------ qualidade no lock
+
+test('enums de qualidade batem com o spec vendorizado', () => {
+  // Valores conferidos em 2026-07-31 no openapi-v2.json:
+  // /create-image-bitforge os declara como enums estritos; o endpoint de 8
+  // direções aceita string livre ("soft guidance") com a mesma lista.
+  assert.deepEqual(
+    [...DETAIL_OPTIONS],
+    ['low detail', 'medium detail', 'highly detailed'],
+  );
+  assert.deepEqual(
+    [...SHADING_OPTIONS],
+    [
+      'flat shading',
+      'basic shading',
+      'medium shading',
+      'detailed shading',
+      'highly detailed shading',
+    ],
+  );
+  assert.deepEqual(
+    [...OUTLINE_OPTIONS],
+    [
+      'single color black outline',
+      'single color outline',
+      'selective outline',
+      'lineless',
+    ],
+  );
+
+  console.log('✓ DETAIL/SHADING/OUTLINE_OPTIONS conferem com o spec');
+});
+
+test('MannequinLock com qualidade: round-trip JSON preserva os campos', () => {
+  const lock: MannequinLock = {
+    frameCount: 8,
+    fps: 8,
+    size: 128,
+    detail: 'highly detailed',
+    shading: 'detailed shading',
+    outline: 'selective outline',
+    guidanceScale: 8,
+  };
+  const s = seedStudio();
+  s.lock = lock;
+
+  const back = JSON.parse(JSON.stringify(s)) as ReturnType<typeof seedStudio>;
+  assert.deepEqual(
+    back.lock,
+    lock,
+    'detail/shading/outline/guidanceScale sobrevivem ao studio.json',
+  );
+
+  console.log('✓ lock com qualidade persiste (round-trip JSON)');
+});
+
+test('MannequinLock sem qualidade continua válido (v2 é aditivo)', () => {
+  // O lock mínimo de antes não muda de forma: os campos são opcionais e
+  // ausentes significam "default da API" (omitidos do request, F0-09).
+  const minimal: MannequinLock = { frameCount: 8, fps: 8, size: 64 };
+  assert.equal(minimal.detail, undefined);
+  assert.equal(minimal.shading, undefined);
+  assert.equal(minimal.outline, undefined);
+  assert.equal(minimal.guidanceScale, undefined);
+
+  console.log('✓ lock mínimo sem qualidade: válido');
 });

@@ -1,10 +1,18 @@
 /**
- * Passo 2 — face sul: geração por texto, preview pixelado, loop de edição
- * por prompt, faixa de versões (tooltip com o prompt de cada uma) e desfazer.
+ * Passo 2 — face sul: geração por texto (com referência opcional), preview
+ * pixelado, loop de edição por prompt, faixa de versões (tooltip com o
+ * prompt de cada uma) e desfazer.
  *
  * O histórico vem de wizard.southVersions; os arquivos seguem o contrato
  * /assets/wizard/<charId>/south-v<i>.png. Personagem importado chega sem
  * histórico — nesse caso só o preview aparece (editar/undo exigem versão).
+ *
+ * Falha e andamento vêm do progress (wizard-progress.ts): o servidor nunca
+ * marca a célula como `gerando`, então o skeleton e o estado de trabalho do
+ * botão seguem o JOB (studio.jobs), não o ciclo do POST — o POST volta em
+ * ~200ms e a geração leva minutos. A caixa de falha tem "Tentar de novo",
+ * que re-chama a mesma rota (a idempotência não bloqueia: a célula não
+ * está `pronto`; na edição, o prompt diferente também não é idempotente).
  */
 import { useState } from 'react';
 import { Skeleton } from '@/components/motion-ui/skeleton';
@@ -20,6 +28,11 @@ import { cn } from '@/lib/utils';
 import { versaoSulAria, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
+import { FailureNotice } from './failure-notice.tsx';
+import {
+	ReferencePicker,
+	type ReferenceImage,
+} from './reference-picker.tsx';
 import { useAction } from './use-action.ts';
 import type { WizardProgress } from './wizard-progress.ts';
 
@@ -52,14 +65,48 @@ function SouthGenerate({
 	readonly busy: boolean;
 }) {
 	const [description, setDescription] = useState(progress.character.description);
+	const [refImage, setRefImage] = useState<ReferenceImage | null>(null);
+	const [refProbe, setRefProbe] = useState(0);
 	const action = useAction(refresh);
 	const generating = progress.southGenerating;
+	const failure = generating ? undefined : progress.southError;
+
+	const generate = (): void =>
+		void action.run(async () => {
+			await api('wizard/south', {
+				method: 'POST',
+				body: JSON.stringify({
+					characterId: progress.character.id,
+					description: description.trim(),
+					// b64 puro, sem prefixo data: — o servidor grava o upload em
+					// assets/wizard/<charId>/reference.png e usa como init_image.
+					...(refImage ? { referenceBase64: refImage.base64 } : {}),
+				}),
+			});
+			if (refImage) {
+				// Upload gravado: a escolha local sai de cena e a sondagem
+				// re-executa — o preview passa a vir do arquivo em disco.
+				setRefImage(null);
+				setRefProbe((v) => v + 1);
+			}
+		});
 
 	return (
 		<>
 			{generating ? (
 				<Skeleton className="size-48" />
 			) : null}
+			<div className="flex flex-col gap-2">
+				<Label>{wizard.sul.referenciaRotulo}</Label>
+				<ReferencePicker
+					characterId={progress.character.id}
+					image={refImage}
+					onChange={setRefImage}
+					probeKey={refProbe}
+					refresh={refresh}
+					disabled={generating || busy}
+				/>
+			</div>
 			<div className="flex flex-col gap-2">
 				<Label htmlFor="wizard-sul-descricao">
 					{wizard.sul.descricaoRotulo}
@@ -72,24 +119,26 @@ function SouthGenerate({
 					disabled={generating || busy}
 				/>
 			</div>
-			<ActionButton
-				state={action.state}
-				message={action.message}
-				generating={generating}
-				label={wizard.sul.gerar}
-				disabled={description.trim() === '' || busy}
-				onClick={() =>
-					void action.run(() =>
-						api('wizard/south', {
-							method: 'POST',
-							body: JSON.stringify({
-								characterId: progress.character.id,
-								description: description.trim(),
-							}),
-						}),
-					)
-				}
-			/>
+			{failure !== undefined ? (
+				<FailureNotice message={failure}>
+					<ActionButton
+						state={action.state}
+						message={action.message}
+						label={wizard.acoes.tentarDeNovo}
+						disabled={description.trim() === '' || busy}
+						onClick={generate}
+					/>
+				</FailureNotice>
+			) : (
+				<ActionButton
+					state={action.state}
+					message={action.message}
+					generating={generating}
+					label={wizard.sul.gerar}
+					disabled={description.trim() === '' || busy}
+					onClick={generate}
+				/>
+			)}
 		</>
 	);
 }
@@ -112,10 +161,25 @@ function SouthReview({
 	const { wizard: wiz, character } = progress;
 	const versions = wiz.southVersions;
 	const southSrc = progress.southCell?.frames?.['south']?.[0];
+	const generating = progress.southGenerating;
+	// Edição falhada: a versão anterior continua pronta — é por isso que o
+	// erro aparece aqui mesmo com southReady (o job é a única fonte).
+	const failure = generating ? undefined : progress.southError;
+
+	const runEdit = (): void =>
+		void edit.run(() =>
+			api('wizard/south/edit', {
+				method: 'POST',
+				body: JSON.stringify({
+					characterId: character.id,
+					prompt: prompt.trim(),
+				}),
+			}),
+		);
 
 	return (
 		<>
-			{progress.southGenerating ? (
+			{generating ? (
 				<Skeleton className="size-48" />
 			) : southSrc ? (
 				<img
@@ -137,25 +201,28 @@ function SouthReview({
 							disabled={busy}
 						/>
 					</div>
+					{failure !== undefined ? (
+						<FailureNotice message={failure}>
+							<ActionButton
+								state={edit.state}
+								message={edit.message}
+								label={wizard.acoes.tentarDeNovo}
+								disabled={prompt.trim() === '' || busy}
+								onClick={runEdit}
+							/>
+						</FailureNotice>
+					) : null}
 					<div className="flex flex-wrap items-start gap-3">
-						<ActionButton
-							state={edit.state}
-							message={edit.message}
-							generating={progress.southGenerating}
-							label={wizard.sul.editar}
-							disabled={prompt.trim() === '' || busy}
-							onClick={() =>
-								void edit.run(() =>
-									api('wizard/south/edit', {
-										method: 'POST',
-										body: JSON.stringify({
-											characterId: character.id,
-											prompt: prompt.trim(),
-										}),
-									}),
-								)
-							}
-						/>
+						{failure === undefined ? (
+							<ActionButton
+								state={edit.state}
+								message={edit.message}
+								generating={generating}
+								label={wizard.sul.editar}
+								disabled={prompt.trim() === '' || busy}
+								onClick={runEdit}
+							/>
+						) : null}
 						{wiz.activeSouth > 0 ? (
 							<ActionButton
 								state={undo.state}

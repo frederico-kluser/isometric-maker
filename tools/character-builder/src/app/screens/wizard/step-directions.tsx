@@ -3,6 +3,12 @@
  * cardeais congeladas). Durante o job a grade mostra 8 skeletons; ao concluir,
  * a grade real com as siglas DIR_SHORT e o confetti do registry — disparado
  * só na transição gerando→pronto, nunca na carga inicial da página.
+ *
+ * Andamento e falha vêm do progress: o servidor nunca marca a célula como
+ * `gerando`, então o skeleton e o estado de trabalho do botão seguem o JOB
+ * (studio.jobs), não o ciclo do POST. Falha vira caixa com a mensagem do
+ * servidor e "Tentar de novo" na mesma rota — a célula não está `pronto`,
+ * então a idempotência não bloqueia a nova tentativa.
  */
 import { useEffect, useRef } from 'react';
 import {
@@ -14,6 +20,7 @@ import { DIRECTIONS, DIR_SHORT } from '../../../../server/model.ts';
 import { direcaoAria, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
+import { FailureNotice } from './failure-notice.tsx';
 import { useAction } from './use-action.ts';
 import type { WizardProgress } from './wizard-progress.ts';
 
@@ -38,6 +45,15 @@ export function DirectionsStep({
 	}, [progress.dir8Ready]);
 
 	const generating = progress.dir8Generating;
+	const failure = generating ? undefined : progress.dir8Error;
+
+	const generate = (): void =>
+		void action.run(() =>
+			api('wizard/directions8', {
+				method: 'POST',
+				body: JSON.stringify({ characterId: progress.character.id }),
+			}),
+		);
 
 	return (
 		<div className="relative flex flex-col gap-4">
@@ -71,21 +87,26 @@ export function DirectionsStep({
 			) : null}
 			{!progress.dir8Ready ? (
 				<>
-					<ActionButton
-						state={action.state}
-						message={action.message}
-						generating={generating}
-						label={wizard.direcoes8.gerar}
-						disabled={!progress.cardinalsReady || !progress.locked || busy}
-						onClick={() =>
-							void action.run(() =>
-								api('wizard/directions8', {
-									method: 'POST',
-									body: JSON.stringify({ characterId: progress.character.id }),
-								}),
-							)
-						}
-					/>
+					{failure !== undefined ? (
+						<FailureNotice message={failure}>
+							<ActionButton
+								state={action.state}
+								message={action.message}
+								label={wizard.acoes.tentarDeNovo}
+								disabled={!progress.cardinalsReady || !progress.locked || busy}
+								onClick={generate}
+							/>
+						</FailureNotice>
+					) : (
+						<ActionButton
+							state={action.state}
+							message={action.message}
+							generating={generating}
+							label={wizard.direcoes8.gerar}
+							disabled={!progress.cardinalsReady || !progress.locked || busy}
+							onClick={generate}
+						/>
+					)}
 					{!progress.locked ? (
 						<p className="text-sm text-muted-foreground">
 							{wizard.direcoes8.faltaConfig}

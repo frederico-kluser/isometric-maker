@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "description": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
+  "size": 64,
+  "seed": 1,
+  "silhouette": "humano-medio",
+  "lock": {
+    "frameCount": 8,
+    "fps": 8,
+    "size": 64
+  },
+  "palette": [
+    "#0d0b0e",
+    "#1c1a21",
+    "#302c35",
+    "#4a444e",
+    "#6b6470",
+    "#918a94",
+    "#c2bcc4",
+    "#eae6ea",
+    "#3b1f1c",
+    "#6b2f26",
+    "#9c4436",
+    "#c96f4a",
+    "#2a2f1c",
+    "#49512c",
+    "#6e7a3e",
+    "#9aa85a",
+    "#1a2430",
+    "#28394d",
+    "#3d5872",
+    "#5f83a3",
+    "#4a3520",
+    "#6f5030",
+    "#9c7345",
+    "#c79d63"
+  ],
+  "remoteId": "dd098754-987b-49de-b465-929432adb85b",
+  "exportedAt": "2026-07-31T20:29:25.650Z"
+}

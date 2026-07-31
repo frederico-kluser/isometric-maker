@@ -69,6 +69,17 @@ export const itens = {
     /** Badge de silhueta incompatível */
     naoServe: 'Não serve neste corpo',
   },
+  /** Disparo em lote das peças pendentes */
+  lote: {
+    /** Botão que dispara todas as peças pendentes que servem na silhueta */
+    gerarTodas: 'Gerar todas as pendentes',
+    /** Botão enquanto os pedidos do lote estão saindo */
+    colocandoNaFila: 'colocando na fila…',
+    /** Botão quando todos os pedidos do lote falharam (estado transitório) */
+    erroEnvio: 'Falhou ao pedir',
+    /** Tooltip do botão de lote quando não há peça pendente */
+    nadaPendente: 'nenhuma peça pendente para este personagem',
+  },
   /** Sheet de criação guiada */
   criar: {
     titulo: 'Cadastrar peça',
@@ -144,3 +155,52 @@ export const tooltipSilhuetaIncompativel = (
 /** Nome acessível do card: "Cota de malha enferrujada, Torso. Abrir detalhes." */
 export const ariaAbrirDetalhe = (label: string, slotLabel: string): string =>
   `${label}, ${slotLabel}. Abrir detalhes.`;
+
+/**
+ * "3 de 5 gerações em andamento — …" — contador do disparo em lote, lido de
+ * studio.jobs. Só aparece quando o total passa do andamento, então "gerações"
+ * é sempre plural aqui.
+ */
+export const progressoGeracoes = (emAndamento: number, total: number): string =>
+  `${emAndamento} de ${total} gerações em andamento — levam de 2 a 5 minutos ` +
+  'e as prévias atualizam sozinhas.';
+
+/** "3 gerações em andamento — …" — contador sem lote rastreado (ex.: página recarregada no meio). */
+export const geracoesEmAndamento = (n: number): string =>
+  n === 1
+    ? '1 geração em andamento — leva de 2 a 5 minutos e as prévias atualizam sozinhas.'
+    : `${n} gerações em andamento — levam de 2 a 5 minutos e as prévias atualizam sozinhas.`;
+
+/**
+ * "3 peças na fila · 2 já prontas" — resumo do disparo em lote. Peça de
+ * silhueta incompatível nunca entra em nenhuma contagem: ela nem candidata
+ * era. Cada parte extra só entra quando é maior que zero; a fila é a manchete
+ * e aparece sempre. `primeiraFalha` é a mensagem do servidor quando algum
+ * pedido nem entrou na fila.
+ */
+export const resumoDisparoPecas = (
+  naFila: number,
+  jaProntas: number,
+  emAndamento: number,
+  falhas: number,
+  primeiraFalha?: string,
+): string => {
+  const partes = [
+    naFila === 1 ? '1 peça na fila' : `${naFila} peças na fila`,
+  ];
+  if (jaProntas > 0) {
+    partes.push(jaProntas === 1 ? '1 já pronta' : `${jaProntas} já prontas`);
+  }
+  if (emAndamento > 0) {
+    partes.push(
+      emAndamento === 1 ? '1 já em andamento' : `${emAndamento} já em andamento`,
+    );
+  }
+  if (falhas > 0) {
+    partes.push(
+      falhas === 1 ? '1 não entrou na fila' : `${falhas} não entraram na fila`,
+    );
+  }
+  const resumo = partes.join(' · ');
+  return primeiraFalha !== undefined ? `${resumo}: ${primeiraFalha}` : resumo;
+};

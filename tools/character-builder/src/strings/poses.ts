@@ -20,9 +20,6 @@ export const poses = {
   semToken: 'PIXELLAB_SECRET não definido — a tela funciona, mas nada gera',
   /** Prefixo do erro ao carregar o estado do estúdio */
   erroCarga: 'Não foi possível carregar o estúdio',
-  /** Aviso enquanto há geração em andamento (jobs levam minutos) */
-  geracaoEmAndamento:
-    'Geração em andamento — leva de 2 a 5 minutos e as células atualizam sozinhas.',
 
   // ── linha do modelo base ─────────────────────────────────────
   /** Nome da primeira linha da grade */
@@ -63,6 +60,14 @@ export const poses = {
   erroEnvio: 'Falhou ao pedir',
   /** Tooltip do botão bloqueado por falta de modelo base */
   bloqueioSemBase: 'gere o modelo base no Wizard primeiro',
+
+  // ── gerar todas as pendentes (lote) ──────────────────────────
+  /** Botão que dispara todas as poses pendentes do personagem em paralelo */
+  gerarTodasPendentes: 'Gerar todas as pendentes',
+  /** Botão enquanto os pedidos do lote estão saindo */
+  colocandoNaFila: 'colocando na fila…',
+  /** Tooltip do botão de lote quando não há o que pedir */
+  nadaPendente: 'nenhuma pose pendente — todas prontas ou em andamento',
 
   // ── tags da pose ─────────────────────────────────────────────
   /** Tag de pose embutida — não pode ser excluída */
@@ -163,6 +168,54 @@ export const hoverAnima = (frames: number): string =>
 
 /** "walking forward…" entre aspas — sinaliza que o detalhe é um prompt */
 export const detalheAcao = (action: string): string => `"${action}"`;
+
+/**
+ * "3 de 5 gerações em andamento — …" — contador do disparo em lote, lido de
+ * studio.jobs. Só aparece quando o total passa do andamento, então "gerações"
+ * é sempre plural aqui.
+ */
+export const progressoGeracoes = (emAndamento: number, total: number): string =>
+  `${emAndamento} de ${total} gerações em andamento — levam de 2 a 5 minutos ` +
+  'e as células atualizam sozinhas.';
+
+/** "3 gerações em andamento — …" — contador sem lote rastreado (ex.: página recarregada no meio). */
+export const geracoesEmAndamento = (n: number): string =>
+  n === 1
+    ? '1 geração em andamento — leva de 2 a 5 minutos e as células atualizam sozinhas.'
+    : `${n} gerações em andamento — levam de 2 a 5 minutos e as células atualizam sozinhas.`;
+
+/**
+ * "4 poses na fila · 1 já pronta" — resumo do disparo em lote. Cada parte
+ * extra só entra quando é maior que zero; a fila é a manchete e aparece
+ * sempre. `primeiraFalha` é a mensagem do servidor quando algum pedido nem
+ * entrou na fila.
+ */
+export const resumoDisparoPoses = (
+  naFila: number,
+  jaProntas: number,
+  emAndamento: number,
+  falhas: number,
+  primeiraFalha?: string,
+): string => {
+  const partes = [
+    naFila === 1 ? '1 pose na fila' : `${naFila} poses na fila`,
+  ];
+  if (jaProntas > 0) {
+    partes.push(jaProntas === 1 ? '1 já pronta' : `${jaProntas} já prontas`);
+  }
+  if (emAndamento > 0) {
+    partes.push(
+      emAndamento === 1 ? '1 já em andamento' : `${emAndamento} já em andamento`,
+    );
+  }
+  if (falhas > 0) {
+    partes.push(
+      falhas === 1 ? '1 não entrou na fila' : `${falhas} não entraram na fila`,
+    );
+  }
+  const resumo = partes.join(' · ');
+  return primeiraFalha !== undefined ? `${resumo}: ${primeiraFalha}` : resumo;
+};
 
 /**
  * Nome completo da direção em pt-BR — tooltip das colunas da grade e

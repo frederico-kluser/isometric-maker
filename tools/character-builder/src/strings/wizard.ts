@@ -83,6 +83,8 @@ export const wizard = {
     atual: 'atual',
     /** Passo ainda não alcançado (sr-only) */
     pendente: 'pendente',
+    /** Passo que falhou (sr-only + badge) */
+    falhou: 'falhou',
     passos: {
       config: 'Configuração',
       sul: 'Face sul',
@@ -96,7 +98,7 @@ export const wizard = {
   config: {
     titulo: 'Configuração da base',
     nota:
-      'Frames, fps e tamanho travam antes da primeira geração e passam a valer ' +
+      'Frames, fps, tamanho e estilo travam antes da primeira geração e passam a valer ' +
       'para todas as poses, peças e personagens derivados — depois disso não mudam mais.',
     /** Rótulo do seletor de frames por animação */
     frames: 'Frames por animação',
@@ -104,10 +106,57 @@ export const wizard = {
     framesAria: 'Frames por animação',
     /** Rótulo do campo de fps */
     fps: 'FPS',
-    /** Rótulo do campo de tamanho */
-    tamanho: 'Tamanho (px)',
     /** Rótulo do seletor de silhueta */
     silhueta: 'Silhueta',
+    /** Rótulo do seletor segmentado de preset de qualidade */
+    qualidade: 'Qualidade da base',
+    /** Nome acessível do seletor segmentado de preset de qualidade */
+    qualidadeAria: 'Preset de qualidade da base',
+    /** Rótulos dos presets (o tamanho é parte do preset) */
+    presets: {
+      rascunho: 'Rascunho 64px',
+      padrao: 'Padrão 96px',
+      maxima: 'Máxima 128px',
+    },
+    /** Título do accordion com os controles finos de estilo */
+    avancadoTitulo: 'Avançado',
+    /** Rótulo do select de nível de detalhe */
+    detail: 'Nível de detalhe',
+    /** Rótulo do select de sombreamento */
+    shading: 'Sombreamento',
+    /** Rótulo do select de contorno */
+    outline: 'Contorno',
+    /** Rótulo do campo de guidance */
+    guidance: 'Guidance (1–20)',
+    /**
+     * Nota discreta sob o Avançado: o vendor descreve detail/shading/outline
+     * como "soft guidance — the model may not follow exactly". A UI repete o
+     * aviso em vez de vender garantia.
+     */
+    estiloNota:
+      'Detalhe, sombreamento e contorno são inclinações fracas: o modelo tende ' +
+      'a seguir, mas não garante — o aviso é do próprio fornecedor da API.',
+    /** Rótulos amigáveis das opções de detalhe (chave = valor exato do spec) */
+    detailRotulos: {
+      'low detail': 'Baixo',
+      'medium detail': 'Médio',
+      'highly detailed': 'Muito detalhado',
+    },
+    /** Rótulos amigáveis das opções de sombreamento (chave = valor exato do spec) */
+    shadingRotulos: {
+      'flat shading': 'Sem sombra (flat)',
+      'basic shading': 'Básico',
+      'medium shading': 'Médio',
+      'detailed shading': 'Detalhado',
+      'highly detailed shading': 'Muito detalhado',
+    },
+    /** Rótulos amigáveis das opções de contorno (chave = valor exato do spec) */
+    outlineRotulos: {
+      'single color black outline': 'Preto, cor única',
+      'single color outline': 'Cor única',
+      'selective outline': 'Seletivo',
+      lineless: 'Sem contorno',
+    },
     /** Botão que trava a configuração */
     travar: 'Travar configuração',
   },
@@ -140,6 +189,25 @@ export const wizard = {
     desfazerBloqueado: 'já está na primeira versão',
     /** Texto alternativo do preview da sul */
     altPreview: 'Face sul atual do personagem',
+    /** Rótulo da dropzone de imagem de referência */
+    referenciaRotulo: 'Imagem de referência (opcional)',
+    /** Texto da dropzone de referência vazia */
+    referenciaVazia: 'Arraste um PNG/JPG aqui ou clique para escolher',
+    /** Nota sob a dropzone de referência — o que a referência faz */
+    referenciaNota:
+      'A referência guia a criação da sul: vai como imagem inicial (init_image) ' +
+      'com força 500 — faixa de variação fiel, não cópia exata. ' +
+      'Sem referência, a sul nasce só do texto.',
+    /** Texto alternativo do preview da referência anexada */
+    referenciaAlt: 'Imagem de referência anexada',
+    /** Legenda do preview quando a referência já está gravada no servidor */
+    referenciaGravada: 'referência anexada — será usada na próxima geração da sul',
+    /** Botão que remove a referência anexada */
+    referenciaRemover: 'Remover referência',
+    /** Erro local quando o arquivo escolhido não é PNG/JPG */
+    referenciaFormato: 'formato inválido — envie um PNG ou JPG',
+    /** Erro local quando o arquivo escolhido não decodifica como imagem */
+    referenciaLeitura: 'não consegui ler a imagem escolhida',
   },
 
   // ── passo 3: cardeais ────────────────────────────────────────
@@ -199,9 +267,15 @@ export const wizard = {
     sucesso: 'Feito',
     /** Rótulo quando a ação falhou (o botão continua clicável para tentar de novo) */
     falha: 'Falhou — tentar de novo',
+    /** Rótulo do botão de nova tentativa na caixa de falha de um passo */
+    tentarDeNovo: 'Tentar de novo',
     /** Rótulo de ações rápidas em andamento (sem geração remota) */
     aguarde: 'Aguarde…',
   },
+
+  // ── erros ────────────────────────────────────────────────────
+  /** Prefixo para erro de geração em célula */
+  erroCelula: 'Erro na geração:',
 
   // ── moldura ──────────────────────────────────────────────────
   /** Exibido enquanto o /api/studio não respondeu */
@@ -212,12 +286,16 @@ export const wizard = {
 // Parameterised strings (funções com nomes descritivos)
 // ==================================================================
 
-/** "8 frames · 8 fps · 64px — travado" — badge da configuração travada */
+/** "128px · 8 frames · 8 fps · highly detailed · travado" — badge da configuração travada.
+ *  O detalhe entra quando o lock tem qualidade (locks antigos não têm). */
 export const configTravada = (
   frameCount: number,
   fps: number,
   size: number,
-): string => `${frameCount} frames · ${fps} fps · ${size}px — travado`;
+  detail?: string,
+): string =>
+  `${size}px · ${frameCount} frames · ${fps} fps` +
+  `${detail ? ` · ${detail}` : ''} · travado`;
 
 /** "Versão 2 da face sul" — nome acessível de cada thumbnail da faixa */
 export const versaoSulAria = (indice: number): string =>

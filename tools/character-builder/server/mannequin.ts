@@ -35,6 +35,15 @@
  *     /create-image-bitforge quanto em /create-character-with-8-directions —
  *     é o mecanismo que prende um personagem derivado à paleta do manequim
  *     (WizardOpts.reference). template_id existe só no de 8 direções.
+ *   - Qualidade (detail/shading/outline/text_guidance_scale): os dois
+ *     endpoints aceitam; o threading vem de studio.lock e os campos são
+ *     OMITIDOS quando ausentes (F0-09). No bitforge são enums estritos; no
+ *     de 8 direções são "soft guidance" (o modelo pode não seguir à risca).
+ *     extra_guidance_scale existe no bitforge mas está DEPRECATED — não usar.
+ *   - init_image + init_image_strength (inteiro 1–999, default 300) existem
+ *     SÓ no bitforge: é o suporte a referência visual na criação da sul
+ *     (upload gravado em wizard/<charId>/reference.png). O endpoint de 8
+ *     direções não tem init_image no spec.
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -51,7 +60,7 @@ import { verifyFreezing } from './freeze-proof.ts';
 import { validateImport } from '../src/import.ts';
 import {
   cardinalKey, directions8Key, southKey,
-  type Cell, type Character, type Studio, type WizardState,
+  type Cell, type Character, type MannequinLock, type Studio, type WizardState,
 } from './model.ts';
 
 // ------------------------------------------------------------------ tipos públicos
@@ -99,6 +108,11 @@ function cardinalPath(
   return join(wizardDir(assetsDir, characterId), `cardinal-${direction}.png`);
 }
 
+/** Referência visual da sul (upload do usuário) — lida por generateSouthFromText. */
+function referencePath(assetsDir: string, characterId: string): string {
+  return join(wizardDir(assetsDir, characterId), 'reference.png');
+}
+
 /** Path público servido pela UI, no mesmo formato que parseAndWriteFrames devolve. */
 function publicPath(characterId: string, fileName: string): string {
   return `/assets/wizard/${characterId}/${fileName}`;
@@ -130,6 +144,22 @@ async function readB64(path: string, label: string): Promise<string> {
   }
 }
 
+/** Extrai b64 puro de uma imagem que pode vir como string ou objeto {type, base64}. */
+function extractBase64(image: unknown): string {
+  if (typeof image === 'string') return image.replace(/^data:image\/\w+;base64,/, '');
+  if (image && typeof image === 'object' && 'base64' in image) {
+    const b = (image as Record<string, unknown>)['base64'];
+    if (typeof b === 'string') return b;
+  }
+  return '';
+}
+
+/** Envolve b64 puro no formato de objeto que a API espera (>= 2026-08). */
+function asBase64Image(raw: string): { type: 'base64'; base64: string } {
+  return { type: 'base64', base64: raw };
+}
+
+/** @deprecated use extractBase64 */
 function stripDataUri(b64: string): string {
   return b64.replace(/^data:image\/\w+;base64,/, '');
 }
@@ -153,6 +183,29 @@ function logGuard(
   for (const a of report.avisos) {
     onLog?.(`[guard]   aviso [${a.code}]: ${a.text}`);
   }
+}
+
+/**
+ * Threading dos campos de qualidade do lock para o corpo do request:
+ * detail/shading/outline vão com o nome próprio e guidanceScale vira
+ * text_guidance_scale. Cada campo é OMITIDO quando ausente no lock (F0-09) —
+ * ausente = default da API. extra_guidance_scale NUNCA é enviado: o spec o
+ * marca como deprecated.
+ *
+ * Vale para /create-image-bitforge (enums estritos) e para
+ * /create-character-with-8-directions (string livre, "soft guidance" — o
+ * modelo pode não seguir à risca, e o mode 'pro' os ignora; o wizard usa
+ * 'standard').
+ */
+function threadQuality(
+  lock: MannequinLock | undefined,
+  body: Record<string, unknown>,
+): void {
+  if (!lock) return;
+  if (lock.detail !== undefined) body['detail'] = lock.detail;
+  if (lock.shading !== undefined) body['shading'] = lock.shading;
+  if (lock.outline !== undefined) body['outline'] = lock.outline;
+  if (lock.guidanceScale !== undefined) body['text_guidance_scale'] = lock.guidanceScale;
 }
 
 function guardFor(estimate: CostEstimate, maxSingleAssetUsd: number): BudgetReport {
@@ -262,18 +315,31 @@ export async function generateSouthFromText(
   // color_image: OMITIDO sem referência (wizard do manequim). Com referência,
   // prende a paleta do derivado à do manequim (spec: "forced color palette").
   const colorImage = opts.reference?.colorImageB64;
-  if (colorImage) body['color_image'] = colorImage;
+  if (colorImage) body['color_image'] = asBase64Image(colorImage);
+  // Qualidade do lock (detail/shading/outline/text_guidance_scale) — cada
+  // campo omitido quando ausente (F0-09).
+  threadQuality(s.lock, body);
+  // Referência visual da sul (upload do usuário em reference.png): vai como
+  // init_image com strength 500 — a faixa oficial 400–600 é a de "variações
+  // fiéis de uma imagem existente"; o default 300 só transfere cor grosseira.
+  // Mesmo formato de objeto base64 que color_image já usa. OMITIDO sem o
+  // arquivo: a sul volta ao modo texto puro.
+  const refPath = referencePath(opts.assetsDir, characterId);
+  if (existsSync(refPath)) {
+    const refB64 = await readFile(refPath, 'base64');
+    body['init_image'] = asBase64Image(refB64);
+    body['init_image_strength'] = 500;
+  }
 
   const res = await client.submit<ImageResponse>('create-image-bitforge', body);
 
   // Gravar PNG ANTES de qualquer pós-processamento — a cobrança já aconteceu.
-  const imageB64 = res.data?.image;
-  if (!imageB64) {
+  const raw = extractBase64(res.data?.image);
+  if (!raw) {
     throw new Error(
       `/create-image-bitforge não devolveu campo "image". Resposta: ${res.raw.slice(0, 200)}`,
     );
   }
-  const raw = stripDataUri(imageB64);
   const filePath = southPath(opts.assetsDir, characterId, 0);
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, Buffer.from(raw, 'base64'));
@@ -317,8 +383,9 @@ interface EditImageSubmitResponse {
 function extractEditedImage(lastResponse: unknown): string | null {
   if (!lastResponse || typeof lastResponse !== 'object') return null;
   const v = (lastResponse as Record<string, unknown>)['image'];
-  if (typeof v !== 'string' || v.length === 0) return null;
-  return stripDataUri(v);
+  if (!v) return null;
+  const raw = extractBase64(v);
+  return raw || null;
 }
 
 /**
@@ -556,7 +623,7 @@ export async function rotateCardinals(
 
     opts.onLog?.(`[wizard] rotate south→${to}...`);
     const body: Record<string, unknown> = {
-      from_image: southB64,
+      from_image: asBase64Image(southB64),
       from_direction: 'south',
       to_direction: to,
       image_size: { width: size, height: size },
@@ -571,13 +638,12 @@ export async function rotateCardinals(
 
     // Gravar PNG ANTES de qualquer pós-processamento — /rotate é síncrono:
     // se o processo morrer aqui, o dinheiro já foi gasto e a imagem se perde.
-    const imageB64 = res.data?.image;
-    if (!imageB64) {
+    const raw = extractBase64(res.data?.image);
+    if (!raw) {
       throw new Error(
         `/rotate south→${to} não devolveu campo "image". Resposta: ${res.raw.slice(0, 200)}`,
       );
     }
-    const raw = stripDataUri(imageB64);
     const filePath = cardinalPath(opts.assetsDir, characterId, to);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, Buffer.from(raw, 'base64'));
@@ -677,14 +743,16 @@ export async function generateDirections8(
   }
 
   // Ler as 4 cardeais do disco e montar o mapa directions.
-  const directions: Record<string, string> = {
-    south: await readB64(
-      southPath(opts.assetsDir, characterId, wiz.activeSouth),
-      `sul v${wiz.activeSouth}`,
-    ),
-    east: await readB64(cardinalPath(opts.assetsDir, characterId, 'east'), 'cardeal east'),
-    north: await readB64(cardinalPath(opts.assetsDir, characterId, 'north'), 'cardeal north'),
-    west: await readB64(cardinalPath(opts.assetsDir, characterId, 'west'), 'cardeal west'),
+  const southRaw = await readB64(southPath(opts.assetsDir, characterId, wiz.activeSouth), `sul v${wiz.activeSouth}`);
+  const eastRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'east'), 'cardeal east');
+  const northRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'north'), 'cardeal north');
+  const westRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'west'), 'cardeal west');
+  const rawDirections: Record<string, string> = { south: southRaw, east: eastRaw, north: northRaw, west: westRaw };
+  const directions: Record<string, { type: 'base64'; base64: string }> = {
+    south: asBase64Image(southRaw),
+    east: asBase64Image(eastRaw),
+    north: asBase64Image(northRaw),
+    west: asBase64Image(westRaw),
   };
 
   const size = ch.size;
@@ -713,7 +781,11 @@ export async function generateDirections8(
   // color_image: OMITIDO sem referência (wizard do manequim). Com referência,
   // a paleta do derivado segue a do manequim (spec: "color palette reference").
   const colorImage = opts.reference?.colorImageB64;
-  if (colorImage) body['color_image'] = colorImage;
+  if (colorImage) body['color_image'] = asBase64Image(colorImage);
+  // Qualidade do lock — aqui "soft guidance" (o modelo pode não seguir à
+  // risca). init_image NÃO existe neste endpoint: a referência visual já
+  // entrou na sul, que vai congelada no mapa directions.
+  threadQuality(s.lock, body);
 
   const res = await client.submit<CreateCharacterResponse>(
     'create-character-with-8-directions',
@@ -752,7 +824,7 @@ export async function generateDirections8(
 
   // Prova de congelamento: as cardeais devolvidas devem ter os mesmos pixels
   // das enviadas no mapa directions.
-  verifyFreezing(directions, response, size);
+  await verifyFreezing(rawDirections, response, size);
 
   // Extrair frames POR CHAVE, nunca por índice.
   const { frames, hasSkeletons } = await parseAndWriteFrames(

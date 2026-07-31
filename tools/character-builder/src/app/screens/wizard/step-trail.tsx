@@ -5,7 +5,7 @@
  * Código novo porque o registry @motion não tem stepper — são `<ol>` +
  * tokens shadcn; o movimento da tela fica por conta dos componentes de ação.
  */
-import { Check } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { wizard } from '../../../strings/wizard.ts';
 import type { WizardStep, WizardStepId } from './wizard-progress.ts';
@@ -22,6 +22,7 @@ const STATUS_SR: Record<WizardStep['status'], string> = {
 	done: wizard.trilha.concluido,
 	active: wizard.trilha.atual,
 	todo: wizard.trilha.pendente,
+	failed: wizard.trilha.falhou,
 };
 
 export function StepTrail({ steps }: { readonly steps: readonly WizardStep[] }) {
@@ -46,12 +47,16 @@ export function StepTrail({ steps }: { readonly steps: readonly WizardStep[] }) 
 									'flex size-6 items-center justify-center rounded-full border text-xs font-medium',
 									step.status === 'done' &&
 										'border-primary bg-primary text-primary-foreground',
+									step.status === 'failed' &&
+										'border-destructive bg-destructive text-destructive-foreground',
 									step.status === 'active' && 'border-primary text-foreground',
 									step.status === 'todo' && 'border-border',
 								)}
 							>
 								{step.status === 'done' ? (
 									<Check className="size-3.5" />
+								) : step.status === 'failed' ? (
+									<X className="size-3.5" />
 								) : (
 									i + 1
 								)}

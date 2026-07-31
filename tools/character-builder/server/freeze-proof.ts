@@ -139,42 +139,82 @@ export function pixelsIdenticos(
  * `directions` de /create-character-with-8-directions congela as direções
  * fornecidas em vez de regenerá-las.
  */
-export function verifyFreezing(
+export async function verifyFreezing(
 	sent: Record<string, string>,
 	response: unknown,
 	imageSize: number,
-): void {
-	// O endpoint devolve um dicionário keyeado por nome de direção.
-	const returned = (response as Record<string, unknown> | null) ?? {};
+): Promise<void> {
+  // O endpoint devolve um dicionário keyeado por nome de direção.
+  // Prefer storage_urls (downloadable PNGs) over raw response values.
+  const returned = (response as Record<string, unknown> | null) ?? {};
+  const storageUrls = returned['storage_urls'] as Record<string, string> | undefined;
+  const images = returned['images'];
+  const rawDict = (images && typeof images === 'object' ? images : returned) as Record<string, unknown>;
 
 	const cardinals = ["south", "north", "east", "west"] as const;
 	const results: string[] = [];
 
 	for (const dir of cardinals) {
 		const sentB64 = sent[dir];
-		const returnedVal = returned[dir];
 		if (!sentB64) {
 			results.push(`${dir}: ausente do mapa enviado — pulando`);
 			continue;
 		}
-		if (typeof returnedVal !== "string") {
-			results.push(
-				`${dir}: resposta não contém string base64 para esta direção`,
-			);
+
+		let returnedB64: string | undefined;
+		// Try storage_urls first (downloadable PNG)
+		const storageUrl = storageUrls?.[dir];
+		if (storageUrl) {
+			try {
+				const dl = await fetch(storageUrl);
+				if (dl.ok) {
+					returnedB64 = Buffer.from(await dl.arrayBuffer()).toString('base64');
+				}
+			} catch { /* fall through to raw dict */ }
+		}
+		// Fallback: extract from raw response
+		if (!returnedB64) {
+			const val = rawDict[dir];
+			if (typeof val === 'string') {
+				returnedB64 = val.replace(/^data:image\/\w+;base64,/, '');
+			} else if (val && typeof val === 'object' && 'base64' in val) {
+				returnedB64 = (val as Record<string, unknown>)['base64'] as string | undefined;
+			}
+		}
+		if (!returnedB64) {
+			results.push(`${dir}: resposta não contém base64 para esta direção`);
 			continue;
 		}
-		// Limpa prefixo data URI se presente.
-		const returnedB64 = returnedVal.replace(/^data:image\/\w+;base64,/, "");
 
 		const identical = pixelsIdenticos(sentB64, returnedB64);
 		if (identical === true) {
 			results.push(`${dir}: CONGELADA — pixels idênticos`);
 		} else if (identical === false) {
-			// Decodifica ambas mas difere — a API reprocessou.
 			const sDec = decodePNGPixels(sentB64);
 			const rDec = decodePNGPixels(returnedB64);
 			const sInfo = sDec ? `${sDec.width}×${sDec.height}` : "?";
 			const rInfo = rDec ? `${rDec.width}×${rDec.height}` : "?";
+			// Canvas inflation (API enlarges by ~40%): check if the inner region matches.
+			if (sDec && rDec && rDec.width >= sDec.width && rDec.height >= sDec.height) {
+				const channels = sDec.pixels.length / (sDec.width * sDec.height);
+				const rChannels = rDec.pixels.length / (rDec.width * rDec.height);
+				if (channels === rChannels) {
+					let match = true;
+					const sentRowBytes = sDec.width * channels;
+					const retRowBytes = rDec.width * channels;
+					for (let y = 0; y < sDec.height && match; y++) {
+						const sOff = y * sentRowBytes;
+						const rOff = y * retRowBytes;
+						match = sDec.pixels.subarray(sOff, sOff + sentRowBytes).equals(
+							rDec.pixels.subarray(rOff, rOff + sentRowBytes)
+						);
+					}
+					if (match) {
+						results.push(`${dir}: CONGELADA — pixels idênticos (canvas inflado ${sInfo}→${rInfo})`);
+						continue;
+					}
+				}
+			}
 			results.push(
 				`${dir}: REPROCESSADA — sent ${sInfo}, returned ${rInfo}. ` +
 					`O mapa directions não congelou esta direção.`,

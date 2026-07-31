@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Cell, Pose } from '../../../../server/model.ts';
+import { cellKey, type Cell, type Pose } from '../../../../server/model.ts';
 import { api } from '../../studio-store.tsx';
 import { gerarPose, poses as t } from '../../../strings/poses.ts';
 
@@ -20,6 +20,8 @@ interface GenerateButtonProps {
   readonly cell: Cell | undefined;
   /** Recarrega o estúdio depois do pedido. */
   readonly onDone: () => Promise<void>;
+  /** Avisa a tela que um POST saiu, para o contador de lote seguir esta chave. */
+  readonly onDispatched?: (key: string) => void;
 }
 
 /**
@@ -36,6 +38,7 @@ export function GenerateButton({
   pose,
   cell,
   onDone,
+  onDispatched,
 }: GenerateButtonProps) {
   const [posting, setPosting] = useState(false);
   const [postFailed, setPostFailed] = useState(false);
@@ -83,6 +86,8 @@ export function GenerateButton({
         method: 'POST',
         body: JSON.stringify({ characterId, poseId: pose.id }),
       });
+      // O contador de lote passa a seguir esta chave — inclusive no retry.
+      onDispatched?.(cellKey(characterId, pose.id));
       // Recarrega ainda em `posting`, para o estado "gerando" do servidor
       // assumir sem piscar pelo repouso.
       await onDone();

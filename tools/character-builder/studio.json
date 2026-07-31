@@ -31,15 +31,41 @@
       "id": "manequim",
       "label": "Manequim base",
       "silhouette": "humano-medio",
-      "description": "",
-      "size": 64,
+      "description": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
+      "size": 128,
       "seed": 1,
       "wizard": {
-        "etapa": "sul",
-        "southVersions": [],
+        "etapa": "pronto",
+        "southVersions": [
+          {
+            "prompt": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
+            "at": "2026-07-31T23:21:51.909Z"
+          }
+        ],
         "activeSouth": 0
       },
-      "createdAt": "2026-07-31T14:21:41.226Z"
+      "createdAt": "2026-07-31T14:21:41.226Z",
+      "remoteId": "0855b5fa-b42e-4a68-90dd-a1ce3fccaaca"
+    },
+    {
+      "id": "modelo",
+      "label": "modelo",
+      "description": "ragnarok 2002 style",
+      "silhouette": "humano-medio",
+      "size": 64,
+      "seed": 70774,
+      "wizard": {
+        "etapa": "direcoes8",
+        "southVersions": [
+          {
+            "prompt": "ragnarok 2002 style",
+            "at": "2026-07-31T21:50:41.337Z"
+          }
+        ],
+        "activeSouth": 0
+      },
+      "createdAt": "2026-07-31T21:50:05.959Z",
+      "remoteId": "3ec44875-dfc7-4e02-adff-c345b0481fb1"
     }
   ],
   "poses": [
@@ -95,5 +121,128 @@
     }
   ],
   "wardrobe": [],
-  "cells": {}
+  "cells": {
+    "modelo::__south__": {
+      "key": "modelo::__south__",
+      "status": "pronto",
+      "frames": {
+        "south": [
+          "/assets/wizard/modelo/south-v0.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T21:50:41.337Z"
+    },
+    "modelo::__cardinal-east__": {
+      "key": "modelo::__cardinal-east__",
+      "status": "pronto",
+      "frames": {
+        "east": [
+          "/assets/wizard/modelo/cardinal-east.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T21:51:11.477Z"
+    },
+    "modelo::__cardinal-north__": {
+      "key": "modelo::__cardinal-north__",
+      "status": "pronto",
+      "frames": {
+        "north": [
+          "/assets/wizard/modelo/cardinal-north.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T21:51:19.404Z"
+    },
+    "modelo::__cardinal-west__": {
+      "key": "modelo::__cardinal-west__",
+      "status": "pronto",
+      "frames": {
+        "west": [
+          "/assets/wizard/modelo/cardinal-west.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T21:51:32.960Z"
+    },
+    "manequim::__south__": {
+      "key": "manequim::__south__",
+      "status": "pronto",
+      "frames": {
+        "south": [
+          "/assets/wizard/manequim/south-v0.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:21:51.909Z"
+    },
+    "manequim::__cardinal-north__": {
+      "key": "manequim::__cardinal-north__",
+      "status": "pronto",
+      "frames": {
+        "north": [
+          "/assets/wizard/manequim/cardinal-north.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:22:34.146Z"
+    },
+    "manequim::__cardinal-east__": {
+      "key": "manequim::__cardinal-east__",
+      "status": "pronto",
+      "frames": {
+        "east": [
+          "/assets/wizard/manequim/cardinal-east.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:22:41.151Z"
+    },
+    "manequim::__cardinal-west__": {
+      "key": "manequim::__cardinal-west__",
+      "status": "pronto",
+      "frames": {
+        "west": [
+          "/assets/wizard/manequim/cardinal-west.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:22:53.518Z"
+    },
+    "manequim::__directions8__": {
+      "key": "manequim::__directions8__",
+      "status": "pronto",
+      "frames": {
+        "south": [
+          "/assets/wizard/manequim_directions8_/south-00.png"
+        ],
+        "south-west": [
+          "/assets/wizard/manequim_directions8_/south-west-00.png"
+        ],
+        "west": [
+          "/assets/wizard/manequim_directions8_/west-00.png"
+        ],
+        "north-west": [
+          "/assets/wizard/manequim_directions8_/north-west-00.png"
+        ],
+        "north": [
+          "/assets/wizard/manequim_directions8_/north-00.png"
+        ],
+        "north-east": [
+          "/assets/wizard/manequim_directions8_/north-east-00.png"
+        ],
+        "east": [
+          "/assets/wizard/manequim_directions8_/east-00.png"
+        ],
+        "south-east": [
+          "/assets/wizard/manequim_directions8_/south-east-00.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:41:48.235Z",
+      "jobId": "4b8f6b1c-d06b-4768-a18e-bea5b8d744a3",
+      "remoteId": "0855b5fa-b42e-4a68-90dd-a1ce3fccaaca"
+    }
+  },
+  "lock": {
+    "frameCount": 8,
+    "fps": 8,
+    "size": 128,
+    "detail": "highly detailed",
+    "shading": "detailed shading",
+    "outline": "selective outline",
+    "guidanceScale": 8
+  }
 }

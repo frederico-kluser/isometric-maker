@@ -27,8 +27,9 @@
  *     chamar a API — 'pronto' é terminal de ponta a ponta, como no wizard.
  */
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PixelLabClient, pollJob } from "../../pixellab-pipeline/src/api.ts";
 import {
@@ -48,17 +49,24 @@ import {
 } from "./rotate-lab.ts";
 import {
 	DIRECTIONS,
+	DETAIL_OPTIONS,
+	OUTLINE_OPTIONS,
+	SHADING_OPTIONS,
 	cardinalKey,
+	cardinalsBatchKey,
 	cellKey,
 	directions8Key,
 	seedStudio,
 	southKey,
 	wardrobeKey,
 	type Character,
+	type DetailOption,
 	type Keypoint,
 	type MannequinLock,
+	type OutlineOption,
 	type Pose,
 	type PoseKind,
+	type ShadingOption,
 	type Silhouette,
 	type Studio,
 	type TemplateAnimation,
@@ -70,7 +78,10 @@ const ROOT = new URL("..", import.meta.url).pathname;
 // in normal use — the default is the tool's own studio.json.
 const STUDIO_JSON =
 	process.env["CHARACTER_BUILDER_STUDIO_JSON"] ?? join(ROOT, "studio.json");
-const ASSETS = join(ROOT, "assets");
+// Test seam, same idea: points the assets root (wizard PNGs, ledger, frames)
+// at a tmpdir so tests never touch the real assets/ directory.
+const ASSETS =
+	process.env["CHARACTER_BUILDER_ASSETS_DIR"] ?? join(ROOT, "assets");
 const LEDGER_PATH = join(ASSETS, "ledger.ndjson");
 /** Onde o bundle default do projeto mora (mannequin.json + 12 PNGs). */
 const MANNEQUIN_DEFAULT_DIR = join(
@@ -88,9 +99,12 @@ const SILHOUETTES: readonly Silhouette[] = [
 // ---------------------------------------------------------------- persistence
 
 let cache: Studio | undefined;
+/** Carga em voo compartilhada enquanto o cache está frio (ver load). */
+let loadPromise: Promise<Studio> | undefined;
+/** Fila de escrita: um writeFile+rename por vez (ver save). */
+let writeQueue: Promise<void> = Promise.resolve();
 
-async function load(): Promise<Studio> {
-	if (cache) return cache;
+async function loadFromDisk(): Promise<Studio> {
 	try {
 		cache = JSON.parse(await readFile(STUDIO_JSON, "utf8")) as Studio;
 	} catch {
@@ -100,13 +114,40 @@ async function load(): Promise<Studio> {
 	return cache;
 }
 
-async function save(s: Studio): Promise<void> {
-	cache = s;
+async function load(): Promise<Studio> {
+	if (cache) return cache;
+	// Concorrência (botões "Gerar todas"): N spawns simultâneos sobre cache
+	// frio dividem UMA carga. Sem isto, cada spawn parseava o arquivo por
+	// conta e ficava com uma referência DIVERGENTE do Studio — o save do
+	// segundo sobrescrevia o do primeiro e células se perdiam. Com a
+	// referência única, load→mutate→save acontece sobre o objeto comum.
+	loadPromise ??= loadFromDisk().finally(() => {
+		loadPromise = undefined;
+	});
+	return loadPromise;
+}
+
+async function writeStudioFile(s: Studio): Promise<void> {
 	await mkdir(dirname(STUDIO_JSON), { recursive: true });
-	const tmp = `${STUDIO_JSON}.tmp`;
+	// tmp único por execução: dois saves nunca dividem o mesmo caminho
+	// temporário (defesa em profundidade — a fila já serializa).
+	const tmp = `${STUDIO_JSON}.${randomBytes(4).toString("hex")}.tmp`;
 	await writeFile(tmp, `${JSON.stringify(s, null, 2)}\n`);
 	const { rename } = await import("node:fs/promises");
 	await rename(tmp, STUDIO_JSON);
+}
+
+async function save(s: Studio): Promise<void> {
+	cache = s;
+	// Fila de escrita: serializa writeFile+rename. Dois saves concorrentes
+	// sobre o MESMO tmp podiam intercalar bytes e misturar dois JSONs — e o
+	// load seguinte, achando JSON inválido, caía no catch e RESETAVA o
+	// estúdio para o seed. A fila executa na ordem de chegada, então o
+	// arquivo final é sempre o save mais recente. A fila nunca trava: uma
+	// falha é devolvida ao chamador mas a corrente segue com catch.
+	const run = writeQueue.then(() => writeStudioFile(s));
+	writeQueue = run.catch(() => {});
+	return run;
 }
 
 /** A implementação de StudioStore que os módulos do wizard/export recebem. */
@@ -414,6 +455,10 @@ function spawn(
 	work: () => Promise<void>,
 	cellKeys: readonly string[] = [key],
 ): void {
+	if (jobs.get(key)?.status === "gerando") {
+		console.warn(`spawn: job "${key}" já está gerando — submissão duplicada ignorada`);
+		return;
+	}
 	jobs.set(key, { key, label, status: "gerando", startedAt: Date.now() });
 	void (async () => {
 		try {
@@ -519,6 +564,10 @@ export async function handle(
 				fps?: number;
 				size?: number;
 				silhouette?: Silhouette;
+				detail?: DetailOption;
+				shading?: ShadingOption;
+				outline?: OutlineOption;
+				guidanceScale?: number;
 			}>(req);
 
 			// Só o manequim trava a config; todo personagem derivado herda o lock.
@@ -578,8 +627,58 @@ export async function handle(
 				);
 				return true;
 			}
+			// Qualidade: enums do spec vendorizado (bitforge é estrito; o de 8
+			// direções é "soft guidance" com os mesmos valores). Ausente = não
+			// grava no lock e o campo não vai no request (F0-09).
+			if (b.detail !== undefined && !DETAIL_OPTIONS.includes(b.detail)) {
+				badRequest(
+					res,
+					`detail desconhecido: ${String(b.detail)} (válidos: ${DETAIL_OPTIONS.join(", ")})`,
+				);
+				return true;
+			}
+			if (b.shading !== undefined && !SHADING_OPTIONS.includes(b.shading)) {
+				badRequest(
+					res,
+					`shading desconhecido: ${String(b.shading)} (válidos: ${SHADING_OPTIONS.join(", ")})`,
+				);
+				return true;
+			}
+			if (b.outline !== undefined && !OUTLINE_OPTIONS.includes(b.outline)) {
+				badRequest(
+					res,
+					`outline desconhecido: ${String(b.outline)} (válidos: ${OUTLINE_OPTIONS.join(", ")})`,
+				);
+				return true;
+			}
+			// text_guidance_scale nos endpoints: number 1–20 (default 8).
+			// Aqui exigimos inteiro. extra_guidance_scale é deprecated no spec —
+			// não é aceito nem gravado.
+			if (
+				b.guidanceScale !== undefined &&
+				(typeof b.guidanceScale !== "number" ||
+					!Number.isInteger(b.guidanceScale) ||
+					b.guidanceScale < 1 ||
+					b.guidanceScale > 20)
+			) {
+				badRequest(
+					res,
+					"guidanceScale precisa ser inteiro entre 1 e 20 (faixa do text_guidance_scale nos endpoints)",
+				);
+				return true;
+			}
 
-			s.lock = { frameCount: b.frameCount, fps: b.fps, size: b.size };
+			s.lock = {
+				frameCount: b.frameCount,
+				fps: b.fps,
+				size: b.size,
+				...(b.detail !== undefined ? { detail: b.detail } : {}),
+				...(b.shading !== undefined ? { shading: b.shading } : {}),
+				...(b.outline !== undefined ? { outline: b.outline } : {}),
+				...(b.guidanceScale !== undefined
+					? { guidanceScale: b.guidanceScale }
+					: {}),
+			};
 			const idx = s.characters.findIndex((c) => c.id === "manequim");
 			s.characters[idx] = {
 				...ch,
@@ -593,9 +692,12 @@ export async function handle(
 
 		// ---- wizard: sul por texto ----------------------------------------------
 		if (url.pathname === "/api/wizard/south" && req.method === "POST") {
-			const b = await readBody<{ characterId?: string; description?: string }>(
-				req,
-			);
+			const b = await readBody<{
+				characterId?: string;
+				description?: string;
+				colorImageB64?: string;
+				referenceBase64?: string;
+			}>(req);
 			if (
 				typeof b.characterId !== "string" ||
 				typeof b.description !== "string" ||
@@ -609,9 +711,36 @@ export async function handle(
 			const s = await load();
 			const ch = resolveWizardCharacter(s, res, characterId);
 			if (!ch) return true;
-			// Derivados levam a sul do manequim como color_image (paleta travada).
+			// Upload de referência visual para a sul: grava ANTES do spawn —
+			// mannequin.ts lê o arquivo do disco e o envia como init_image.
+			// Aceita b64 puro ou data URI (FileReader.readAsDataURL na UI manda
+			// "data:image/png;base64,…"). Upload novo substitui o anterior; sem
+			// o campo, uma referência já gravada continua valendo (remover é
+			// DELETE /api/wizard/south/reference). O formato real da imagem não
+			// é validado aqui — quem rejeita é a API, e a correção é refazer o
+			// upload ou remover a referência.
+			if (
+				typeof b.referenceBase64 === "string" &&
+				b.referenceBase64.trim() !== ""
+			) {
+				const raw = b.referenceBase64.replace(/^data:image\/\w+;base64,/, "");
+				const buf = Buffer.from(raw, "base64");
+				if (buf.length === 0) {
+					badRequest(res, "referenceBase64 não é um base64 válido");
+					return true;
+				}
+				const refPath = join(ASSETS, "wizard", ch.id, "reference.png");
+				await mkdir(dirname(refPath), { recursive: true });
+				await writeFile(refPath, buf);
+			}
+			// colorImageB64 explícito do cliente (ex.: referência de cor customizada)
+			// tem precedência sobre a sul do manequim do estúdio.
 			const reference =
-				ch.id === "manequim" ? undefined : await mannequinSouthB64(s);
+				b.colorImageB64 && b.colorImageB64.length > 0
+					? b.colorImageB64
+					: ch.id === "manequim"
+						? undefined
+						: await mannequinSouthB64(s);
 			const key = southKey(ch.id);
 			spawn(key, `${ch.label} · sul`, () =>
 				generateSouthFromText(
@@ -671,6 +800,37 @@ export async function handle(
 			return true;
 		}
 
+		// ---- wizard: remover a referência da sul -------------------------------------
+		if (
+			url.pathname === "/api/wizard/south/reference" &&
+			req.method === "DELETE"
+		) {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			const s = await load();
+			const ch = s.characters.find((c) => c.id === b.characterId);
+			if (!ch) {
+				json(res, 404, {
+					error: `personagem "${b.characterId}" não encontrado`,
+				});
+				return true;
+			}
+			// Idempotente: 200 sempre que o personagem existe — rm force não
+			// lança quando o arquivo não existe. Não há ponteiro persistido no
+			// modelo: o arquivo em disco É o estado da referência, então
+			// removê-lo já devolve a sul ao modo texto puro. Não exige wizard
+			// state de propósito: a limpeza precisa funcionar mesmo depois de
+			// um reset do manequim.
+			await rm(join(ASSETS, "wizard", ch.id, "reference.png"), {
+				force: true,
+			});
+			json(res, 200, { ok: true });
+			return true;
+		}
+
 		// ---- wizard: cardeais ---------------------------------------------------------
 		if (url.pathname === "/api/wizard/cardinals" && req.method === "POST") {
 			const b = await readBody<{ characterId?: string }>(req);
@@ -682,9 +842,9 @@ export async function handle(
 			const ch = resolveWizardCharacter(s, res, b.characterId);
 			if (!ch) return true;
 			// mannequin.ts grava as três células cardinal-* uma a uma; o job usa a
-			// chave da primeira direção e o spawn marca falha só nas que não
-			// ficaram prontas (política documentada no cabeçalho do arquivo).
-			const key = cardinalKey(ch.id, "east");
+			// chave de lote e o spawn marca falha só nas que não ficaram prontas
+			// (política documentada no cabeçalho do arquivo).
+			const key = cardinalsBatchKey(ch.id);
 			spawn(
 				key,
 				`${ch.label} · cardeais`,

@@ -3,10 +3,11 @@
  * config → face sul → cardeais → 8 direções → pronto.
  *
  * A tela não guarda progresso: deriva tudo de `character.wizard.etapa` +
- * células (wizard-progress.ts) e lê o studio do useStudio, que já faz poll
- * enquanto houver geração. Toda ação remota sai pelo multi-state-button e
- * todo erro HTTP aparece como veio do servidor (pt-BR), sem diálogo de
- * orçamento em nenhuma forma.
+ * células + jobs (wizard-progress.ts — o servidor nunca marca célula do
+ * wizard como `gerando`; andamento e falha vivem em studio.jobs) e lê o
+ * studio do useStudio, que já faz poll enquanto houver geração. Toda ação
+ * remota sai pelo multi-state-button e todo erro HTTP aparece como veio do
+ * servidor (pt-BR), sem diálogo de orçamento em nenhuma forma.
  */
 import { wizard } from '../../strings/wizard.ts';
 import { useSelectedCharacter, useStudio } from '../studio-store.tsx';
@@ -46,7 +47,7 @@ export function WizardScreen() {
 			<p className="text-sm text-muted-foreground">{wizard.carregando}</p>
 		);
 	}
-	const progress = deriveWizard(studio, character);
+	const progress = deriveWizard(studio, character, studio.jobs);
 	const status = (id: WizardStepId): StepStatus =>
 		progress.steps.find((s) => s.id === id)?.status ?? 'todo';
 
