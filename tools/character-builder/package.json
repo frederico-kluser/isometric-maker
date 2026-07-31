@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npx tsx server/rotate.test.ts"
   },
   "dependencies": {
     "pixi.js": "8.19.0"
