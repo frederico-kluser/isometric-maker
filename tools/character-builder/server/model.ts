@@ -108,12 +108,17 @@ export interface Character {
   readonly size: number;
   readonly seed: number;
   /**
-   * Reference art, south-facing, max 256×256. When present, `create-character-v3`
-   * rotates *this* into the 8 directions instead of inventing a body.
+   * Reference art, south-facing, max 256×256. When present, the creation endpoint
+   * freezes *this* as the south direction and generates the other 7 around it.
    */
   referenceImage?: string;
   /** Character id minted by the API. Everything downstream hangs off this. */
   remoteId?: string;
+  /**
+   * Generate in isometric projection. OMITIDO do request quando false —
+   * preserva specHash (F0-09).
+   */
+  isometric?: boolean;
   readonly createdAt: string;
 }
 
