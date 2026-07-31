@@ -108,6 +108,26 @@ export const S = {
     /** Exibido quando PIXELLAB_SECRET não está definido */
     semToken:
       'PIXELLAB_SECRET não definido — a tela funciona, mas nada gera',
+    /** Título do diálogo de custo */
+    tituloDialogo: 'Custo estimado',
+    /** Rótulo: itens a gerar */
+    aGerar: 'A gerar',
+    /** Rótulo: itens em cache */
+    emCache: 'Em cache',
+    /** Rótulo: número de gerações */
+    geracoes: 'Gerações',
+    /** Rótulo: estimativa de custo */
+    estimativa: 'Estimativa',
+    /** Rótulo: gasto na sessão */
+    gastoSessao: 'Gasto na sessão',
+    /** Rótulo: gasto no mês */
+    gastoMes: 'Gasto no mês',
+    /** Botão confirmar */
+    confirmar: 'Confirmar',
+    /** Botão cancelar */
+    cancelar: 'Cancelar',
+    /** Botão confirmar desabilitado (contagem regressiva) */
+    aguarde: 'Aguarde…',
   },
 
   // ── erro ───────────────────────────────────────────────────────

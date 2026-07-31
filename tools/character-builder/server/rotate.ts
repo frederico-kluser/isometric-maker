@@ -20,6 +20,7 @@ import {
   COST_TABLE, estimateByArea, sumEstimates, checkBudget,
   type BudgetReport, type CostEstimate,
 } from '../../pixellab-pipeline/src/cost.ts';
+import { trackSpend } from './estimate.ts';
 
 // ---- tipos
 
@@ -182,6 +183,11 @@ export async function rotateCardinals(
     const raw = imageB64.replace(/^data:image\/\w+;base64,/, '');
     await writeFile(paths[dir], Buffer.from(raw, 'base64'));
     opts?.onLog?.(`[rotate] south→${dir} → ${paths[dir]} (${raw.length} chars b64)`);
+
+    // Tracking de sessão (F1-06): acumula o gasto assim que a resposta chega.
+    if (typeof res.usage?.usd === 'number') {
+      trackSpend(res.usage.usd);
+    }
 
     // Escrever no ledger com usage cru.
     if (opts?.ledgerPath) {

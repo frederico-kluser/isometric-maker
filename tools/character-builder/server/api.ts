@@ -25,6 +25,12 @@ import {
 } from './rotate.ts';
 import { validateImport } from '../src/import.ts';
 import {
+  parseAndWriteFrames,
+  UnknownDirectionError,
+  MissingDirectionError,
+} from './frames.ts';
+import { getEstimateReport, trackSpend } from './estimate.ts';
+import {
   DIRECTIONS, cellKey, seedStudio, wardrobeKey,
   type Cell, type Character, type Pose, type Studio, type WardrobeItem,
 } from './model.ts';
@@ -420,7 +426,10 @@ async function generateBase(character: Character): Promise<void> {
     'create-character-with-8-directions', body,
   );
 
-  // Persistir character_id IMEDIATAMENTE — o dinheiro já saiu na submissão.
+  // Tracking de sessão: o dinheiro já saiu na submissão.
+  if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+
+  // Persistir character_id IMEDIATAMENTE.
   const jobId = res.data?.background_job_id;
   const remoteId = res.data?.character_id;
   if (remoteId) {
@@ -452,11 +461,12 @@ async function generateBase(character: Character): Promise<void> {
   const response = polled.job.last_response ?? polled.job;
   verifyFreezing(directions, response, character.size);
 
-  // Extrair imagens e salvar.
-  const images = extractImages(response);
-  if (images.length === 0) throw new Error('resposta sem imagem');
+  // Extrair imagens e salvar — usando rotation_urls por chave, NUNCA por índice.
+  const { frames, hasSkeletons } = await parseAndWriteFrames(
+    response, 'characters', key, ASSETS,
+  );
+  if (Object.keys(frames).length === 0) throw new Error('resposta sem imagem');
 
-  const frames = await writeFrames('characters', key, images);
   const cell: Cell = {
     key, status: 'pronto', frames, updatedAt: new Date().toISOString(),
     ...(jobId ? { jobId } : {}), ...(remoteId ? { remoteId } : {}),
@@ -465,6 +475,10 @@ async function generateBase(character: Character): Promise<void> {
   const cur = await load();
   cur.cells[key] = cell;
   await save(cur);
+
+  if (hasSkeletons) {
+    console.log('[skeletons] resposta de E5: skeletons populado para', key);
+  }
 }
 
 /** Step 2: a pose, animated on top of an existing base character. */
@@ -694,6 +708,28 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       s.wardrobe.push(item);
       await save(s);
       json(res, 200, item);
+      return true;
+    }
+
+    // ---- estimate ----------------------------------------------------------
+    if (url.pathname === '/api/estimate' && req.method === 'GET') {
+      const charId = url.searchParams.get('characterId');
+      const poseId = url.searchParams.get('poseId');
+      const wardrobeId = url.searchParams.get('wardrobeId');
+      const s = await load();
+      const ch = s.characters.find((c) => c.id === charId);
+      if (!ch) { json(res, 404, { error: 'personagem não encontrado' }); return true; }
+
+      const pose = poseId ? s.poses.find((p) => p.id === poseId) : undefined;
+      const item = wardrobeId ? s.wardrobe.find((w) => w.id === wardrobeId) : undefined;
+
+      const estReq: import('../server/estimate.ts').EstimateRequest = {
+        character: ch,
+        ...(pose ? { pose } : {}),
+        ...(item ? { item } : {}),
+      };
+      const estimate = await getEstimateReport(estReq);
+      json(res, 200, estimate);
       return true;
     }
 
