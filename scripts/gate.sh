@@ -136,6 +136,13 @@ nao_exercitado_stage "vendor-types.mjs --check" \
   "node tools/pixi-reference/scripts/vendor-types.mjs --check"
 
 # ═══════════════════════════════════════════════════════════════════════
+header "runtime"
+
+stage "check-runtime-boundary" \
+  "bash scripts/check-runtime-boundary.sh" \
+  "F4-03"
+
+# ═══════════════════════════════════════════════════════════════════
 header "plano"
 
 stage "scripts/validate-plan.mjs" \
