@@ -123,6 +123,13 @@ nao_exercitado_stage "run-skill-evals.mjs" \
   "node .agents/skills/scripts/run-skill-evals.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════
+header "PixiJS pin"
+
+stage "check-pixi-pin" \
+  "node scripts/check-pixi-pin.mjs" \
+  "F0-05"
+
+# ═══════════════════════════════════════════════════════════════════════
 header "PixiJS vendor"
 
 nao_exercitado_stage "vendor-types.mjs --check" \

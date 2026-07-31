@@ -1349,7 +1349,7 @@ deps: [F0-02]
 critico: false
 gasta: nao
 worktree: sim
-estado: pendente
+estado: feito
 arquivos:
   - tools/character-builder/package.json
   - scripts/check-pixi-pin.mjs
