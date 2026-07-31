@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { type MapData, MULTI_CELL_ERROR, validateMapObject } from './map.ts';
 
 // ---------------------------------------------------------------------------
 // Tipos do formato de projeto v1
@@ -20,8 +21,13 @@ export interface ProjectV1 {
   readonly geometria: ProjectGeometry;
   /** Caminhos relativos aos sidecars .pixellab.json. */
   readonly atlas: readonly string[];
-  /** Dados do mapa — F2-02 é o dono deste campo. */
-  readonly mapa?: Record<string, never>;
+  /**
+   * Dados do mapa (blocos, arestas, objectos).
+   *
+   * Ausente em projectos criados antes de F2-02; o editor trata `undefined`
+   * como mapa vazio.
+   */
+  readonly mapa?: MapData;
 }
 
 /** União preparada para versões futuras. */
@@ -101,7 +107,16 @@ export async function loadProject(filePath: string): Promise<ProjectV1> {
     );
   }
 
-  // O descriminador bate — confiamos no resto da forma para esta versão.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- validação de schema feito acima
-  return parsed as ProjectV1;
+  const project = parsed as ProjectV1;
+
+  // Validação de objectos multi-célula (F2-02)
+  if (project.mapa?.objects) {
+    for (const obj of project.mapa.objects) {
+      if (!validateMapObject(obj)) {
+        throw new Error(MULTI_CELL_ERROR);
+      }
+    }
+  }
+
+  return project;
 }

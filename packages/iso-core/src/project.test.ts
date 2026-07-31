@@ -9,6 +9,7 @@ import {
   saveProject,
   type ProjectV1,
 } from './project.ts';
+import { type MapData } from './map.ts';
 
 describe('project v1', () => {
   /** Directório temporário descartável para cada bloco. */
@@ -134,5 +135,147 @@ describe('project v1', () => {
     assert.strictEqual(typeof project.data, 'string');
     // data é ISO-8601 válida
     assert.ok(!Number.isNaN(Date.parse(project.data)));
+  });
+
+  // ------------------------------------------------------------------
+  // Mapa — integração F2-02
+  // ------------------------------------------------------------------
+
+  it('projecto sem mapa é carregado normalmente (retrocompatibilidade)', async () => {
+    const dir = await tmpDir();
+    const filePath = join(dir, 'sem-mapa.json');
+
+    const project = criarProject('sem-mapa', []);
+    await saveProject(project, filePath);
+    const loaded = await loadProject(filePath);
+
+    assert.strictEqual(loaded.mapa, undefined);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('projecto com mapa válido (blocos, arestas, objectos) é carregado', async () => {
+    const dir = await tmpDir();
+    const filePath = join(dir, 'com-mapa.json');
+
+    const project = criarProject('com-mapa', []);
+    const projectComMapa = {
+      ...project,
+      mapa: {
+        blocks: {
+          '0:0': [
+            { block: 'grass', count: 3 },
+            { block: 'dirt', count: 2 },
+          ],
+        },
+        edges: [
+          { x: 0, y: 0, z: 0, lado: 'N' as const, tipo: 'stone_wall' },
+        ],
+        objects: [
+          { tipo: 'tree', x: 5, y: 3, z: 0 },
+        ],
+      } satisfies MapData,
+    };
+
+    await saveProject(projectComMapa as ProjectV1, filePath);
+    const loaded = await loadProject(filePath);
+
+    assert.ok(loaded.mapa);
+    assert.ok(loaded.mapa!.blocks['0:0']);
+    assert.strictEqual(loaded.mapa!.edges.length, 1);
+    assert.strictEqual(loaded.mapa!.objects!.length, 1);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejeita projecto com objeto multi-célula (cells)', async () => {
+    const dir = await tmpDir();
+    const filePath = join(dir, 'multi-cell.json');
+
+    const project = criarProject('multi-cell', []);
+    const projectInvalido = {
+      ...project,
+      mapa: {
+        blocks: {},
+        edges: [],
+        objects: [
+          {
+            tipo: 'building',
+            x: 0,
+            y: 0,
+            z: 0,
+            cells: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+          },
+        ],
+      },
+    };
+
+    await saveProject(projectInvalido as ProjectV1, filePath);
+
+    await assert.rejects(
+      async () => loadProject(filePath),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes('multi-célula'),
+    );
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejeita projecto com objeto multi-célula (width/height)', async () => {
+    const dir = await tmpDir();
+    const filePath = join(dir, 'multi-cell-wh.json');
+
+    const project = criarProject('multi-cell-wh', []);
+    const projectInvalido = {
+      ...project,
+      mapa: {
+        blocks: {},
+        edges: [],
+        objects: [
+          {
+            tipo: 'furniture',
+            x: 0,
+            y: 0,
+            z: 0,
+            width: 2,
+            height: 3,
+          },
+        ],
+      },
+    };
+
+    await saveProject(projectInvalido as ProjectV1, filePath);
+
+    await assert.rejects(
+      async () => loadProject(filePath),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes('multi-célula'),
+    );
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('projecto com mapa sem objects é válido', async () => {
+    const dir = await tmpDir();
+    const filePath = join(dir, 'sem-objects.json');
+
+    const project = criarProject('sem-objects', []);
+    const projectSemObjects = {
+      ...project,
+      mapa: {
+        blocks: {
+          '0:0': [{ block: 'grass', count: 1 }],
+        },
+        edges: [],
+      },
+    };
+
+    await saveProject(projectSemObjects as ProjectV1, filePath);
+    const loaded = await loadProject(filePath);
+
+    assert.ok(loaded.mapa);
+    assert.strictEqual(loaded.mapa!.objects, undefined);
+
+    await rm(dir, { recursive: true, force: true });
   });
 });

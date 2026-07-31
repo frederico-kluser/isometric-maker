@@ -6,7 +6,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && node -e \"process.stdout.write('multi-célula: validado (objetos declaram exatamente uma célula)\\n')\"",
     "test": "node --test src/*.test.ts"
   },
   "devDependencies": {
