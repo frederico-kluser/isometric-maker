@@ -93,7 +93,7 @@ export function DirectionsStep({
 								state={action.state}
 								message={action.message}
 								label={wizard.acoes.tentarDeNovo}
-								disabled={!progress.cardinalsReady || !progress.locked || busy}
+							disabled={!progress.southReady || !progress.locked || busy}
 								onClick={generate}
 							/>
 						</FailureNotice>
@@ -102,8 +102,8 @@ export function DirectionsStep({
 							state={action.state}
 							message={action.message}
 							generating={generating}
-							label={wizard.direcoes8.gerar}
-							disabled={!progress.cardinalsReady || !progress.locked || busy}
+label={wizard.direcoes8.gerar}
+disabled={!progress.southReady || !progress.locked || busy}
 							onClick={generate}
 						/>
 					)}

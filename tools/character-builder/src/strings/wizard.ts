@@ -1,7 +1,13 @@
 /**
  * Strings da aba Wizard — cadeia derivativa do personagem
- * (config → sul → cardeais → 8 direções → pronto).
+ * (config → sul → 8 direções → pronto).
  * Chaves em inglês, valores em pt-BR (ADR 0008, ADR 0016).
+ *
+ * Com a migração para create-character-v3 (2026-07-31):
+ * - O passo de cardeais foi removido — o v3 rotaciona a reference_image
+ *   direto, sem rotações intermediárias.
+ * - shading e guidanceScale removidos (não existem no v3).
+ * - detail e outline são IGNORADOS em modo reference_image.
  *
  * Prompts que vão para a API ficam em inglês nos placeholders, com o
  * rótulo avisando — mesma convenção de `personagem.edicaoPrompt`.
@@ -88,7 +94,6 @@ export const wizard = {
     passos: {
       config: 'Configuração',
       sul: 'Face sul',
-      cardeais: 'Cardeais',
       direcoes8: '8 direções',
       pronto: 'Pronto',
     },
@@ -126,8 +131,6 @@ export const wizard = {
     shading: 'Sombreamento',
     /** Rótulo do select de contorno */
     outline: 'Contorno',
-    /** Rótulo do campo de guidance */
-    guidance: 'Guidance (1–20)',
     /**
      * Nota discreta sob o Avançado: o vendor descreve detail/shading/outline
      * como "soft guidance — the model may not follow exactly". A UI repete o
@@ -142,15 +145,6 @@ export const wizard = {
       'medium detail': 'Médio',
       'highly detailed': 'Muito detalhado',
     },
-    /** Rótulos amigáveis das opções de sombreamento (chave = valor exato do spec) */
-    shadingRotulos: {
-      'flat shading': 'Sem sombra (flat)',
-      'basic shading': 'Básico',
-      'medium shading': 'Médio',
-      'detailed shading': 'Detalhado',
-      'highly detailed shading': 'Muito detalhado',
-    },
-    /** Rótulos amigáveis das opções de contorno (chave = valor exato do spec) */
     outlineRotulos: {
       'single color black outline': 'Preto, cor única',
       'single color outline': 'Cor única',
@@ -210,24 +204,12 @@ export const wizard = {
     referenciaLeitura: 'não consegui ler a imagem escolhida',
   },
 
-  // ── passo 3: cardeais ────────────────────────────────────────
-  cardeais: {
-    titulo: 'Cardeais',
-    nota:
-      'Leste e norte saem em paralelo; o oeste vem depois, com as duas prontas. ' +
-      'Cada uma é uma rotação da sul ativa.',
-    /** Botão que dispara as três rotações */
-    gerar: 'Gerar cardeais',
-    /** Texto alternativo de uma cardeal pronta */
-    altPronta: 'Cardeal gerada',
-  },
-
-  // ── passo 4: oito direções ───────────────────────────────────
+  // ── passo 3: oito direções ───────────────────────────────────
   direcoes8: {
     titulo: 'Oito direções',
     nota:
-      'As 4 cardeais são enviadas congeladas e as 4 diagonais são geradas em volta — ' +
-      'a prova de congelamento confere os pixels no final.',
+      'O modelo v3 rotaciona a face sul diretamente para as 8 direções — ' +
+      'sem cardeais intermediárias. A referência visual é o sprite sul ativo.',
     /** Botão que dispara a geração das 8 direções */
     gerar: 'Gerar as 8 direções',
     /** Aviso quando falta travar a configuração */

@@ -44,16 +44,12 @@ import {
 	type MannequinLock,
 	OUTLINE_OPTIONS,
 	type OutlineOption,
-	SHADING_OPTIONS,
-	type ShadingOption,
 	type Silhouette,
 } from '../../../../server/model.ts';
 import { configTravada, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
 import {
-	GUIDANCE_MAX,
-	GUIDANCE_MIN,
 	matchPreset,
 	QUALITY_PRESETS,
 	QUALITY_PRESET_IDS,
@@ -112,11 +108,7 @@ function ConfigForm({
 	const action = useAction(refresh);
 
 	const fpsNum = Number(fps);
-	const guidanceOk =
-		Number.isInteger(quality.guidanceScale) &&
-		quality.guidanceScale >= GUIDANCE_MIN &&
-		quality.guidanceScale <= GUIDANCE_MAX;
-	const canSubmit = Number.isFinite(fpsNum) && fpsNum > 0 && guidanceOk;
+	const canSubmit = Number.isFinite(fpsNum) && fpsNum > 0;
 	const preset = matchPreset(quality);
 
 	return (
@@ -201,14 +193,6 @@ function ConfigForm({
 								onChange={(detail) => setQuality({ ...quality, detail })}
 							/>
 							<StyleSelect
-								id="wizard-config-shading"
-								label={wizard.config.shading}
-								value={quality.shading}
-								options={SHADING_OPTIONS}
-								labels={wizard.config.shadingRotulos}
-								onChange={(shading) => setQuality({ ...quality, shading })}
-							/>
-							<StyleSelect
 								id="wizard-config-outline"
 								label={wizard.config.outline}
 								value={quality.outline}
@@ -216,25 +200,6 @@ function ConfigForm({
 								labels={wizard.config.outlineRotulos}
 								onChange={(outline) => setQuality({ ...quality, outline })}
 							/>
-							<div className="flex flex-col gap-2">
-								<Label htmlFor="wizard-config-guidance">
-									{wizard.config.guidance}
-								</Label>
-								<Input
-									id="wizard-config-guidance"
-									type="number"
-									min={GUIDANCE_MIN}
-									max={GUIDANCE_MAX}
-									value={String(quality.guidanceScale)}
-									onChange={(e) =>
-										setQuality({
-											...quality,
-											guidanceScale: Number(e.target.value),
-										})
-									}
-									className="w-28"
-								/>
-							</div>
 						</div>
 						<p className="max-w-prose text-xs text-muted-foreground">
 							{wizard.config.estiloNota}
@@ -259,9 +224,7 @@ function ConfigForm({
 								size: quality.size,
 								silhouette,
 								detail: quality.detail,
-								shading: quality.shading,
 								outline: quality.outline,
-								guidanceScale: quality.guidanceScale,
 							}),
 						}),
 					)

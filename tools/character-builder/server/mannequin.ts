@@ -1,14 +1,13 @@
 /**
  * Fluxo do wizard do manequim (studio.json v2).
  *
- * Cadeia derivativa, na ordem em que o dinheiro sai:
+ * Cadeia derivativa v3, na ordem em que o dinheiro sai:
  *   1. generateSouthFromText — sul por texto via /create-image-bitforge.
  *   2. editSouth           — edição iterativa da sul ativa via /edit-image.
  *   3. undoSouth           — volta uma versão, SEM chamada de API.
- *   4. rotateCardinals     — south→east ∥ south→north, depois south→west (/rotate).
- *   5. generateDirections8 — /create-character-with-8-directions com o mapa
- *      directions={south,east,north,west}: diagonais geradas, cardeais
- *      congeladas, prova de congelamento ao final.
+ *   4. generateDirections8 — /create-character-v3 com o sprite sul como
+ *      reference_image: o modelo v3 rotaciona sozinho para as 8 direções.
+ *      O passo de cardeais (/rotate) foi removido com a migração para v3.
  *
  * Regras que valem para todo o módulo:
  *   - PNG gravado em disco ANTES de qualquer pós-processamento: depois da
@@ -27,23 +26,19 @@
  *     imagem de REFERÊNCIA; width/height são o canvas ALVO — não são
  *     intercambiáveis. Resultado chega em last_response do background job.
  *   - /rotate: SÍNCRONO, pode responder 529 (o PixelLabClient já trata 429/529).
- *   - /create-character-with-8-directions: assíncrono mas responde 200 com
- *     {background_job_id, character_id}; directions é dicionário por nome de
- *     direção, cada imagem com as dimensões EXATAS de image_size (senão 422);
- *     direções fornecidas são usadas as-is (frozen).
- *   - color_image (paleta forçada / referência de cor) existe tanto em
- *     /create-image-bitforge quanto em /create-character-with-8-directions —
- *     é o mecanismo que prende um personagem derivado à paleta do manequim
- *     (WizardOpts.reference). template_id existe só no de 8 direções.
- *   - Qualidade (detail/shading/outline/text_guidance_scale): os dois
- *     endpoints aceitam; o threading vem de studio.lock e os campos são
- *     OMITIDOS quando ausentes (F0-09). No bitforge são enums estritos; no
- *     de 8 direções são "soft guidance" (o modelo pode não seguir à risca).
- *     extra_guidance_scale existe no bitforge mas está DEPRECATED — não usar.
- *   - init_image + init_image_strength (inteiro 1–999, default 300) existem
- *     SÓ no bitforge: é o suporte a referência visual na criação da sul
- *     (upload gravado em wizard/<charId>/reference.png). O endpoint de 8
- *     direções não tem init_image no spec.
+ *   - /create-character-v3: ASSÍNCRONO (200 {background_job_id, character_id}).
+ *     Dois modos: reference_image (sprite sul, máx 256×256 — o modelo rotaciona
+ *     para 8 direções) e from-scratch (description + outline/detail opcionais).
+ *     Custo reference: ceil(w×h×8 / 65536) gerações. image_size é advisory em
+ *     modo reference. outline/detail são IGNORADOS com reference_image.
+ *     template_id define o template de esqueleto (mannequin/bear/cat/dog/horse/lion).
+ *   - color_image (paleta forçada / referência de cor) existe em
+ *     /create-image-bitforge — é o mecanismo que prende um personagem derivado
+ *     à paleta do manequim. /create-character-v3 não tem color_image.
+ *   - Qualidade (detail/outline): o bitforge aceita; o v3 reference mode ignora.
+ *     shading e text_guidance_scale NÃO EXISTEM no v3.
+ *     init_image + init_image_strength (inteiro 1–999, default 300) existem
+ *     SÓ no bitforge.
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -56,7 +51,8 @@ import {
 } from '../../pixellab-pipeline/src/cost.ts';
 import { trackSpend } from './estimate.ts';
 import { parseAndWriteFrames } from './frames.ts';
-import { verifyFreezing } from './freeze-proof.ts';
+// verifyFreezing removido com migração para v3 — o endpoint não tem mapa directions.
+
 import { validateImport } from '../src/import.ts';
 import {
   cardinalKey, directions8Key, southKey,
@@ -695,16 +691,24 @@ interface CreateCharacterResponse {
 }
 
 /**
- * Gera as 8 direções via /create-character-with-8-directions (mode 'standard'):
- * as 4 cardeais vão no mapa `directions` (congeladas, usadas as-is) e as 4
- * diagonais são geradas. Prova de congelamento ao final: pixels das cardeais
- * devolvidas devem ser idênticos aos enviados.
+ * Gera as 8 direções via /create-character-v3 (modo reference_image):
+ * o sprite sul vai como `reference_image` e o modelo v3 rotaciona sozinho
+ * para as 8 direções — sem cardeais intermediárias, sem mapa `directions`,
+ * sem prova de congelamento.
+ *
+ * Com a migração para v3 (2026-07-31):
+ * - O endpoint `create-character-v3` aceita `reference_image` (base64 do sprite
+ *   sul, máx 256×256) e devolve `character_id` + `background_job_id`.
+ * - `image_size` é advisory em modo reference — o modelo escolhe o tamanho.
+ * - `outline`/`detail` são IGNORADOS quando `reference_image` está presente.
+ * - Custo: ceil(w×h×8 / 65536) gerações. Para 64×64 = 1 geração;
+ *   para 128×128 = 2 gerações.
  *
  * EXIGE studio.lock — a config do wizard (frameCount/fps/size) trava ANTES da
  * base, e gerar as 8 direções sem lock significaria uma base sem contrato de
  * frames. Erro explícito se ausente.
  *
- * Pré-condição: células da sul e das 3 cardeais prontas.
+ * Pré-condição: célula da sul pronta.
  * Idempotência: célula directions8Key pronta → nenhuma chamada sai.
  */
 export async function generateDirections8(
@@ -730,65 +734,38 @@ export async function generateDirections8(
     return;
   }
 
-  // Pré-condição: sul + 3 cardeais prontas.
-  const missing: string[] = [];
-  if (s.cells[southKey(characterId)]?.status !== 'pronto') missing.push('sul');
-  for (const d of CARDINAL_DIRECTIONS) {
-    if (s.cells[cardinalKey(characterId, d)]?.status !== 'pronto') missing.push(d);
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `faltam direções prontas antes de gerar as 8: ${missing.join(', ')}`,
-    );
+  // Pré-condição: sul pronta (reference_image do v3).
+  const southCell = s.cells[southKey(characterId)];
+  if (southCell?.status !== 'pronto') {
+    throw new Error('a face sul precisa estar pronta antes das 8 direções');
   }
 
-  // Ler as 4 cardeais do disco e montar o mapa directions.
   const southRaw = await readB64(southPath(opts.assetsDir, characterId, wiz.activeSouth), `sul v${wiz.activeSouth}`);
-  const eastRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'east'), 'cardeal east');
-  const northRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'north'), 'cardeal north');
-  const westRaw = await readB64(cardinalPath(opts.assetsDir, characterId, 'west'), 'cardeal west');
-  const rawDirections: Record<string, string> = { south: southRaw, east: eastRaw, north: northRaw, west: westRaw };
-  const directions: Record<string, { type: 'base64'; base64: string }> = {
-    south: asBase64Image(southRaw),
-    east: asBase64Image(eastRaw),
-    north: asBase64Image(northRaw),
-    west: asBase64Image(westRaw),
-  };
-
   const size = ch.size;
 
-  // Guard: informa, nunca recusa. mode='standard' = 1 geração para as 8 direções.
+  // Guard: v3 reference mode custa ceil(w×h×8 / 65536) gerações.
   const estimate = estimateByArea(
-    COST_TABLE['create-character-with-8-directions'],
+    COST_TABLE['create-character-v3'],
     size * size,
   );
   logGuard(
-    'create-character-with-8-directions (8 direções)',
+    'create-character-v3 (8 direções via reference_image)',
     guardFor(estimate, estimate.point),
     opts.onLog,
   );
 
   const body: Record<string, unknown> = {
     description: ch.description,
-    image_size: { width: size, height: size },
+    reference_image: { base64: southRaw },
+    template_id: 'mannequin',
     view: 'low top-down',
-    mode: 'standard',
     seed: ch.seed,
-    directions,
+    no_background: true,
+    image_size: { width: size, height: size },
   };
-  // isometric: OMITIDO quando false (F0-09).
-  if (ch.isometric) body['isometric'] = true;
-  // color_image: OMITIDO sem referência (wizard do manequim). Com referência,
-  // a paleta do derivado segue a do manequim (spec: "color palette reference").
-  const colorImage = opts.reference?.colorImageB64;
-  if (colorImage) body['color_image'] = asBase64Image(colorImage);
-  // Qualidade do lock — aqui "soft guidance" (o modelo pode não seguir à
-  // risca). init_image NÃO existe neste endpoint: a referência visual já
-  // entrou na sul, que vai congelada no mapa directions.
-  threadQuality(s.lock, body);
 
   const res = await client.submit<CreateCharacterResponse>(
-    'create-character-with-8-directions',
+    'create-character-v3',
     body,
   );
 
@@ -798,7 +775,7 @@ export async function generateDirections8(
   appendLedger(opts.ledgerPath, {
     at: new Date().toISOString(),
     characterId,
-    endpoint: 'create-character-with-8-directions',
+    endpoint: 'create-character-v3',
     usd: usage?.usd ?? null,
     generations: usage?.generations ?? null,
     unit: usage?.type ?? 'unknown',
@@ -822,9 +799,7 @@ export async function generateDirections8(
 
   const response = polled.job.last_response ?? polled.job;
 
-  // Prova de congelamento: as cardeais devolvidas devem ter os mesmos pixels
-  // das enviadas no mapa directions.
-  await verifyFreezing(rawDirections, response, size);
+  // v3 não tem mapa directions — sem prova de congelamento.
 
   // Extrair frames POR CHAVE, nunca por índice.
   const { frames, hasSkeletons } = await parseAndWriteFrames(

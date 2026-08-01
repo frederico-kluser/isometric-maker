@@ -215,9 +215,7 @@ test('config: grava qualidade no lock e persiste no disco', async () => {
     fps: 8,
     size: 128,
     detail: 'highly detailed',
-    shading: 'detailed shading',
     outline: 'selective outline',
-    guidanceScale: 8,
   });
   assert.equal(r.status, 200, `config válida deveria dar 200, veio ${r.status}: ${JSON.stringify(r.json)}`);
 
@@ -227,9 +225,7 @@ test('config: grava qualidade no lock e persiste no disco', async () => {
     fps: 8,
     size: 128,
     detail: 'highly detailed',
-    shading: 'detailed shading',
     outline: 'selective outline',
-    guidanceScale: 8,
   });
 });
 
@@ -256,28 +252,21 @@ test('config: enum de qualidade inválido → 400 listando os válidos', async (
       fps: 8,
       size: 128,
       detail: 'highly detailed',
-      shading: 'detailed shading',
       outline: 'selective outline',
-      guidanceScale: 8,
     },
     'um config inválido não pode regravar o lock',
   );
 });
 
-test('config: guidanceScale fora da faixa ou não inteiro → 400', async () => {
-  for (const guidanceScale of [0, 21, 1.5, '8']) {
+test('config: size fora da faixa 32-256 → 400', async () => {
+  for (const size of [31, 257]) {
     const r = await post('/api/wizard/config', {
       characterId: 'manequim',
       frameCount: 8,
       fps: 8,
-      size: 128,
-      guidanceScale,
+      size,
     });
-    assert.equal(
-      r.status,
-      400,
-      `guidanceScale=${JSON.stringify(guidanceScale)} deveria dar 400, veio ${r.status}`,
-    );
+    assert.equal(r.status, 400, `size=${size} deveria dar 400, veio ${r.status}`);
   }
 });
 

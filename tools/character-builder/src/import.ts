@@ -72,7 +72,7 @@ export type ImportResult = ImportOk | ImportErr;
  * 1. Arquivo precisa ser PNG.
  * 2. Nenhum lado pode passar de 256 px (limite da API para referência).
  * 3. A imagem precisa ser quadrada (largura = altura).
- * 4. Os lados precisam estar na faixa 16–128 px (faixa dos endpoints de criação).
+ * 4. Os lados precisam estar na faixa 32–256 px (faixa do create-character-v3).
  * 5. A altura informada não pode exceder a altura da imagem.
  *
  * @param buffer Conteúdo binário do arquivo (ArrayBuffer).
@@ -107,8 +107,8 @@ export function validateImport(
     return { ok: false, error: S.erro.imagemNaoQuadrada };
   }
 
-  // 4. Faixa 16–128 — validada via validateSize do pipeline.
-  const sizeErrors = validateSize('create-character-with-4-directions', { width, height });
+  // 4. Faixa 32–256 — validada via validateSize do pipeline (create-character-v3).
+  const sizeErrors = validateSize('create-character-v3', { width, height });
   if (sizeErrors.length > 0) {
     return { ok: false, error: S.erro.ladoForaDaFaixa };
   }
