@@ -58,11 +58,13 @@ import {
 	runWorldBlock,
 	readWorldBlockResult,
 	listWorldBlocks,
+	canonizeWorldBlock,
 	worldBlockHash,
 	validateWorldBlockConfig,
 	WorldBlockValidationError,
 	type WorldBlockConfig,
 } from "./world-block.ts";
+import { BLOCK_GEOMETRY, renderMouldPng } from "./cube-mould.ts";
 import {
 	exportWizardBundle,
 	importSpriteBundle,
@@ -1215,6 +1217,64 @@ export async function handle(
 		// Catálogo de blocos já gerados: é daqui que o map-builder monta a paleta.
 		if (url.pathname === "/api/world-blocks" && req.method === "GET") {
 			json(res, 200, { blocks: await listWorldBlocks(ASSETS) });
+			return true;
+		}
+
+		// O molde em PNG: o editor mostra ao usuário a forma que toda geração segue.
+		if (url.pathname === "/api/block-mould.png" && req.method === "GET") {
+			const png = renderMouldPng();
+			res.writeHead(200, {
+				"content-type": "image/png",
+				"content-length": String(png.length),
+				// Determinístico e derivado do código: cachear é seguro enquanto o
+				// processo viver, e errado entre versões. `no-cache` revalida.
+				"cache-control": "no-cache",
+			});
+			res.end(png);
+			return true;
+		}
+
+		// A geometria canônica, para quem desenha. Uma fonte, não uma constante
+		// copiada em cada ferramenta.
+		if (url.pathname === "/api/block-geometry" && req.method === "GET") {
+			json(res, 200, {
+				geometry: {
+					tileWidth: BLOCK_GEOMETRY.tileWidth,
+					tileHeight: BLOCK_GEOMETRY.tileHeight,
+					cubeHeight: BLOCK_GEOMETRY.cubeHeight,
+					spriteWidth: BLOCK_GEOMETRY.spriteWidth,
+					spriteHeight: BLOCK_GEOMETRY.spriteHeight,
+					anchorX: BLOCK_GEOMETRY.anchorX,
+					anchorY: BLOCK_GEOMETRY.anchorY,
+				},
+				mouldUrl: "/api/block-mould.png",
+			});
+			return true;
+		}
+
+		// Alinha ao molde a arte JÁ PAGA de um bloco. Zero chamadas à API, zero
+		// custo — e o PNG original nunca é tocado.
+		if (
+			url.pathname.startsWith("/api/world-block/") &&
+			url.pathname.endsWith("/canon") &&
+			req.method === "POST"
+		) {
+			const hash = url.pathname.slice(
+				"/api/world-block/".length,
+				url.pathname.length - "/canon".length,
+			);
+			if (hash === "" || hash.includes("/")) {
+				badRequest(res, "hash de bloco inválido");
+				return true;
+			}
+			try {
+				json(res, 200, await canonizeWorldBlock(hash, ASSETS));
+			} catch (err) {
+				badRequest(
+					res,
+					`não deu para alinhar o bloco "${hash}": ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 			return true;
 		}
 

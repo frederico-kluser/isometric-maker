@@ -88,13 +88,33 @@ Every referenced atlas is checked to exist on disk **before** success is declare
 silently omits an atlas produces a runtime that loads and then draws nothing, and the cause is three
 steps removed from the symptom.
 
+### Authoring format and export format are deliberately different
+
+The map is authored as RLE columns — compact, hole-free, heavily tested. It is **exported** as a
+list of instances, where every placed block carries `id`, `x`, `y`, `z`, `kind` and `material`
+already resolved, next to a material table with the physical properties
+(`packages/iso-core/src/map-instances.ts`, `docs/adr/0027-exportacao-v2-instancias-e-materiais.md`).
+
+Whoever writes physics should not have to decode RLE or carry the palette to find out whether a cell
+is solid. The redundancy — `kind` and `material` appear in the palette *and* in each instance — is
+deliberate and derived; it is never hand-edited.
+
+The instance id is `b:x:y:z`, derived from the position. A counter would need persisted state kept in
+sync with undo; a UUID would change every save and make the file undiffable. The consequence to know:
+**moving a block changes its id**, because a block is not an entity that walks — it is the contents
+of a cell.
+
 ## The rendering module does not edit
 
-`renderer.ts` renders and nothing else (`tools/map-builder/src/renderer.ts:9@32151310`). Edits belong
-to the tool layer. Two boot constraints live there and both must hold before the first
-`Assets.load`: nearest sampling with mipmaps off
-(`tools/map-builder/src/renderer.ts:10@32151310`), and a whole-number stage scale. Sprites come from
+`scene.ts` is the renderer; `renderer.ts` is its superseded predecessor and still draws coloured
+rectangles. Edits belong to the tool layer. Two boot constraints must hold before the first
+`Assets.load`: nearest sampling with mipmaps off, and a whole-number stage scale. Sprites come from
 a pool so that painting does not allocate per frame.
+
+**Sprite scale must be uniform and the anchor declared.** Setting `width` and `height` separately
+scales the axes differently, the art's top diamond stops being 2:1 and blocks stop seaming — the
+symptom reads as "the generated art is wrong" and is not. `projecting-isometric-geometry` owns the
+arithmetic; `tools/map-builder/src/placement.ts` is the one implementation, with tests.
 
 ## The placement tools that exist, and the state they return
 
@@ -125,19 +145,21 @@ heuristic obsolete.
 
 ## What does not exist yet — say so instead of inventing it
 
-- **Undo/redo has a substrate but no history.** The tools are pure and return new state, which is
-  exactly what a command or snapshot scheme needs, and `paint.ts` states the intent — "desfazer/refazer
-  via comandos imutáveis" (`tools/map-builder/src/tools/paint.ts:10@d704c95a`). **No stack, no
-  history and no command object exists anywhere.** The open question is not how to make edits
-  reversible; it is what one undo step contains, and what a stroke costs in memory against the RLE
-  store.
 - **Multi-cell brush shapes.** Single-cell operations exist; rectangle, line and bucket do not, and
-  there is no convention for what one drag produces.
+  there is no convention for what one drag produces. Dragging with the button held repeats the
+  single-cell operation, which is not the same thing.
 - **Layer visibility by Z.** Nothing hides or dims the levels above the one being edited — the
   standard remedy for editing a floor under a roof.
 - **Placement validity feedback.** `canEnter` and `canCross` exist in the model but are not wired to
-  the real stores at all, so no affordance can surface them yet.
-- **Camera rotation.** No support anywhere in the codebase, and no decision recorded.
+  the real stores at all. The preview cube turns red for a destructive tool; that is tool state, not
+  a validity check.
+- **Physics that consumes the material table.** `map-instances.ts` resolves every placed block to a
+  material with friction, density and movement cost, and `collision.ts` still reads the block store
+  directly and ignores all of it. The **data** exists; the wiring does not.
+
+Two entries that used to live here are now implemented, and claiming otherwise wastes a task:
+**undo/redo** exists as a snapshot stack (`tools/map-builder/src/editor/map-state.ts`), and **camera
+rotation** exists in four views with an animated turn (`rotating-isometric-camera`).
 
 These are absences, not defects. **Do not invent a convention to fill one.** Propose it through
 `meta-skill-evolution` as a draft, or ask. A rule invented to make a table look complete is exactly

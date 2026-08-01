@@ -30,6 +30,10 @@ export interface WorldBlockBody {
   readonly seed?: number;
   readonly facingMode?: string;
   readonly lockPalette?: boolean;
+  /** `'canonica'` manda o molde como referência; `'legado'` é o comportamento antigo. */
+  readonly geometry?: string;
+  /** PNG base64 da referência do usuário. Ausente = o molde do projeto. */
+  readonly referencePngB64?: string;
 }
 
 export interface WorldBlockAccepted {
@@ -67,6 +71,10 @@ export interface BlockFormInput {
   readonly seedText: string;
   readonly facingMode: string;
   readonly lockPalette: boolean;
+  /** `'canonica'` (padrão) ou `'legado'`. */
+  readonly geometry: string;
+  /** Base64 puro do PNG de referência. '' = usar o molde do projeto. */
+  readonly referencePngB64: string;
 }
 
 export type BuildResult =
@@ -134,6 +142,10 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
       // lockPalette só significa alguma coisa no modo orientado; enviá-lo no
       // uniforme sujaria o hash e criaria dois caches para o mesmo bloco.
       ...(oriented ? { lockPalette: input.lockPalette } : {}),
+      ...(input.geometry !== '' ? { geometry: input.geometry } : {}),
+      // A referência entra no hash. Mandar '' criaria um cache diferente do de
+      // "sem referência", que é a MESMA geração.
+      ...(input.referencePngB64 !== '' ? { referencePngB64: input.referencePngB64 } : {}),
     },
   };
 }

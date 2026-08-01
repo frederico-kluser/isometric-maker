@@ -50,21 +50,23 @@ spec on every run. Load the hub first, then the family.
 ## Knowledge — the isometric model, which is this repository's own
 
 Four skills own `packages/iso-core` and `tools/map-builder` — the layer that decides *what is true*
-about the world, as opposed to how it is drawn. Three of them existed as code with 290 + 73 passing
-tests and no skill pointing at them, which is how an agent ends up reimplementing `canEnter` or
-writing picking from the ADR's wrong constant. The fourth documents a decision **not** taken. Signal
-for all four: the package's own test suite.
+about the world, as opposed to how it is drawn. Three of them existed as code with hundreds of
+passing tests and no skill pointing at them, which is how an agent ends up reimplementing `canEnter`
+or writing picking from the ADR's wrong constant. The fourth started as a decision **not** taken and
+now documents the one that was. Signal for all four: the package's own test suite.
 
 | Skill | Owns | The trap it exists for |
 |---|---|---|
-| [`projecting-isometric-geometry`](projecting-isometric-geometry/SKILL.md) | the 2:1 projection, the floor rule, the diagonal identity, the depth key and the half-cell wall offset | `docs/adr/0013` states the diagonal as `(+1,+1)`; the correct value for its own geometry is `(+0.5,+0.5)` — see `docs/adr/0020` |
+| [`projecting-isometric-geometry`](projecting-isometric-geometry/SKILL.md) | the 2:1 projection, the cube's vertical edge, the floor rule, the diagonal identity, the depth key, the declared anchor | `zStep` is not a taste parameter: it is `sqrt((W²−H²)/2)`, and the `16` this repo shipped drew blocks at 40.8% of a cube — see `docs/adr/0024` |
 | [`simulating-isometric-physics`](simulating-isometric-physics/SKILL.md) | continuous xy over integer Z, support and edge rules, the one-level step, the screen-only jump parabola, deterministic replay | routing the step through `canCross` looks like deduplication and makes every staircase unwalkable |
-| [`editing-isometric-maps`](editing-isometric-maps/SKILL.md) | picking as a diagonal walk, the RLE column store, autotiling from returned rules, export that fails by absence | hit-testing sprites picks the wrong cell exactly at the diamond edges, where the user aims |
-| [`rotating-isometric-camera`](rotating-isometric-camera/SKILL.md) | the four-view question: rotation as discrete integer state, Z invariance, the `x+y` term that must be recomputed, the art budget nobody measured | the reference engine ships **two** sort implementations and still calls its occlusion fix partial — rotation is not "just a coordinate transform" |
+| [`editing-isometric-maps`](editing-isometric-maps/SKILL.md) | picking as a diagonal walk, the RLE column store, autotiling from returned rules, the two formats — RLE to author, instances to export | hit-testing sprites picks the wrong cell exactly at the diamond edges, where the user aims |
+| [`rotating-isometric-camera`](rotating-isometric-camera/SKILL.md) | the four views: discrete rotation state, Z invariance, the `x+y` term that must be recomputed, the animated turn, camera-fixed light | the reference engine ships **two** sort implementations and still calls its occlusion fix partial — and the sprite can never be rotated, only cross-faded |
 
-`editing-isometric-maps` also carries the list of what the editor **does not have** — brushes, undo,
-layer hiding by Z, placement feedback, camera rotation. Those are absences with no convention yet,
-and inventing one to fill the table is the failure this library exists to prevent.
+`editing-isometric-maps` also carries the list of what the editor **does not have** — multi-cell
+brushes, layer hiding by Z, placement validity feedback, and physics that actually consumes the
+material table. Those are absences with no convention yet, and inventing one to fill the table is the
+failure this library exists to prevent. Undo/redo and camera rotation used to be on that list and are
+now implemented; the skill says so, because a stale absence wastes a whole task.
 
 ## Knowledge — PixiJS, and what upstream cannot know
 

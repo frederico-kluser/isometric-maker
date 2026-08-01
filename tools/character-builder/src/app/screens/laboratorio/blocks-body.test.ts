@@ -24,6 +24,8 @@ function form(over: Partial<BlockFormInput> = {}): BlockFormInput {
     seedText: '',
     facingMode: 'uniform',
     lockPalette: true,
+    geometry: 'canonica',
+    referencePngB64: '',
     ...over,
   };
 }
@@ -121,4 +123,30 @@ test('lockPalette só vai no modo orientado — no uniforme sujaria o hash', () 
   assert.ok(orientado.ok);
   assert.equal(orientado.ok && orientado.body.lockPalette, false);
   assert.equal(orientado.ok && orientado.body.facingMode, 'oriented');
+});
+
+// ------------------------------------------------------------------ molde
+
+test('a geometria vai no body, e a canônica é a que a tela manda por padrão', () => {
+  const r = buildWorldBlockBody(form());
+  assert.equal(r.ok, true);
+  assert.equal(r.ok === true && r.body.geometry, 'canonica');
+});
+
+test('geometria em branco é OMITIDA — o servidor decide o default', () => {
+  const r = buildWorldBlockBody(form({ geometry: '' }));
+  assert.equal(r.ok, true);
+  assert.equal(r.ok === true && 'geometry' in r.body, false);
+});
+
+test('referência vazia é OMITIDA — mandar "" criaria um cache separado do mesmo bloco', () => {
+  const r = buildWorldBlockBody(form({ referencePngB64: '' }));
+  assert.equal(r.ok, true);
+  assert.equal(r.ok === true && 'referencePngB64' in r.body, false);
+});
+
+test('referência preenchida vai crua no body', () => {
+  const r = buildWorldBlockBody(form({ referencePngB64: 'iVBORw0KGgo=' }));
+  assert.equal(r.ok, true);
+  assert.equal(r.ok === true && r.body.referencePngB64, 'iVBORw0KGgo=');
 });

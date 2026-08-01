@@ -1,9 +1,17 @@
 /**
  * Cena isométrica do editor — PixiJS 8.
  *
- * Substitui `renderer.ts`, que desenhava retângulos coloridos: o que se via na
- * tela era um borrão, não um mapa. Aqui cada célula é um cubo isométrico de
- * verdade, com as três faces do gênero, e a câmera gira nas quatro vistas.
+ * ## O que mudou, e por que era um erro
+ *
+ * A versão anterior desenhava cada bloco com `sprite.width = tileWidth × zoom`
+ * e `sprite.height = (tileHeight + zStep) × zoom`. Sobre uma textura de 48×48
+ * isso é **escala não uniforme**: 1,333× na horizontal e 1,0× na vertical. O
+ * losango do topo da arte deixava de ser 2:1 e parava de costurar no grid — que
+ * é exatamente o "não fica em perspectiva correta" que se vê na tela, e que não
+ * é culpa da arte.
+ *
+ * Aqui a escala é sempre UNIFORME e a âncora é declarada, não inferida do canto
+ * do bounding box. Arte canônica (48×53) desenha em 1:1 vezes o zoom inteiro.
  *
  * ## Decisões de renderização (ADR 0013 + as skills de Pixi deste repo)
  *
@@ -17,22 +25,39 @@
  *
  * ## Ordem de desenho
  *
- * Por `depthAt`, que rotaciona a coordenada e só então soma. Um caminho, não
- * quatro expressões por vista. Empate desfeito por z, para que a coluna suba
- * de baixo para cima.
+ * Por `depthAt`, que rotaciona a coordenada (por um ângulo que pode ser
+ * fracionário durante o giro) e só então soma. Um caminho, não quatro
+ * expressões por vista. Empate desfeito por z, para que a coluna suba de baixo
+ * para cima.
  *
  * **A oclusão continua imperfeita, e isso é declarado.** O motor isométrico de
  * referência resolve ordem por comparação par-a-par de caixas 3D e mesmo assim
  * o mantenedor descreve a melhoria como "não perfeita". Uma cena acíclica de
  * uma vista pode ser cíclica de outra. A chave escalar aqui cobre o caso de
  * célula única — que é exatamente o que o formato de mapa permite.
+ *
+ * ## O giro
+ *
+ * A posição é interpolada; o sprite NUNCA é rotacionado. Girar pixel art por um
+ * ângulo que não seja múltiplo de 90° reamostra a imagem e transforma a arte
+ * paga em borrão durante a transição inteira. O que troca de vista é a FACE
+ * desenhada, por cross-fade — a de origem por baixo, opaca, a de destino por
+ * cima, com o alfa do progresso. Somar duas semitransparentes deixaria o fundo
+ * aparecer no meio do giro.
  */
 import { Application, Assets, Container, Sprite, Texture, TextureSource } from 'pixi.js';
 import type { MapData } from '@isometric-maker/iso-core/map';
 import { rotateDirectionIndex, type Rotation } from '@isometric-maker/iso-core/rotation';
 import {
+  ROTATION_DURATION_MS,
+  sampleTween,
+  startTween,
+} from '@isometric-maker/iso-core/rotation-tween';
+import { CANONICAL_CUBE } from '@isometric-maker/iso-core/iso-cube';
+import {
   DEFAULT_GEOMETRY,
   cellToScreen,
+  centerOn,
   depthAt,
   type Camera,
   type Cell3D,
@@ -40,11 +65,12 @@ import {
 } from './camera.ts';
 import {
   hueFromId,
-  makeCubeCanvas,
+  makeCubeCanvasFromHue,
+  makeCubeViewsFromHue,
   makeDiamondCanvas,
-  shadesFromHue,
-  type CubeGeometry,
+  rgba,
 } from './cube.ts';
+import { spriteBox } from './placement.ts';
 
 // ------------------------------------------------------------------ paleta
 
@@ -83,20 +109,40 @@ export interface SceneState {
   readonly highlight?: Cell3D | null;
 }
 
+export interface RotateOptions {
+  /** Células a manter enquadradas durante o giro. */
+  readonly cells: readonly Cell3D[];
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly durationMs?: number;
+}
+
 export interface IsoScene {
   readonly app: Application;
   /** Registra as peças da paleta e pré-carrega a arte das que têm PNG. */
   setPalette(blocks: readonly BlockDef[]): Promise<void>;
   render(state: SceneState): void;
+  /**
+   * Gira a câmera com animação e resolve com a câmera final.
+   *
+   * Quem chama só toca no estado UMA vez, no fim: React não reconcilia 60 vezes
+   * por segundo por causa de uma animação que vive no ticker do Pixi.
+   */
+  rotateTo(rotation: Rotation, options: RotateOptions): Promise<Camera>;
+  /** true enquanto um giro está em andamento — o cursor fica desligado. */
+  isRotating(): boolean;
   resize(width: number, height: number): void;
   destroy(): void;
 }
 
 // ------------------------------------------------------------------ cores fixas
 
-const GRID_STROKE = 'rgba(148, 163, 184, 0.28)';
+const GRID_STROKE = rgba(148, 163, 184, 71);
+const HIGHLIGHT_STROKE = rgba(56, 189, 248, 242);
+const HIGHLIGHT_FILL = rgba(56, 189, 248, 46);
 const PREVIEW_HUE_OK = 190;
 const PREVIEW_HUE_BAD = 5;
+const PREVIEW_ALPHA = 0.45;
 
 // ------------------------------------------------------------------ fábrica
 
@@ -106,11 +152,10 @@ export async function createIsoScene(
 ): Promise<IsoScene> {
   const geom = options.geometry ?? DEFAULT_GEOMETRY;
   const gridMargin = options.gridMargin ?? 4;
-  const cubeGeom: CubeGeometry = {
-    tileWidth: geom.tileWidth,
-    tileHeight: geom.tileHeight,
-    depth: geom.zStep,
-  };
+  // A geometria do cubo é a canônica quando a projeção também é. Uma projeção
+  // fora do padrão ainda desenha, mas a arte de reserva segue a canônica: um só
+  // molde, sempre.
+  const cubeGeom = CANONICAL_CUBE;
 
   const app = new Application();
   await app.init({
@@ -143,13 +188,16 @@ export async function createIsoScene(
     let used = 0;
     return {
       take(): Sprite {
-        const s = pool[used] ?? (() => {
-          const created = new Sprite();
-          pool.push(created);
-          parent.addChild(created);
-          return created;
-        })();
+        const s =
+          pool[used] ??
+          (() => {
+            const created = new Sprite();
+            pool.push(created);
+            parent.addChild(created);
+            return created;
+          })();
         s.visible = true;
+        s.alpha = 1;
         used += 1;
         return s;
       },
@@ -179,28 +227,31 @@ export async function createIsoScene(
     return tex;
   };
 
-  const gridTexture = fromCanvas(
-    makeDiamondCanvas(geom.tileWidth, geom.tileHeight, GRID_STROKE),
-  );
+  const gridTexture = fromCanvas(makeDiamondCanvas(cubeGeom, GRID_STROKE));
   const previewOk = fromCanvas(
-    makeCubeCanvas(cubeGeom, shadesFromHue(PREVIEW_HUE_OK, 70), 0.45),
+    makeCubeCanvasFromHue(PREVIEW_HUE_OK, cubeGeom, PREVIEW_ALPHA, 0.7),
   );
   const previewBad = fromCanvas(
-    makeCubeCanvas(cubeGeom, shadesFromHue(PREVIEW_HUE_BAD, 70), 0.45),
+    makeCubeCanvasFromHue(PREVIEW_HUE_BAD, cubeGeom, PREVIEW_ALPHA, 0.7),
   );
   const highlightTexture = fromCanvas(
-    makeDiamondCanvas(geom.tileWidth, geom.tileHeight, 'rgba(56,189,248,0.95)', 'rgba(56,189,248,0.18)'),
+    makeDiamondCanvas(cubeGeom, HIGHLIGHT_STROKE, HIGHLIGHT_FILL),
   );
 
   /** id da peça → textura por face; peça procedural tem a mesma nas quatro. */
   const artwork = new Map<string, Texture[]>();
 
-  /** Cubo procedural determinístico, criado sob demanda e cacheado. */
+  /**
+   * Cubo procedural determinístico, criado sob demanda e cacheado.
+   *
+   * QUATRO texturas, uma por vista — mesmo tom de face, desenho de material
+   * diferente. Uma textura só nas quatro vistas faria o giro parecer a mesma
+   * figura deslizando, que é o oposto do efeito de volume.
+   */
   function proceduralFor(id: string, hue?: number): Texture[] {
     const cached = artwork.get(id);
     if (cached) return cached;
-    const tex = fromCanvas(makeCubeCanvas(cubeGeom, shadesFromHue(hue ?? hueFromId(id))));
-    const four = [tex, tex, tex, tex];
+    const four = makeCubeViewsFromHue(hue ?? hueFromId(id), cubeGeom).map(fromCanvas);
     artwork.set(id, four);
     return four;
   }
@@ -237,7 +288,7 @@ export async function createIsoScene(
   };
 
   /**
-   * Textura da peça na vista atual.
+   * Textura da peça numa vista.
    *
    * `(facing + rotation) mod 4` é o mesmo reindexamento das 8 direções de
    * personagem, com N=4: cada giro de 90° avança exatamente uma face. É isto
@@ -251,27 +302,82 @@ export async function createIsoScene(
 
   // ------------------------------------------------------------------ desenho
 
+  /** Posiciona um sprite. A conta mora em `placement.ts`, que é testável. */
+  function place(
+    s: Sprite,
+    texture: Texture,
+    screen: { x: number; y: number },
+    zoom: number,
+    anchorX: number,
+    anchorY: number,
+  ): void {
+    s.texture = texture;
+    const box = spriteBox({
+      screenX: screen.x,
+      screenY: screen.y,
+      textureWidth: texture.width,
+      tileWidth: geom.tileWidth,
+      zoom,
+      anchorX,
+      anchorY,
+    });
+    s.scale.set(box.scale);
+    s.x = box.x;
+    s.y = box.y;
+  }
+
   interface Drawable {
     readonly cell: Cell3D;
-    readonly texture: Texture;
+    readonly block: string;
     readonly key: number;
   }
 
+  let lastState: SceneState | null = null;
+
+  const collect = (map: MapData, camera: Camera): Drawable[] => {
+    const drawables: Drawable[] = [];
+    for (const [key, runs] of Object.entries(map.blocks)) {
+      const [xs, ys] = key.split(':');
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      let z = 0;
+      for (const run of runs) {
+        if (run.block !== '') {
+          for (let i = 0; i < run.count; i += 1) {
+            const cell = { x, y, z: z + i };
+            drawables.push({ cell, block: run.block, key: depthAt(cell, camera) });
+          }
+        }
+        z += run.count;
+      }
+    }
+    drawables.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.cell.z - b.cell.z));
+    return drawables;
+  };
+
   const render = (state: SceneState): void => {
+    lastState = state;
     gridPool.reset();
     blockPool.reset();
     overlayPool.reset();
 
     const { map, camera } = state;
 
-    // --- células ocupadas ---
-    const drawables: Drawable[] = [];
+    // Durante o giro há DUAS vistas certas ao mesmo tempo. Fora dele, uma.
+    const turn = camera.turn;
+    const baixo = Math.floor(turn);
+    const alpha = turn - baixo;
+    const vistaA = (((baixo % 4) + 4) % 4) as Rotation;
+    const vistaB = ((((baixo + 1) % 4) + 4) % 4) as Rotation;
+    const girando = alpha > 0.0001;
+
+    // --- extensão da malha ---
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
-
-    for (const [key, runs] of Object.entries(map.blocks)) {
+    for (const key of Object.keys(map.blocks)) {
       const [xs, ys] = key.split(':');
       const x = Number(xs);
       const y = Number(ys);
@@ -280,24 +386,7 @@ export async function createIsoScene(
       maxX = Math.max(maxX, x);
       minY = Math.min(minY, y);
       maxY = Math.max(maxY, y);
-
-      let z = 0;
-      for (const run of runs) {
-        if (run.block !== '') {
-          for (let i = 0; i < run.count; i += 1) {
-            const cell = { x, y, z: z + i };
-            drawables.push({
-              cell,
-              texture: textureFor(run.block, camera.rotation),
-              key: depthAt(cell, camera),
-            });
-          }
-        }
-        z += run.count;
-      }
     }
-
-    // --- malha do chão ---
     // Sem conteúdo, a malha nasce ao redor da origem: um mapa vazio precisa de
     // algum lugar onde clicar.
     if (!Number.isFinite(minX)) {
@@ -306,55 +395,113 @@ export async function createIsoScene(
       minY = 0;
       maxY = 0;
     }
+
     for (let x = minX - gridMargin; x <= maxX + gridMargin; x += 1) {
       for (let y = minY - gridMargin; y <= maxY + gridMargin; y += 1) {
         const p = cellToScreen({ x, y, z: 0 }, camera, geom);
-        const s = gridPool.take();
-        s.texture = gridTexture;
-        s.width = geom.tileWidth * camera.zoom;
-        s.height = geom.tileHeight * camera.zoom;
-        s.x = p.x - (geom.tileWidth / 2) * camera.zoom;
-        s.y = p.y;
-        s.alpha = 1;
+        place(gridPool.take(), gridTexture, p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
       }
     }
 
     // --- blocos, do fundo para a frente ---
-    drawables.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.cell.z - b.cell.z));
-    for (const d of drawables) {
+    for (const d of collect(map, camera)) {
       const p = cellToScreen(d.cell, camera, geom);
-      const s = blockPool.take();
-      s.texture = d.texture;
-      // A arte cobre o losango MAIS a profundidade das laterais; ancorar pelo
-      // losango do topo é o que faz a peça assentar na célula certa.
-      s.width = geom.tileWidth * camera.zoom;
-      s.height = (geom.tileHeight + geom.zStep) * camera.zoom;
-      s.x = p.x - (geom.tileWidth / 2) * camera.zoom;
-      s.y = p.y;
-      s.alpha = 1;
+      const base = blockPool.take();
+      place(base, textureFor(d.block, vistaA), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
+      if (girando) {
+        // A vista de destino vai POR CIMA, com o alfa do progresso. A de
+        // origem fica opaca embaixo: duas semitransparentes deixariam o fundo
+        // aparecer através do bloco no meio do giro.
+        const topo = blockPool.take();
+        place(topo, textureFor(d.block, vistaB), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
+        topo.alpha = alpha;
+      }
     }
 
     // --- realce da célula atingida ---
     if (state.highlight) {
       const p = cellToScreen(state.highlight, camera, geom);
-      const s = overlayPool.take();
-      s.texture = highlightTexture;
-      s.width = geom.tileWidth * camera.zoom;
-      s.height = geom.tileHeight * camera.zoom;
-      s.x = p.x - (geom.tileWidth / 2) * camera.zoom;
-      s.y = p.y;
+      place(overlayPool.take(), highlightTexture, p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
     }
 
     // --- cubo semitransparente de preview ---
     if (state.preview) {
       const p = cellToScreen(state.preview, camera, geom);
-      const s = overlayPool.take();
-      s.texture = state.previewInvalid === true ? previewBad : previewOk;
-      s.width = geom.tileWidth * camera.zoom;
-      s.height = (geom.tileHeight + geom.zStep) * camera.zoom;
-      s.x = p.x - (geom.tileWidth / 2) * camera.zoom;
-      s.y = p.y;
+      place(
+        overlayPool.take(),
+        state.previewInvalid === true ? previewBad : previewOk,
+        p,
+        camera.zoom,
+        cubeGeom.anchorX,
+        cubeGeom.anchorY,
+      );
     }
+  };
+
+  // ------------------------------------------------------------------ giro
+
+  let rotating = false;
+
+  const rotateTo = (rotation: Rotation, opts: RotateOptions): Promise<Camera> => {
+    const state = lastState;
+    if (!state) {
+      return Promise.resolve({ ...DEFAULT_CAMERA_FALLBACK, rotation, turn: rotation });
+    }
+    const de = state.camera.rotation;
+    const duracao = opts.durationMs ?? ROTATION_DURATION_MS;
+
+    const settle = (): Camera => {
+      const pan = centerOn(
+        opts.cells,
+        rotation,
+        opts.viewportWidth,
+        opts.viewportHeight,
+        state.camera.zoom,
+        geom,
+      );
+      return { rotation, turn: rotation, zoom: state.camera.zoom, ...pan };
+    };
+
+    if (de === rotation || duracao <= 0) {
+      const final = settle();
+      render({ ...state, camera: final, preview: null, highlight: null });
+      return Promise.resolve(final);
+    }
+
+    rotating = true;
+    const tween = startTween(de, rotation, performance.now(), duracao);
+
+    return new Promise<Camera>((resolve) => {
+      const tick = (): void => {
+        const sample = sampleTween(tween, performance.now());
+        // Reenquadrar a cada quadro é o que faz o mapa girar em torno do
+        // próprio centro. Sem isso ele descreve um arco e sai da tela no meio.
+        const pan = centerOn(
+          opts.cells,
+          sample.turn,
+          opts.viewportWidth,
+          opts.viewportHeight,
+          state.camera.zoom,
+          geom,
+        );
+        const camera: Camera = {
+          rotation: sample.done ? rotation : de,
+          turn: sample.turn,
+          zoom: state.camera.zoom,
+          ...pan,
+        };
+        // Durante o giro não existe célula sob o cursor: mostrar preview seria
+        // prometer uma colocação que o clique não faria.
+        render({ ...state, camera, preview: null, highlight: null });
+
+        if (sample.done) {
+          app.ticker.remove(tick);
+          rotating = false;
+          resolve(settle());
+        }
+      };
+      app.ticker.add(tick);
+    });
   };
 
   const resize = (width: number, height: number): void => {
@@ -371,5 +518,14 @@ export async function createIsoScene(
     app.destroy(true, { children: true, texture: true, textureSource: true });
   };
 
-  return { app, setPalette, render, resize, destroy };
+  return { app, setPalette, render, rotateTo, isRotating: () => rotating, resize, destroy };
 }
+
+/** Só para o caso impossível de girar antes do primeiro desenho. */
+const DEFAULT_CAMERA_FALLBACK: Camera = {
+  rotation: 0,
+  turn: 0,
+  panX: 0,
+  panY: 0,
+  zoom: 2,
+};

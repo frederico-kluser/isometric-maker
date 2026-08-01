@@ -38,9 +38,15 @@ import {
 } from '@isometric-maker/iso-core/rotation';
 import {
   DEFAULT_GEOMETRY,
-  centerOn,
+  framedCamera,
   type Camera,
 } from '../camera.ts';
+import { buildExport } from '@isometric-maker/iso-core/map-instances';
+import {
+  DEFAULT_BLOCKS,
+  makeCatalog,
+  type BlockCatalog,
+} from '@isometric-maker/iso-core/block-catalog';
 import { pick3d, pickColumnTop, type Pick3DResult } from '../pick3d.ts';
 import { createIsoScene, type BlockDef, type IsoScene } from '../scene.ts';
 import {
@@ -95,6 +101,9 @@ export function MapEditor() {
   const [selectedBlock, setSelectedBlock] = useState<string>(FALLBACK_BLOCKS[0]!.id);
   const [paletteLoading, setPaletteLoading] = useState(true);
   const [generatedCount, setGeneratedCount] = useState(0);
+  // O catálogo é lido só na exportação, então vive num ref: guardá-lo em estado
+  // faria a árvore reconciliar por um dado que nenhum componente desenha.
+  const catalogRef = useRef<BlockCatalog>(makeCatalog(DEFAULT_BLOCKS));
 
   const [tool, setTool] = useState<Tool>('empilhar');
   const [history, setHistory] = useState<History>(() =>
@@ -102,6 +111,7 @@ export function MapEditor() {
   );
   const [camera, setCamera] = useState<Camera>({
     rotation: 0,
+    turn: 0,
     panX: 0,
     panY: 0,
     zoom: 2,
@@ -124,6 +134,7 @@ export function MapEditor() {
     void loadPalette().then((loaded) => {
       if (cancelled) return;
       setBlocks(loaded.blocks);
+      catalogRef.current = loaded.catalog;
       setGeneratedCount(loaded.generatedCount);
       setPaletteLoading(false);
       const first = loaded.blocks[0];
@@ -161,7 +172,7 @@ export function MapEditor() {
       // Enquadra o mapa inicial: nascer fora da tela é o jeito mais rápido de
       // um editor parecer quebrado.
       setCamera((c) =>
-        centerOn(
+        framedCamera(
           occupiedCells(stateRef.current.map),
           c.rotation,
           host.clientWidth,
@@ -305,25 +316,34 @@ export function MapEditor() {
 
   const host = hostRef.current;
 
-  const rotateTo = useCallback(
-    (rotation: Rotation) => {
-      const box = hostRef.current;
-      setCamera((c) =>
-        box
-          ? centerOn(
-              occupiedCells(stateRef.current.map),
-              rotation,
-              box.clientWidth,
-              box.clientHeight,
-              c.zoom,
-              GEOM,
-            )
-          : { ...c, rotation },
-      );
-      setPickState(null);
-    },
-    [],
-  );
+  /**
+   * Gira a câmera com animação.
+   *
+   * A animação vive no ticker do PixiJS, não no React: reconciliar a árvore 60
+   * vezes por segundo por causa de uma transição de 280 ms seria pagar caro por
+   * um efeito visual. O React só recebe o estado UMA vez, quando o giro
+   * termina — e a cena, que já está desenhando, devolve a câmera final.
+   *
+   * Girar durante um giro é ignorado: encadear tweens sobre o mesmo alvo faria
+   * a câmera passar do ponto e voltar.
+   */
+  const rotateTo = useCallback((rotation: Rotation) => {
+    const scene = sceneRef.current;
+    const box = hostRef.current;
+    if (!scene || !box) {
+      setCamera((c) => ({ ...c, rotation, turn: rotation }));
+      return;
+    }
+    if (scene.isRotating()) return;
+    setPickState(null);
+    void scene
+      .rotateTo(rotation, {
+        cells: occupiedCells(stateRef.current.map),
+        viewportWidth: box.clientWidth,
+        viewportHeight: box.clientHeight,
+      })
+      .then(setCamera);
+  }, []);
 
   const zoomBy = useCallback((delta: number) => {
     setCamera((c) => {
@@ -365,8 +385,22 @@ export function MapEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Exporta no formato v2: cada bloco colocado sai com id, posição x,y,z, tipo
+   * e material já resolvidos.
+   *
+   * O formato de AUTORIA continua sendo a coluna RLE — compacta e sem buracos.
+   * O de EXPORTAÇÃO é a lista de instâncias, porque quem vai escrever física em
+   * cima não deveria precisar decodificar RLE nem carregar a paleta para saber
+   * se uma célula é sólida.
+   */
   const handleExport = useCallback(() => {
-    const blob = new Blob([`${JSON.stringify(stateRef.current.map, null, 2)}\n`], {
+    const dados = buildExport(stateRef.current.map, catalogRef.current, {
+      tileWidth: GEOM.tileWidth,
+      tileHeight: GEOM.tileHeight,
+      cubeHeight: GEOM.zStep,
+    });
+    const blob = new Blob([`${JSON.stringify(dados, null, 2)}\n`], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);

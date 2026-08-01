@@ -10,6 +10,7 @@ import {
   type ProjectV1,
 } from './project.ts';
 import { type MapData } from './map.ts';
+import { CANONICAL_CUBE } from './iso-cube.ts';
 
 describe('project v1', () => {
   /** Directório temporário descartável para cada bloco. */
@@ -125,13 +126,17 @@ describe('project v1', () => {
   // Campos obrigatórios
   // ------------------------------------------------------------------
 
-  it('criarProject preenche geometria padrão', () => {
+  it('criarProject preenche a geometria canônica do cubo', () => {
     const project = criarProject('teste', []);
 
     assert.strictEqual(project.schemaVersion, 1);
-    assert.strictEqual(project.geometria.tileWidth, 64);
-    assert.strictEqual(project.geometria.tileHeight, 32);
-    assert.strictEqual(project.geometria.zStep, 16);
+    // Era 64/32/16. O 16 era o erro: com W=64 um cubo pede zStep 39, então o
+    // bloco saía com 40,8 % da altura de um cubo. A geometria agora vem de
+    // `iso-cube.ts`, e o zStep É a aresta vertical do cubo.
+    assert.strictEqual(project.geometria.tileWidth, CANONICAL_CUBE.tileWidth);
+    assert.strictEqual(project.geometria.tileHeight, CANONICAL_CUBE.tileHeight);
+    assert.strictEqual(project.geometria.zStep, CANONICAL_CUBE.cubeHeight);
+    assert.strictEqual(project.geometria.tileHeight, project.geometria.tileWidth / 2);
     assert.strictEqual(typeof project.data, 'string');
     // data é ISO-8601 válida
     assert.ok(!Number.isNaN(Date.parse(project.data)));

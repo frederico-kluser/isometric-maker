@@ -8,7 +8,7 @@
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc && vite build",
-    "test": "node --test src/autotile.test.ts src/export.test.ts src/picking.test.ts src/camera.test.ts src/editor/map-state.test.ts"
+    "test": "node --test src/autotile.test.ts src/export.test.ts src/picking.test.ts src/camera.test.ts src/placement.test.ts src/editor/map-state.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

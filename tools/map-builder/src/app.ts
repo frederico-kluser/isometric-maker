@@ -13,6 +13,7 @@
 
 import { createMapRenderer, type MapRenderer } from "./renderer.ts";
 import type { MapData } from "@isometric-maker/iso-core/map";
+import { CANONICAL_CUBE } from "@isometric-maker/iso-core/iso-cube";
 
 /** Geometria da projecção isométrica (evita importar project.ts que usa node:crypto). */
 interface ProjectGeometry {
@@ -59,10 +60,17 @@ const FIXTURE_MAP: MapData = {
 
 // ------------------------------------------------------------------ geometria
 
+/**
+ * Geometria: a canônica de `iso-cube.ts`, sem número copiado.
+ *
+ * Era `64 / 32 / 16` — e o `16` estava errado por um fator de 2,45. Este
+ * módulo é o renderizador antigo, superado por `scene.ts`, mas duplicar aqui a
+ * constante errada é justamente como ela voltaria para o código novo.
+ */
 const GEOMETRY: ProjectGeometry = {
-	tileWidth: 64,
-	tileHeight: 32,
-	zStep: 16,
+	tileWidth: CANONICAL_CUBE.tileWidth,
+	tileHeight: CANONICAL_CUBE.tileHeight,
+	zStep: CANONICAL_CUBE.cubeHeight,
 };
 
 // ------------------------------------------------------------------ main

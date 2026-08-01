@@ -57,8 +57,12 @@
       "why": "rotation changes which configurations hit cyclic occlusion, so the multi-cell ban stays load-bearing"
     },
     {
-      "must_contain": "without an ADR",
-      "why": "rotation touches geometry, depth, input, art budget and the project format at once"
+      "must_contain": "non-multiple of 90",
+      "why": "rotating pixel art by a fractional angle resamples it and smears the paid art for the whole transition; this is the constraint that rules out spinning the container and forces the cross-fade"
+    },
+    {
+      "must_contain": "zero claims that survived verification",
+      "why": "the turn duration and easing curve have no external corroboration; presenting them as a community convention launders a project choice into a fact"
     }
   ],
   "check_provenance": true
