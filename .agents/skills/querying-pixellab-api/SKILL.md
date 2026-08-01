@@ -44,6 +44,12 @@ The vendored snapshot is the source of truth, not your memory and not any blog:
 a guide in this same machine going stale and being wrong by an order of magnitude on price
 (`docs/01-pixellab/delta-vs-guia-antigo.md:16@11e43044`).
 
+This spec is fetched from `/v2/openapi.json`, but it already contains v3 endpoints —
+`/create-character-v3`, `/generate-8-rotations-v3`, `/animate-with-text-v3`, `/inpaint-v3` —
+alongside their v2 predecessors. The v3 operationIds and schemas share the `/v2/` URL prefix
+regardless of the label. There is no separate `/v3/openapi.json` — the URL returns 404 as of
+2026-07-29 — so this single snapshot is the whole surface.
+
 ### One command instead of a 387 KB file
 
 Run the bundled script — do not load the spec into context:
@@ -77,8 +83,11 @@ endpoint's range as if it were the API's range is wrong for most of the surface.
 
 **The status code does not say whether an endpoint is asynchronous.** 36 POSTs hand back a
 `background_job_id`; only 23 of them declare `202`. The other 13 — every character-creation
-endpoint, `/map-objects`, `/generate-8-rotations-v3`, `/animate-with-text-v3`,
-`/create-1-direction-object` — answer `200` with a job id in the body. Two more,
+endpoint (seven paths, from `/create-character-with-4-directions` through
+`/create-character-state`), all three object-lifecycle endpoints (`/create-1-direction-object`,
+`/create-8-direction-object`, `/objects/{object_id}/states`), plus `/map-objects`,
+`/generate-8-rotations-v3`, and `/animate-with-text-v3` — answer `200` with a job id in the
+body. Two more,
 `/create-tileset` and `/create-isometric-tile`, declare **both** and may answer either.
 
 Branch on the presence of `background_job_id`, never on the code. Anything testing

@@ -35,11 +35,11 @@ Indexing frames by the enum's position is the single most reproducible way to sh
 
 ### The three endpoints do different jobs
 
-| Endpoint | Input | Output | Sync? |
-|---|---|---|---|
-| `/rotate` | one image + from/to direction and view | **one** rotated image | **synchronous** |
-| `/generate-8-rotations-v2` | reference, concept or description | 8 images | async, `202` |
-| `/generate-8-rotations-v3` | `first_frame` only | 8 frames | async, answers **`200`** |
+| Endpoint | Input | Output | Sync? | Notes |
+|---|---|---|---|---|---|
+| `/rotate` | one image + from/to direction and view | **one** rotated image | **synchronous** | single-frame rotator + view-change |
+| `/generate-8-rotations-v2` | reference, concept or description | 8 images | async, `202` | rotator and creator — has `method` field |
+| `/generate-8-rotations-v3` | `first_frame` (Base64Image, max **256×256**) | 8 frames | async, answers **`200`** | strictly a rotator — no `method` field |
 
 `/rotate` is the only one that changes **camera view** as well as facing. Both `from_view` and
 `to_view` take `CameraView` = side, low top-down, high top-down
@@ -54,7 +54,8 @@ to do" and results are unreliable. Rotating within one view works; tilting betwe
 
 - `/rotate`: 16–200
 - `/generate-8-rotations-v2`: **32–168**
-- `/generate-8-rotations-v3`: `first_frame` up to **256×256**
+- `/generate-8-rotations-v3`: `first_frame` up to **256×256** (`V3OutputImageSize` min=32 max=256;
+  the spec says "max 256x256 pixels")
 
 There is no global size rule in this API — `ImageSize` is namespaced per endpoint. Quoting one
 endpoint's range as if it were the family's is wrong for two of the three.
@@ -65,9 +66,18 @@ endpoint's range as if it were the family's is wrong for two of the three.
 create_from_concept — so it can also **create** a character from scratch, not just rotate one, and it
 accepts `description`, `style_description` and `concept_image`.
 
-`/generate-8-rotations-v3` takes only `first_frame`, an optional `description` to improve consistency,
-`no_background` and `seed`. It is strictly a rotator. It also documents its own polling cadence
-(every 2–5 seconds) and a typical generation time of 30–180 seconds.
+`/generate-8-rotations-v3` takes only `first_frame` (required, `Base64Image`, max 256×256 —
+the spec says "max 256x256 pixels"), an optional `description` (string, max 2000 chars), optional
+`no_background` (boolean), and optional `seed` (integer, min 0, default 0). It has no `method`
+field — it is strictly a rotator, unlike v2 whose `method` ∈ rotate_character, create_with_style,
+create_from_concept.
+
+The `description` field is documented as: "Optional description of the subject in the reference
+frame, used to improve rotation consistency. The subject is always analyzed from the reference
+frame; this text is taken into account as an extra hint."
+
+It also documents its own polling cadence (every 2–5 seconds) and a typical generation time of
+30–180 seconds.
 
 Neither persists a character. If you want the result stored, animatable and listable, use
 `/create-character-pro` with `method='rotate_character'` or `/create-character-v3` with a
@@ -75,9 +85,10 @@ Neither persists a character. If you want the result stored, animatable and list
 
 ### v3 answers 200 while being asynchronous
 
-`/generate-8-rotations-v3` returns `background_job_id` under status **`200`**, not `202`. Frames
-arrive at `last_response.images` on the background job. Branch on the presence of
-`background_job_id`, never on the code.
+`/generate-8-rotations-v3` returns `Generate8RotationsV3Response` — `background_job_id` (required)
+and `status` — under status **`200`**, not `202`. No `character_id` is returned: v3 produces
+frames only, not a persisted character. Frames arrive at `last_response.images` on the background
+job. Branch on the presence of `background_job_id`, never on the code.
 
 ```bash
 S=.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs

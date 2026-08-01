@@ -29,8 +29,8 @@ node $S flow /create-character-v3
 
 | Endpoint | Size range | Cost order | What it ignores |
 |---|---|---|---|
-| `/create-character-v3` (reference_image) | 16–256 advisory | ceil(w×h×8 / 65536) gen | `outline`, `detail` |
-| `/create-character-v3` (from-scratch) | 32–256 | 1 + ceil(s²×8 / 65536) gen | — |
+| `/create-character-v3` (reference_image) | 32–256 (schema floor); desc mentions 16–256 for from-scratch, may route via Pixen first | ceil(w×h×8 / 65536) gen | `outline`, `detail` |
+| `/create-character-v3` (from-scratch) | 32–256 (schema); 16–256 in endpoint prose — contradiction not yet resolved | 1 + ceil(s²×8 / 65536) gen | — |
 | `/create-character-with-8-directions` `mode='standard'` | 16–128 | 1 generation | — |
 | `/create-character-with-8-directions` `mode='pro'` | 16–128 | 20–40 generations | `outline`, `shading`, `detail`, `proportions`, `text_guidance_scale` |
 | `/create-character-pro` | 32–168 | 20–40 generations | style-hint fields; takes `style_description` |
@@ -62,8 +62,9 @@ poll: the money left at submit, and the id is the only way back to the artefact.
 
 Three different inflation rules coexist, and using the wrong one crops heads off:
 
-- `/create-character-v3` (reference_image): canvas padded **~2x** for animation room, capped at 256.
-  `image_size` is advisory — the model picks the output size.
+- `/create-character-v3` (both modes): final canvas padded **~2x** for animation room, capped at 256
+  (per endpoint description: "Final canvas is padded ~2x for animation room (capped at 256).").
+  In reference_image mode `image_size` is advisory — the model picks the output size.
 - `/create-character-with-8-directions` inflates by **~40%** — ask 64×64, get roughly 90×90
   (`tools/pixellab-pipeline/src/endpoints.ts:80@7e700048`).
 - `/create-character-pro` pads the persisted canvas to **~2x** the requested frame size.
@@ -74,18 +75,29 @@ Crop against the returned metadata, never against the requested value.
 
 `create-character-v3` with `reference_image` takes a single south-facing sprite (max 256×256,
 base64) and rotates it into 8 directions. `outline` and `detail` are **ignored** when
-`reference_image` is present — the spec says so explicitly. `template_id` picks the skeleton
-template: `mannequin` (biped, default), `bear`, `cat`, `dog`, `horse`, or `lion`. `view` sets
+`reference_image` is present — the spec says so explicitly. `template_id` picks the 3D skeleton
+template the estimator fits to the generated frames (six values in the spec:
+`mannequin` (biped, default), `bear`, `cat`, `dog`, `horse`, `lion` for quadrupeds).
+**Must match the body type in `reference_image`.** `view` sets
 the camera angle: `low top-down`, `high top-down`, or `side`.
+
+`name` is the display name and defaults to the first 50 characters of `description` when omitted
+or `null`. There is no need to pass it separately unless you want a different label from the
+prompt text.
 
 The old `directions` map (frozen cardinals) from the 8-directions endpoint does not exist on
 v3 — the model handles rotation internally.
 
-### Response: dictionary, never an array
+### Response: dictionary, never an array; v3 returns both `character_id` and `background_job_id`
 
 All character endpoints return frames keyed by direction name (e.g. `rotation_urls.south`,
 `rotation_urls.south-west`). Index by direction name, never by position — there is no array
 whose order you could be reading.
+
+`create-character-v3` returns both `character_id` and `background_job_id` in the 200 response
+body. The character row is created immediately with `status='processing'` and transitions to
+`completed` once frame generation, upload, and 3D skeleton reconstruction finish. Persist the
+`character_id` before the first poll — it is the only key back to the artefact.
 
 ### Reference images per direction have rules the spec states only in prose
 

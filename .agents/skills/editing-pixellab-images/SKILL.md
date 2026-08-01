@@ -34,13 +34,25 @@ bleeding past the mask boundary. Turning it off is how you get soft edges in pix
 | Endpoint | Size | Sync? |
 |---|---|---|
 | `/inpaint` | max area 200×200 | **synchronous**, may answer `529` |
-| `/inpaint-v3` | inpainting image 32–512, context image up to 1024 | async, `202` |
+| `/inpaint-v3` | inpainting image 32–512 px, mask must match, context ≤ 1024 px (deprecated) | async, `202` |
 | `/edit-image` | reference and target both 16–400 | async, `202` |
 | `/edit-images-v2` | 32–512 output, inputs ≤ 512 each, **1–16 images** | async, `202` |
 | `/resize` | 16–200, both source and target | **synchronous** |
 | `/remove-background` | max area 400×400 | **synchronous** |
 | `/image-to-pixelart` | input 16–1280, **output 16–320** | **synchronous** |
 | `/image-to-pixelart-pro` | any PNG/JPEG, >2048px scaled down first | async, `202` |
+
+### `/inpaint-v3` response is a background job, not an image
+
+The endpoint is "Inpaint image (Pro)" in the spec — AI-powered inpainting that edits specific areas
+from a text `description` (required, 1–2000 characters). It returns **202** with `InpaintV3Response`,
+which contains a `background_job_id` (required) and a `status` field defaulting to `"processing"`.
+The inpainted image is not in this response — it arrives in `last_response` of
+`GET /v2/background-jobs/{job_id}`, polled every 5–10 s until `"completed"`.
+
+The `mask_image` must have the **same pixel dimensions** as the `inpainting_image` — a size
+mismatch is a validation error, not a quality problem. `context_image` and `bounding_box` are
+both marked `deprecated: true` in the schema; they are accepted and ignored (see below).
 
 `/edit-image` has a documented **free-tier ceiling of 200×200** on the target canvas that the schema
 range (16–400) does not express (`docs/01-pixellab/custos-e-limites.md:142@fe52f3d5`). The 422 only

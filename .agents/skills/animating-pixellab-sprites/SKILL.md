@@ -28,7 +28,14 @@ directions cost 8 generations or 320 depending on one string field.
 The project's default is `template` and `pro` is refused without a recorded decision
 (`docs/adr/0006-animacao-em-template-mode.md:5@554b0d42`). The API's own text says `pro` "usually
 produces **lower** quality" than `v3` while costing far more — so the expensive mode is also the
-worse one. On objects, `/objects/{object_id}/animations` defaults to `v3` and carries that cost
+worse one.
+
+**v3 is the API's default on `/animate-character`**: when `template_animation_id` is omitted, the
+endpoint falls back to `mode='v3'` automatically. Unlike template mode (which animates every
+direction the character has), v3 defaults to **south only** — omitting `directions` in v3 mode
+delivers one direction, not eight.
+
+On objects, `/objects/{object_id}/animations` defaults to `v3` and carries that cost
 warning inline.
 
 One job is queued **per direction**. Eight directions is eight jobs, eight ids to persist, and eight
@@ -48,22 +55,35 @@ The three the catalog uses are inside the visible prefix and are safe:
 ### `directions` defaults differ by mode, and the surprise is expensive in one direction and useless in the other
 
 Same field, opposite defaults: **template mode defaults to every direction the character has**;
-custom mode defaults to **south only**. Omitting it in template mode buys eight animations when you
-wanted one. Omitting it in custom mode delivers one when you needed eight.
+v3 mode defaults to **south only**. Omitting it in template mode buys eight animations when you
+wanted one. Omitting it in v3 mode delivers one when you needed eight. Since v3 is the API's
+default on `/animate-character`, the trap is now reachable without ever setting `mode`.
 
 ### Frame count is a negotiation, not a setting
 
-Three endpoints, three different rules:
+Four endpoints, four different rules:
 
 - `/animate-with-text` takes `n_frames` in the 2–20 range with default 4, and its own description
   says "the model will always generate 4 frames". The parameter does not do what it says. This
   endpoint also accepts **only 64×64**, exactly.
 - `/animate-with-text-v2` has **no frame-count parameter at all** — the count follows the size:
   32×32 and 64×64 return 16 frames, while 128, 170 and 256 return 4.
-- `/animate-with-text-v3` takes `frame_count` 4–16 and it **must be even**, under a pixel budget of
+- `/animate-character` takes `frame_count` 4–16, must be even, default 8 — but only in **v3 mode**.
+  In template mode the frame count is set by the template and `frame_count` is ignored.
+- `/animate-with-text-v3` takes `frame_count` 4–16, must be even, default 8, under a pixel budget of
   `width × height × frame_count ≤ 524288`
   (`tools/pixellab-pipeline/src/endpoints.ts:207@b6e61f99`). Ask for 128×128 with 16 frames and the
-  request is rejected after you have already built it.
+  request is rejected after you have already built it. It also takes:
+  - `last_frame` (Base64Image, max 256×256): optional end pose. Providing it enables interpolation
+    from `first_frame` toward `last_frame` instead of inventing motion from `action`.
+  - `drift_threshold` (number, ≥0): color de-flicker sensitivity. Frames whose foreground drifts
+    from the first frame beyond this threshold are corrected toward it; 0 corrects every frame,
+    higher values correct fewer. Omit for the default.
+  - `enhance_prompt` (boolean, default false): auto-expands `action` into a richer motion
+    description before generating. The response includes both `enhanced_prompt` and `enhance_usage`
+    (separate charge). Uses `first_frame` (and `last_frame` for interpolation) to ground the
+    description.
+  - `first_frame` is capped at **256×256 pixels** explicitly, not the general `V3OutputImageSize`.
 
 `/animate-with-skeleton` has a stricter, undocumented-looking rule that the spec does state:
 `skeleton_keypoints` requires **exactly 3 frames** — it is a three-frame window model, and any other
@@ -88,6 +108,10 @@ Passing `end_frame` to `mode='v3'` silently switches the endpoint into interpola
 inventing motion from the action text, it animates **between** the start pose and the pose you gave.
 `custom_start_frame` replaces the character's own rotation as frame zero, and `keep_first_frame=false`
 stores exactly `frame_count` frames rather than the reference plus the frames.
+
+On objects (`/objects/{object_id}/animations`), when `end_frame` or `custom_start_frame` is provided
+in v3 mode, **exactly one direction must be specified** in `directions` — the endpoint rejects
+multi-direction requests with either frame override.
 
 The dedicated `/interpolation-v2` does the same between two arbitrary keyframes, capped at 16–128px
 output, and is a Pro endpoint.

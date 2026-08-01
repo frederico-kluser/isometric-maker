@@ -88,15 +88,40 @@ the only one whose `negative_description` is documented as functional.
 
 ### Prompt enhancement is a separate, separately billed call
 
-`/enhance-pixen-prompt`, `/enhance-character-v3-prompt` and `/enhance-animation-v3-prompt` are
-synchronous, return `enhanced_prompt`, and cost a small amount of their own. Several generation
-endpoints take `enhance_prompt: true` to do it inline — and when they do, they return **both**
-`enhanced_prompt` and a separate `enhance_usage`, so a single call produces **two** charges. Cost
-accounting that reads only `usage` undercounts.
+`/enhance-pixen-prompt`, `/enhance-character-v3-prompt` and `/enhance-animation-v3-prompt` are all
+synchronous, return `enhanced_prompt`, and cost a small amount of their own. Several v2 image
+generation endpoints take `enhance_prompt: true` to do it inline — and when they do, they return
+**both** `enhanced_prompt` and a separate `enhance_usage`, so a single call produces **two** charges.
+Cost accounting that reads only `usage` undercounts.
+
+The v3 generation endpoints (`/create-character-v3`, `/animate-with-text-v3`) do **not** offer an
+`enhance_prompt: true` inline option — enhancement is always a separate call.
+
+**`/enhance-character-v3-prompt`** (synchronous, POST):
+
+- Required: `description` (max 2000 chars), `image_size` (V3OutputImageSize, 32–256)
+- Optional: `view` (enum: `low top-down`, `high top-down`, `side`; default `low top-down`),
+  `outline` (free string, soft guidance — same as `create-character-v3`),
+  `detail` (free string, soft guidance — same as `create-character-v3`)
+- Returns: `enhanced_prompt` (string) + `usage` (nullable)
+- Responses: 200, 401, 402, 422
+- Note: `outline` and `detail` are soft hints like the v3 character endpoint,
+  NOT the strict enums used by image endpoints
+
+**`/enhance-animation-v3-prompt`** (synchronous, POST):
+
+- Required: `first_frame` (Base64Image), `action` (max 500 chars, e.g. "walking", "jumping",
+  "sword swing")
+- Optional: `last_frame` (Base64Image). When provided, the enhanced prompt describes the
+  interpolated motion between `first_frame` and `last_frame`; without it, the enhancement
+  describes animation from the single frame's visible pose.
+- Returns: `enhanced_prompt` (string) + `usage` (nullable)
+- Responses: 200, 401, 402, 422
 
 ```bash
 S=.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs
 node $S tag "Create Image"
+node $S tag "Enhance Prompt"    # the three enhancement endpoints
 node $S endpoint /create-image-pixen
 node $S flow /generate-image-v2
 ```
