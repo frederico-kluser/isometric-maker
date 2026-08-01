@@ -135,10 +135,14 @@ export type Silhouette =
 	| "quadrupede";
 
 /**
- * The wizard's steps, in order. "pronto" is terminal: from then on the frame
- * contract (`Studio.lock`) is immutable and the mannequin is just a character.
+ * Wizard steps, in order. The cardinals step was removed with the v3 migration:
+ * `create-character-v3` rotates the south-facing `reference_image` directly into
+ * 8 directions — no intermediate `/rotate` calls needed.
+ *
+ * "pronto" is terminal: from then on the frame contract (`Studio.lock`) is
+ * immutable and the mannequin is just a character.
  */
-export type WizardStage = "sul" | "cardeais" | "direcoes8" | "pronto";
+export type WizardStage = "sul" | "direcoes8" | "pronto";
 
 /** One accepted version of the south face. The art itself lives in the cell
  *  under `southKey(characterId)` — this history keeps the prompt that made it. */
@@ -275,25 +279,27 @@ export type OutlineOption = (typeof OUTLINE_OPTIONS)[number];
  * derived character inherits frameCount/fps/size, and the UI stops offering
  * the choice.
  *
+ * With the v3 migration (2026-07-31):
+ * - `size` range is now 32–256 (`create-character-v3` from-scratch range;
+ *   reference mode is advisory).
+ * - `shading` and `guidanceScale` removed — `create-character-v3` has no
+ *   `shading` parameter, and `text_guidance_scale` does not exist on the
+ *   v3 endpoint.
+ * - `detail` and `outline` remain but are IGNORED when `reference_image` is
+ *   provided (the progressivo mode); they only apply in from-scratch mode.
+ *
  * The quality fields are OPTIONAL and ride the same lock: when present they
- * are threaded into the south (bitforge) and 8-directions requests; when
- * absent they are OMITTED from the request body (F0-09) so the API defaults
- * apply and no specHash-style invalidation can sneak in.
+ * are threaded into the bitforge and v3 requests; when absent they are
+ * OMITTED from the request body (F0-09) so the API defaults apply.
  */
 export interface MannequinLock {
 	/** 4, 8 or 16. The API rejects anything else. */
 	readonly frameCount: 4 | 8 | 16;
 	readonly fps: number;
+	/** Character size in pixels (32–256 for create-character-v3 from-scratch). */
 	readonly size: number;
 	readonly detail?: DetailOption;
-	readonly shading?: ShadingOption;
 	readonly outline?: OutlineOption;
-	/**
-	 * Sent as `text_guidance_scale` — integer 1–20 in this tool (the spec
-	 * models number 1–20, default 8). NOT `extra_guidance_scale`, which the
-	 * spec marks deprecated.
-	 */
-	readonly guidanceScale?: number;
 }
 
 export interface Studio {
@@ -322,6 +328,11 @@ export const wardrobeKey = (characterId: string, itemId: string): string =>
 export const southKey = (characterId: string): string =>
 	`${characterId}::__south__`;
 
+/**
+ * @deprecated O passo de cardeais foi removido com a migração para
+ * create-character-v3 — o v3 rotaciona a reference_image diretamente.
+ * Mantido para compatibilidade com dados v2 existentes.
+ */
 export const cardinalKey = (
 	characterId: string,
 	direction: "east" | "north" | "west",
@@ -330,6 +341,10 @@ export const cardinalKey = (
 export const directions8Key = (characterId: string): string =>
 	`${characterId}::__directions8__`;
 
+/**
+ * @deprecated O passo de cardeais foi removido com a migração para
+ * create-character-v3. Mantido para compatibilidade com dados v2.
+ */
 export const cardinalsBatchKey = (characterId: string): string =>
 	`${characterId}::__cardinals__`;
 
@@ -338,8 +353,9 @@ export const cardinalsBatchKey = (characterId: string): string =>
  *
  * The mannequin is born with an EMPTY description on purpose: the wizard owns
  * the south face from the first boot — the user describes it, iterates on it,
- * and only then are the cardinals and the 8 directions derived. `lock` stays
- * absent until the wizard fixes the frame contract.
+ * and then the 8 directions are generated from it via `create-character-v3`
+ * (the cardinals step was removed with the v3 migration). `lock` stays absent
+ * until the wizard fixes the frame contract.
  *
  * The five built-in poses are the ones the game needs first. Note that three
  * of them are `action`, not `template` — the template library has no walk, run
@@ -384,8 +400,9 @@ export function seedStudio(): Studio {
 				// Empty on purpose — the wizard's first step is describing the
 				// south face. Filling it here would pre-empt the wizard.
 				description: "",
-				// 128×128 por decisão do projeto (qualidade máxima): é o teto do
-				// create-character-with-8-directions, o elo fraco da cadeia.
+				// 128×128 por decisão do projeto: no modo reference_image
+				// (progressivo) o image_size é advisory — o modelo escolhe.
+				// No modo from-scratch (direto) o teto é 256.
 				size: 128,
 				seed: 1,
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },

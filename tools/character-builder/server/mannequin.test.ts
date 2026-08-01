@@ -148,13 +148,13 @@ class FakeClient extends PixelLabClient {
       return this.ok<T>({ image: { type: 'base64', base64: img }, usage: { type: 'usd', usd: 0.0106 } });
     }
 
-    if (method === 'POST' && path === '/create-character-with-8-directions') {
-      this.lastDirections = { ...(b?.['directions'] as Record<string, { type: 'base64'; base64: string }>) };
+    if (method === 'POST' && path === '/create-character-v3') {
+      this.lastDirections = b?.['reference_image'] as { type: 'base64'; base64: string } | undefined;
       return this.ok<T>({
         background_job_id: 'job-dir8',
         character_id: 'remote-char-1',
         status: 'processing',
-        usage: { type: 'usd', usd: 0.0173 },
+        usage: { type: 'usd', usd: 0.041 },
       });
     }
 
@@ -169,30 +169,20 @@ class FakeClient extends PixelLabClient {
         });
       }
       if (id === 'job-dir8') {
-        const d = this.lastDirections ?? {};
-        // Cardeais congeladas: devolve byte-a-byte o que foi enviado (raw b64),
-        // mais as 4 diagonais geradas — rotation_urls keyeado por nome de direção.
-        const southRaw = d['south']?.base64 ?? '';
-        const eastRaw = d['east']?.base64 ?? '';
-        const northRaw = d['north']?.base64 ?? '';
-        const westRaw = d['west']?.base64 ?? '';
+        // v3: rotation_urls keyeado por nome de direção — 8 PNGs gerados.
         return this.ok<T>({
           id,
           status: 'completed',
           created_at: '2026-07-31T00:00:00Z',
           last_response: {
-            south: southRaw,
-            east: eastRaw,
-            north: northRaw,
-            west: westRaw,
             rotation_urls: {
-              south: [southRaw],
+              south:     [PNG_SOUTH],
               'south-west': [PNG_DIAGONAL],
-              west: [westRaw],
+              west:      [PNG_WEST],
               'north-west': [PNG_DIAGONAL],
-              north: [northRaw],
+              north:     [PNG_NORTH],
               'north-east': [PNG_DIAGONAL],
-              east: [eastRaw],
+              east:      [PNG_EAST],
               'south-east': [PNG_DIAGONAL],
             },
           },
@@ -411,7 +401,7 @@ test('directions8 exige studio.lock', async () => {
       /config travada/,
     );
     assert.equal(
-      client.count('/create-character-with-8-directions'),
+      client.count('/create-character-v3'),
       0,
       'sem lock, nenhuma chamada sai',
     );
@@ -420,21 +410,16 @@ test('directions8 exige studio.lock', async () => {
   }
 });
 
-test('directions8 monta o mapa directions com as 4 cardeais certas', async () => {
+test('directions8 envia reference_image com a sul ativa', async () => {
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
     await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
-    await rotateCardinals(client, store, CHAR_ID, opts);
     await generateDirections8(client, store, CHAR_ID, opts);
 
-    const d = client.lastDirections;
-    assert.ok(d, 'o mapa directions deveria ter sido submetido');
-    assert.deepEqual(Object.keys(d).sort(), ['east', 'north', 'south', 'west']);
-    assert.equal(d['south']?.base64, PNG_SOUTH, 'sul ativa vai no mapa');
-    assert.equal(d['east']?.base64, PNG_EAST);
-    assert.equal(d['north']?.base64, PNG_NORTH);
-    assert.equal(d['west']?.base64, PNG_WEST);
+    const refImg = client.lastDirections;
+    assert.ok(refImg, 'reference_image deveria ter sido submetida');
+    assert.equal(refImg?.base64, PNG_SOUTH, 'sul ativa vai como reference_image');
 
     // remoteId persistido, célula pronta com as 8 direções por chave, etapa pronto.
     assert.equal(store.studio.characters[0]?.remoteId, 'remote-char-1');
@@ -449,40 +434,23 @@ test('directions8 monta o mapa directions com as 4 cardeais certas', async () =>
 
     // Segunda execução: nenhuma chamada nova.
     await generateDirections8(client, store, CHAR_ID, opts);
-    assert.equal(client.count('/create-character-with-8-directions'), 1);
+    assert.equal(client.count('/create-character-v3'), 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('directions8 falha nomeando a cardeal que falta', async () => {
+test('directions8 falha quando a sul não está pronta', async () => {
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
-    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
 
-    // Sem nenhuma cardeal: as três aparecem no erro.
+    // Sem sul pronta: erro explícito.
     await assert.rejects(
       () => generateDirections8(client, store, CHAR_ID, opts),
-      /east, north, west/,
+      /face sul/,
     );
-
-    // Com só east pronta, o erro nomeia north e west.
-    const eastFile = join(opts.assetsDir, 'wizard', CHAR_ID, 'cardinal-east.png');
-    mkdirSync(dirname(eastFile), { recursive: true });
-    writeFileSync(eastFile, Buffer.from(PNG_EAST, 'base64'));
-    const eKey = cardinalKey(CHAR_ID, 'east');
-    store.studio.cells[eKey] = {
-      key: eKey,
-      status: 'pronto',
-      frames: { east: [`/assets/wizard/${CHAR_ID}/cardinal-east.png`] },
-      updatedAt: new Date().toISOString(),
-    };
-    await assert.rejects(
-      () => generateDirections8(client, store, CHAR_ID, opts),
-      /north, west/,
-    );
-    assert.equal(client.count('/create-character-with-8-directions'), 0);
+    assert.equal(client.count('/create-character-v3'), 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -490,12 +458,10 @@ test('directions8 falha nomeando a cardeal que falta', async () => {
 
 // ------------------------------------------------------------------ referência do manequim
 
-test('referência do manequim chega como color_image na sul e nas 8 direções', async () => {
+test('referência do manequim chega como color_image na sul por texto', async () => {
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
-    // api.ts preenche reference com o PNG da sul do manequim para derivados;
-    // aqui o valor é um b64 simbólico — o módulo só o repassa ao request.
     const optsRef: WizardOpts = {
       ...opts,
       reference: { colorImageB64: 'cmVmZXJlbmNpYS1kby1tYW5lcXVpbQ==' },
@@ -509,20 +475,8 @@ test('referência do manequim chega como color_image na sul e nas 8 direções',
       'a sul por texto leva color_image quando a referência está presente',
     );
 
-    // As cardeais NÃO levam referência (/rotate não tem color_image no fluxo
-    // do wizard) — só a sul e as 8 direções.
-    await rotateCardinals(client, store, CHAR_ID, opts);
-    for (const call of client.calls.filter((c) => c.path === '/rotate')) {
-      assert.ok(!('color_image' in (call.body ?? {})), 'rotate não recebe color_image');
-    }
-
-    await generateDirections8(client, store, CHAR_ID, optsRef);
-    const dir8 = client.calls.find((c) => c.path === '/create-character-with-8-directions');
-    assert.deepStrictEqual(
-      dir8?.body?.['color_image'],
-      { type: 'base64', base64: 'cmVmZXJlbmNpYS1kby1tYW5lcXVpbQ==' },
-      'as 8 direções levam color_image quando a referência está presente',
-    );
+    // v3 reference mode não usa color_image — a rota directions8 do api.ts
+    // não passa mais reference para generateDirections8.
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -533,18 +487,11 @@ test('sem reference, nenhum color_image é enviado (retroativo-compatível)', as
   try {
     const client = new FakeClient();
     await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
-    await rotateCardinals(client, store, CHAR_ID, opts);
-    await generateDirections8(client, store, CHAR_ID, opts);
 
     const bitforge = client.calls.find((c) => c.path === '/create-image-bitforge');
     assert.ok(
       !('color_image' in (bitforge?.body ?? {})),
       'sem reference, o bitforge não recebe color_image',
-    );
-    const dir8 = client.calls.find((c) => c.path === '/create-character-with-8-directions');
-    assert.ok(
-      !('color_image' in (dir8?.body ?? {})),
-      'sem reference, o endpoint de 8 direções não recebe color_image',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -553,68 +500,39 @@ test('sem reference, nenhum color_image é enviado (retroativo-compatível)', as
 
 // ------------------------------------------------------------------ qualidade do lock
 
-test('qualidade do lock vai no request do bitforge e do 8-directions', async () => {
+test('qualidade do lock vai no request do bitforge', async () => {
   const { dir, store, opts } = makeHarness();
   try {
+    // detail e outline permanecem no lock; shading e guidanceScale removidos com v3.
     store.studio.lock = {
       frameCount: 8,
       fps: 8,
       size: SIZE,
       detail: 'highly detailed',
-      shading: 'detailed shading',
       outline: 'selective outline',
-      guidanceScale: 8,
     };
     const client = new FakeClient();
 
     await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
     const bitforge = client.calls.find((c) => c.path === '/create-image-bitforge');
     assert.equal(bitforge?.body?.['detail'], 'highly detailed');
-    assert.equal(bitforge?.body?.['shading'], 'detailed shading');
     assert.equal(bitforge?.body?.['outline'], 'selective outline');
-    assert.equal(
-      bitforge?.body?.['text_guidance_scale'],
-      8,
-      'guidanceScale do lock vira text_guidance_scale no request',
-    );
-    assert.ok(
-      !('extra_guidance_scale' in (bitforge?.body ?? {})),
-      'extra_guidance_scale é deprecated no spec — nunca enviado',
-    );
 
-    // /rotate NÃO leva qualidade: o endpoint não tem esses campos no fluxo.
-    await rotateCardinals(client, store, CHAR_ID, opts);
-    for (const call of client.calls.filter((c) => c.path === '/rotate')) {
-      assert.ok(!('detail' in (call.body ?? {})), 'rotate não recebe detail');
-      assert.ok(!('text_guidance_scale' in (call.body ?? {})), 'rotate não recebe guidance');
-    }
-
-    await generateDirections8(client, store, CHAR_ID, opts);
-    const dir8 = client.calls.find((c) => c.path === '/create-character-with-8-directions');
-    assert.equal(dir8?.body?.['detail'], 'highly detailed');
-    assert.equal(dir8?.body?.['shading'], 'detailed shading');
-    assert.equal(dir8?.body?.['outline'], 'selective outline');
-    assert.equal(dir8?.body?.['text_guidance_scale'], 8);
+    // v3 reference mode IGNORA detail/outline — generateDirections8 não threada qualidade.
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('sem qualidade no lock, os campos são omitidos dos requests (F0-09)', async () => {
-  // O lock padrão do harness não tem detail/shading/outline/guidanceScale:
-  // nada disso pode vazar para o request — ausente = default da API.
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
     await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
-    await rotateCardinals(client, store, CHAR_ID, opts);
-    await generateDirections8(client, store, CHAR_ID, opts);
 
-    for (const path of ['/create-image-bitforge', '/create-character-with-8-directions']) {
-      const body = client.calls.find((c) => c.path === path)?.body ?? {};
-      for (const field of ['detail', 'shading', 'outline', 'text_guidance_scale']) {
-        assert.ok(!(field in body), `${path} sem "${field}" quando o lock não tem qualidade`);
-      }
+    const body = client.calls.find((c) => c.path === '/create-image-bitforge')?.body ?? {};
+    for (const field of ['detail', 'shading', 'outline', 'text_guidance_scale']) {
+      assert.ok(!(field in body), `bitforge sem "${field}" quando o lock não tem qualidade`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -650,11 +568,9 @@ test('south com reference.png envia init_image + strength 500; sem, omite', asyn
     );
     assert.equal(comRef?.body?.['init_image_strength'], 500);
 
-    // E o endpoint de 8 direções NÃO recebe init_image (ausente no spec dele),
-    // mesmo com a referência no disco.
-    await rotateCardinals(client, store, CHAR_ID, opts);
+    // E o endpoint v3 NÃO recebe init_image (não existe no spec dele).
     await generateDirections8(client, store, CHAR_ID, opts);
-    const dir8 = client.calls.find((c) => c.path === '/create-character-with-8-directions');
+    const dir8 = client.calls.find((c) => c.path === '/create-character-v3');
     assert.ok(!('init_image' in (dir8?.body ?? {})), '8 direções não recebe init_image');
     assert.ok(!('init_image_strength' in (dir8?.body ?? {})));
   } finally {

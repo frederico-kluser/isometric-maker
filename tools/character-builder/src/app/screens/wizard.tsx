@@ -13,7 +13,6 @@ import { wizard } from '../../strings/wizard.ts';
 import { useSelectedCharacter, useStudio } from '../studio-store.tsx';
 import { CharacterHeader } from './wizard/character-header.tsx';
 import { FirstRun } from './wizard/first-run.tsx';
-import { CardinalsStep } from './wizard/step-cardinals.tsx';
 import { StepCard } from './wizard/step-card.tsx';
 import { ConfigStep } from './wizard/step-config.tsx';
 import { DirectionsStep } from './wizard/step-directions.tsx';
@@ -75,13 +74,6 @@ export function WizardScreen() {
 					status={status('sul')}
 				>
 					<SouthStep progress={progress} refresh={refresh} busy={busy} />
-				</StepCard>
-				<StepCard
-					title={wizard.cardeais.titulo}
-					note={wizard.cardeais.nota}
-					status={status('cardeais')}
-				>
-					<CardinalsStep progress={progress} refresh={refresh} busy={busy} />
 				</StepCard>
 				<StepCard
 					title={wizard.direcoes8.titulo}

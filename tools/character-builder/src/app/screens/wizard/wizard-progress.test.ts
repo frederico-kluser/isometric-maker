@@ -10,8 +10,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-	cardinalKey,
-	cardinalsBatchKey,
 	directions8Key,
 	seedStudio,
 	southKey,
@@ -66,7 +64,6 @@ test('estado inicial: config é o passo ativo, primeira execução', () => {
 	assert.deepEqual(statusMap(p), {
 		config: 'active',
 		sul: 'todo',
-		cardeais: 'todo',
 		direcoes8: 'todo',
 		pronto: 'todo',
 	});
@@ -83,11 +80,11 @@ test('config travada: sul vira o passo ativo', () => {
 	assert.equal(p.firstRun, true);
 });
 
-test('sul pronta: cardeais vira o passo ativo', () => {
+test('sul pronta: direcoes8 vira o passo ativo', () => {
 	const s = withCell(withLock(seedStudio()), southKey('manequim'));
 	const p = deriveWizard(s, mannequin(s));
 
-	assert.equal(p.activeStep, 'cardeais');
+	assert.equal(p.activeStep, 'direcoes8');
 	assert.equal(p.southReady, true);
 	assert.equal(p.firstRun, false);
 });
@@ -104,22 +101,9 @@ test('sul gerada sem lock: o passo ativo continua sendo a config', () => {
 	assert.equal(statusMap(p)['config'], 'active');
 });
 
-test('cardeais parciais: o passo continua em cardeais', () => {
-	let s = withCell(withLock(seedStudio()), southKey('manequim'));
-	s = withCell(s, cardinalKey('manequim', 'east'));
-	s = withCell(s, cardinalKey('manequim', 'north'));
-	const p = deriveWizard(s, mannequin(s));
-
-	assert.equal(p.cardinalsReady, false);
-	assert.equal(p.activeStep, 'cardeais');
-});
-
 test('tudo pronto e etapa pronto: trilha inteira concluída', () => {
 	let s = withLock(seedStudio());
 	s = withCell(s, southKey('manequim'));
-	for (const d of ['east', 'north', 'west'] as const) {
-		s = withCell(s, cardinalKey('manequim', d));
-	}
 	s = withCell(s, directions8Key('manequim'));
 	const ch = mannequin(s);
 	ch.wizard = { etapa: 'pronto', southVersions: [], activeSouth: 0 };
@@ -188,7 +172,6 @@ test('job-based generating flags work when cells are not gerando', () => {
 
 	assert.equal(p.southGenerating, true);
 	assert.equal(p.dir8Generating, true);
-	assert.equal(p.cardinalsGenerating, false);
 	assert.equal(p.southReady, false);
 });
 
@@ -204,25 +187,27 @@ test('failed cells produce failed step status with error', () => {
 
 	assert.equal(statusMap(p)['sul'], 'failed');
 	assert.equal(p.stepErrors['sul'], errorMsg);
-	assert.equal(p.stepErrors['cardeais'], undefined);
 	assert.equal(p.stepErrors['direcoes8'], undefined);
 	assert.equal(p.activeStep, 'sul');
 });
 
-test('cardinals batch key in jobs drives cardinalsGenerating', () => {
+test('job falhou das 8 direções alimenta o erro', () => {
 	const s = withLock(seedStudio());
 	const jobs = {
-		[cardinalsBatchKey('manequim')]: { status: 'gerando' },
+		[directions8Key('manequim')]: {
+			status: 'falhou',
+			message: 'resposta sem imagem',
+		},
 	};
 	const p = deriveWizard(s, mannequin(s), jobs);
 
-	assert.equal(p.cardinalsGenerating, true);
-	assert.equal(p.southGenerating, false);
+	assert.equal(p.dir8Error, 'resposta sem imagem');
+	assert.equal(p.stepErrors['direcoes8'], 'resposta sem imagem');
+	assert.equal(statusMap(p)['direcoes8'], 'failed');
+	assert.equal(p.southError, undefined);
 });
 
-test('job falhou produz erro com a mensagem, mesmo sem célula falhou', () => {
-	// O spawn registra o job falhou ANTES de gravar a célula — nesta janela a
-	// tela já deve mostrar o erro (e marcar o passo como falhou).
+test('job falhou produz erro na sul mesmo sem célula falhou', () => {
 	const s = withLock(seedStudio());
 	const jobs = {
 		[southKey('manequim')]: { status: 'falhou', message: 'tempo esgotado' },
@@ -233,29 +218,6 @@ test('job falhou produz erro com a mensagem, mesmo sem célula falhou', () => {
 	assert.equal(p.stepErrors['sul'], 'tempo esgotado');
 	assert.equal(statusMap(p)['sul'], 'failed');
 	assert.equal(p.firstRun, false);
-});
-
-test('job falhou do lote de cardeais e das 8 direções alimentam os erros', () => {
-	const s = withLock(seedStudio());
-	const jobs = {
-		[cardinalsBatchKey('manequim')]: {
-			status: 'falhou',
-			message: '529 — API sobrecarregada',
-		},
-		[directions8Key('manequim')]: {
-			status: 'falhou',
-			message: 'resposta sem imagem',
-		},
-	};
-	const p = deriveWizard(s, mannequin(s), jobs);
-
-	assert.equal(p.cardinalsError, '529 — API sobrecarregada');
-	assert.equal(p.dir8Error, 'resposta sem imagem');
-	assert.equal(p.stepErrors['cardeais'], '529 — API sobrecarregada');
-	assert.equal(p.stepErrors['direcoes8'], 'resposta sem imagem');
-	assert.equal(statusMap(p)['cardeais'], 'failed');
-	assert.equal(statusMap(p)['direcoes8'], 'failed');
-	assert.equal(p.southError, undefined);
 });
 
 test('erro da célula é o fallback quando o job não está falhou', () => {

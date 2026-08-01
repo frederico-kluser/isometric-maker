@@ -152,18 +152,12 @@ test('rejeita imagem 64×65 (não quadrada)', () => {
   assertErr(r, '64×65 deveria ser recusada');
 });
 
-// --- rejeição: lado fora de 16–128 -----------------------------------
+// --- rejeição: lado fora de 32–256 -----------------------------------
 
-test('rejeita largura = 15 (fora da faixa)', () => {
-  const buf = toArrayBuffer(makePNG(15, 15));
-  const r = validateImport(buf, 15);
-  assertErr(r, '15×15 deveria ser recusada');
-});
-
-test('rejeita largura = 129 (fora da faixa)', () => {
-  const buf = toArrayBuffer(makePNG(129, 129));
-  const r = validateImport(buf, 100);
-  assertErr(r, '129×129 deveria ser recusada');
+test('rejeita largura = 257 (fora da faixa)', () => {
+	const buf = toArrayBuffer(makePNG(257, 257));
+	const r = validateImport(buf, 256);
+	assertErr(r, '257×257 deveria ser recusada');
 });
 
 // --- rejeição: altura informada > altura da imagem -------------------
@@ -199,10 +193,10 @@ test('aceita PNG 128×128 com altura igual à imagem', () => {
   assert(r.ok === true, '128×128 com altura 128 deveria passar');
 });
 
-test('aceita PNG 16×16 no limite inferior', () => {
-  const buf = toArrayBuffer(makePNG(16, 16));
-  const r = validateImport(buf, 16);
-  assert(r.ok === true, '16×16 com altura 16 deveria passar');
+test('aceita PNG 32×32 no limite inferior', () => {
+	const buf = toArrayBuffer(makePNG(32, 32));
+	const r = validateImport(buf, 32);
+	assert(r.ok === true, '32×32 com altura 32 deveria passar');
 });
 
 test('aceita PNG 32×32 com altura zero (base no chão)', () => {

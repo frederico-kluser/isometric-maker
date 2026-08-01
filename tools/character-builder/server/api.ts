@@ -6,9 +6,9 @@
  *   2. Long jobs. Generation takes 2-5 minutes; the browser polls this server,
  *      which owns the job registry and survives a page reload.
  *
- * v2: o fluxo antigo de "modelo base" morreu — quem constrói o corpo é o
- * wizard (server/mannequin.ts), em cadeia derivativa: sul por texto → edição
- * → cardeais → 8 direções. Estas rotas só fazem a fiação: validam o pedido,
+ * v3 (2026-07-31): o wizard do manequim migrou para create-character-v3 —
+ * a sul vai como reference_image e o modelo rotaciona sozinho; o passo de
+ * cardeais foi removido. Estas rotas só fazem a fiação: validam o pedido,
  * escolhem as chaves canônicas de célula e disparam o módulo certo.
  *
  * Política de células (a UI lê o status por elas):
@@ -36,7 +36,6 @@ import {
 	generateSouthFromText,
 	editSouth,
 	undoSouth,
-	rotateCardinals,
 	generateDirections8,
 	type StudioStore,
 	type WizardOpts,
@@ -51,9 +50,6 @@ import {
 	DIRECTIONS,
 	DETAIL_OPTIONS,
 	OUTLINE_OPTIONS,
-	SHADING_OPTIONS,
-	cardinalKey,
-	cardinalsBatchKey,
 	cellKey,
 	directions8Key,
 	seedStudio,
@@ -66,7 +62,6 @@ import {
 	type OutlineOption,
 	type Pose,
 	type PoseKind,
-	type ShadingOption,
 	type Silhouette,
 	type Studio,
 	type TemplateAnimation,
@@ -565,9 +560,7 @@ export async function handle(
 				size?: number;
 				silhouette?: Silhouette;
 				detail?: DetailOption;
-				shading?: ShadingOption;
 				outline?: OutlineOption;
-				guidanceScale?: number;
 			}>(req);
 
 			// Só o manequim trava a config; todo personagem derivado herda o lock.
@@ -606,17 +599,17 @@ export async function handle(
 				badRequest(res, "fps precisa ser um número positivo");
 				return true;
 			}
-			// Faixa do create-character-with-8-directions no spec vendorizado:
-			// image_size 16–128 (o bitforge aceita até 200; o elo fraco é a base).
+			// Faixa do create-character-v3 no spec vendorizado:
+			// from-scratch image_size 32–256; reference mode é advisory.
 			if (
 				typeof b.size !== "number" ||
 				!Number.isInteger(b.size) ||
-				b.size < 16 ||
-				b.size > 128
+				b.size < 32 ||
+				b.size > 256
 			) {
 				badRequest(
 					res,
-					"size precisa ser inteiro entre 16 e 128 (faixa do endpoint de 8 direções)",
+					"size precisa ser inteiro entre 32 e 256 (faixa do endpoint create-character-v3)",
 				);
 				return true;
 			}
@@ -627,20 +620,13 @@ export async function handle(
 				);
 				return true;
 			}
-			// Qualidade: enums do spec vendorizado (bitforge é estrito; o de 8
-			// direções é "soft guidance" com os mesmos valores). Ausente = não
-			// grava no lock e o campo não vai no request (F0-09).
+			// Qualidade: detail e outline existem no create-character-v3 mas são
+			// IGNORADOS em modo reference_image. Mantidos para modo from-scratch.
+			// shading e guidanceScale foram removidos — o v3 não tem esses parâmetros.
 			if (b.detail !== undefined && !DETAIL_OPTIONS.includes(b.detail)) {
 				badRequest(
 					res,
 					`detail desconhecido: ${String(b.detail)} (válidos: ${DETAIL_OPTIONS.join(", ")})`,
-				);
-				return true;
-			}
-			if (b.shading !== undefined && !SHADING_OPTIONS.includes(b.shading)) {
-				badRequest(
-					res,
-					`shading desconhecido: ${String(b.shading)} (válidos: ${SHADING_OPTIONS.join(", ")})`,
 				);
 				return true;
 			}
@@ -651,33 +637,13 @@ export async function handle(
 				);
 				return true;
 			}
-			// text_guidance_scale nos endpoints: number 1–20 (default 8).
-			// Aqui exigimos inteiro. extra_guidance_scale é deprecated no spec —
-			// não é aceito nem gravado.
-			if (
-				b.guidanceScale !== undefined &&
-				(typeof b.guidanceScale !== "number" ||
-					!Number.isInteger(b.guidanceScale) ||
-					b.guidanceScale < 1 ||
-					b.guidanceScale > 20)
-			) {
-				badRequest(
-					res,
-					"guidanceScale precisa ser inteiro entre 1 e 20 (faixa do text_guidance_scale nos endpoints)",
-				);
-				return true;
-			}
 
 			s.lock = {
 				frameCount: b.frameCount,
 				fps: b.fps,
 				size: b.size,
 				...(b.detail !== undefined ? { detail: b.detail } : {}),
-				...(b.shading !== undefined ? { shading: b.shading } : {}),
 				...(b.outline !== undefined ? { outline: b.outline } : {}),
-				...(b.guidanceScale !== undefined
-					? { guidanceScale: b.guidanceScale }
-					: {}),
 			};
 			const idx = s.characters.findIndex((c) => c.id === "manequim");
 			s.characters[idx] = {
@@ -831,35 +797,7 @@ export async function handle(
 			return true;
 		}
 
-		// ---- wizard: cardeais ---------------------------------------------------------
-		if (url.pathname === "/api/wizard/cardinals" && req.method === "POST") {
-			const b = await readBody<{ characterId?: string }>(req);
-			if (typeof b.characterId !== "string") {
-				badRequest(res, "characterId é obrigatório");
-				return true;
-			}
-			const s = await load();
-			const ch = resolveWizardCharacter(s, res, b.characterId);
-			if (!ch) return true;
-			// mannequin.ts grava as três células cardinal-* uma a uma; o job usa a
-			// chave de lote e o spawn marca falha só nas que não ficaram prontas
-			// (política documentada no cabeçalho do arquivo).
-			const key = cardinalsBatchKey(ch.id);
-			spawn(
-				key,
-				`${ch.label} · cardeais`,
-				() => rotateCardinals(client(), store, ch.id, wizardOpts()),
-				[
-					cardinalKey(ch.id, "east"),
-					cardinalKey(ch.id, "north"),
-					cardinalKey(ch.id, "west"),
-				],
-			);
-			json(res, 202, { key });
-			return true;
-		}
-
-		// ---- wizard: oito direções -------------------------------------------------------
+		// ---- wizard: oito direções (create-character-v3) -------------------------------
 		if (url.pathname === "/api/wizard/directions8" && req.method === "POST") {
 			const b = await readBody<{ characterId?: string }>(req);
 			if (typeof b.characterId !== "string") {
@@ -869,12 +807,9 @@ export async function handle(
 			const s = await load();
 			const ch = resolveWizardCharacter(s, res, b.characterId);
 			if (!ch) return true;
-			// Derivados levam a sul do manequim como color_image (paleta travada).
-			const reference =
-				ch.id === "manequim" ? undefined : await mannequinSouthB64(s);
 			const key = directions8Key(ch.id);
 			spawn(key, `${ch.label} · 8 direções`, () =>
-				generateDirections8(client(), store, ch.id, wizardOpts(reference)),
+				generateDirections8(client(), store, ch.id, wizardOpts()),
 			);
 			json(res, 202, { key });
 			return true;
@@ -925,10 +860,9 @@ export async function handle(
 				json(res, 404, { error: "manequim não encontrado" });
 				return true;
 			}
-			// Reabre o wizard do zero: sul, cardeais, 8 direções, remoteId e lock
+			// Reabre o wizard do zero: sul, 8 direções, remoteId e lock
 			// caem. Poses, guarda-roupa e os demais personagens não são tocados.
-			// Um job do wizard ainda em voo pode regravar célula ao concluir —
-			// reset não aborta job em andamento.
+			// O passo de cardeais foi removido com a migração v3.
 			const next: Character = {
 				...ch,
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
@@ -936,9 +870,6 @@ export async function handle(
 			delete next.remoteId;
 			s.characters[idx] = next;
 			delete s.cells[southKey("manequim")];
-			delete s.cells[cardinalKey("manequim", "east")];
-			delete s.cells[cardinalKey("manequim", "north")];
-			delete s.cells[cardinalKey("manequim", "west")];
 			delete s.cells[directions8Key("manequim")];
 			delete s.lock;
 			await save(s);
