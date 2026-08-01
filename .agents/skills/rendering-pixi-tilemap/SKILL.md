@@ -24,8 +24,9 @@ batching container but not tilemaps as such.
 Deep research over more than a hundred agents produced **no** verified answer to three questions that
 have to be answered before terrain is built:
 
-1. Whether the community tilemap package supports v8, and from which version. It is not installed
-   here and nothing about it has been verified.
+1. ~~Whether the community tilemap package supports v8~~ — **partly answered, see below.** What
+   remains open is whether it suits an *isometric* map with stacked Z, which a second research round
+   left explicitly unresolved.
 2. Whether `ParticleContainer` is safe to build on — see the contradiction below.
 3. How a chunked approach interacts with camera-driven culling at the scale of a map this editor is
    expected to author.
@@ -36,6 +37,36 @@ settle inline.
 
 What is *not* open is the geometry. Read the next two sections before proposing anything: they are
 the part of this surface that is already decided, and the part whose limits are provable.
+
+### The community tilemap package, verified from its own source
+
+Still **not installed here**, and adopting it is still a dependency decision. But these are no longer
+unknowns — each was read from the package registry or the upstream source, not from a summary of it:
+
+- **It declares v8 compatibility from 8.5.0.** `peerDependencies` is `pixi.js: ">=8.5.0"`; the latest
+  release is 5.0.2. This repo's pin satisfies that range.
+- **It consumes texture references, never sprites.** The word "Sprite" does not appear once in the
+  package's main tilemap source file. Tiles are added by texture name, texture, or tileset index — a
+  v7 mental model of "add sprites to a tilemap" does not apply.
+- **One tilemap holds 16 textures**, from `TEXTURES_PER_TILEMAP` in the package's settings. The
+  composite variant exists for exactly one reason: to chain tilemaps once that limit is reached. It
+  is not a general-purpose grouping abstraction.
+- **Per-tile tint is impossible without forking the package.** Its vertex format carries seven
+  attributes — position, texture coordinate, frame, animation, texture id, animation divisor and
+  alpha — and **no colour attribute at all**. Per-tile alpha, size, rotation and animation *do*
+  exist, so "it has no per-tile properties" would be false; tint specifically does not.
+- **Per-tile rotation is an 8-orientation flip/rotate enum**, which is directly the shape autotiling
+  and mirrored variants want.
+
+**The staleness risk is the real one.** The latest release predates this repo by about a year, and
+the package has already broken once against a PixiJS minor — an upstream commit exists whose message
+is that the tilemap stopped rendering as of Pixi 8.7.0. Meanwhile PixiJS keeps shipping behaviour
+changes; `composing-pixi-scene` documents one that landed in 8.16.0. Adopting this package means
+accepting that a Pixi upgrade can break the floor, with no vendor on the hook.
+
+Two things a first round of research asserted and a verification pass **killed** — do not repeat
+them: that the project publishes a Pixi-to-tilemap compatibility table, and that it is
+rectangular-only by explicit design. Isometric suitability is **unresolved**, not refuted.
 
 ### The geometry is fixed, and it is the sort key
 

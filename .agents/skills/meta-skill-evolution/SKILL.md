@@ -95,6 +95,20 @@ Keep the body under 500 lines. **Edit and replace; do not accumulate.** No dates
 The `guard-skill-write` hook blocks modification of an existing SKILL.md without a fresh token, so a
 skipped Step 4 does not fail quietly; it fails loudly.
 
+#### Three properties of the tooling that cost a cycle each if unknown
+
+- **`must_contain` is a literal substring match against the raw body, so it must not span a line
+  wrap.** Bodies are hard-wrapped, and an invariant phrased as a full sentence usually straddles a
+  newline and never matches, no matter that the sentence is right there. Keep each one short enough
+  to live on one line, and prefer a distinctive fragment over a complete clause.
+- **A brand-new skill cannot be edited until its eval suite exists.** Creating `SKILL.md` is allowed
+  — a new file is a reviewable draft — but the first correction to it needs a token, the token needs
+  a green suite, and a missing suite is a hard failure. Write `evals/<name>.json` immediately after
+  the skill file, before revising anything.
+- **`check-pixi-claims` resolves backticked capitalised identifiers as PixiJS symbols.** Citing a
+  third-party source file whose name is also a class name fails the check even though nothing about
+  PixiJS was claimed. Refer to such files in prose, or by a path that is not a bare identifier.
+
 ### Step 5 — Git commit (the audit trail)
 
 Commit the skill update on its own, with a message saying what changed and what verified it. Git

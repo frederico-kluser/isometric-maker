@@ -28,7 +28,9 @@ A fonte da verdade neste repositório é o spec vendorizado:
 (+ PROVENIENCIA.txt com data de captura e sha256)
 ```
 
-Antes de afirmar que um endpoint, parâmetro, enum ou limite existe, **consulte o spec vendorizado**. Se for necessário atualizar, baixe de `https://api.pixellab.ai/v2/openapi.json`, regrave o `PROVENIENCIA.txt` com a nova data e hash, rode `npm run codegen` e trate os erros de compilação como a lista de mudanças.
+Antes de afirmar que um endpoint, parâmetro, enum ou limite existe, **consulte o spec vendorizado**. Para atualizar, rode `npm run refresh-openapi` dentro de `tools/pixellab-pipeline` — ele baixa o spec, regrava o `PROVENIENCIA.txt` com data e sha256 novos, e deixa o diff visível no git. Depois rode `npm run typecheck` e `npm test`, e trate os erros como a lista de mudanças do fornecedor.
+
+Revendorizar **não invalida o catálogo**: `computeSpecHash` hasheia `{endpoint, params, inputs, parents, pipelineVersion, salt}` e o schema não entra. Drift de schema é aviso do `doctor`, nunca cobrança nova. E a checagem tem que ser por conteúdo: em 2026-08-01 o spec mudou de sha256 mantendo os mesmos 79 paths e 235 schemas — contagem de paths teria reportado "sem mudança".
 
 Ao citar preço, escreva **"preço estimado"**. A própria PixelLab rotula a coluna como `Estimated Price* (USD)` com a nota "will vary because of variation in the GPU processing time".
 

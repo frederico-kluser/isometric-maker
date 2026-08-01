@@ -47,6 +47,25 @@ spec on every run. Load the hub first, then the family.
 | [`designing-pixellab-interfaces`](designing-pixellab-interfaces/SKILL.md) | UI Creator · font-pro | 6 | a size **floor** of 192px, and `image_size` is a pricing tier, not a size |
 | [`orchestrating-pixellab-jobs`](orchestrating-pixellab-jobs/SKILL.md) | Background Jobs · Account · Documentation | 3 + cross-cutting | 36 endpoints are async; only 23 say `202` |
 
+## Knowledge — the isometric model, which is this repository's own
+
+Four skills own `packages/iso-core` and `tools/map-builder` — the layer that decides *what is true*
+about the world, as opposed to how it is drawn. Three of them existed as code with 290 + 73 passing
+tests and no skill pointing at them, which is how an agent ends up reimplementing `canEnter` or
+writing picking from the ADR's wrong constant. The fourth documents a decision **not** taken. Signal
+for all four: the package's own test suite.
+
+| Skill | Owns | The trap it exists for |
+|---|---|---|
+| [`projecting-isometric-geometry`](projecting-isometric-geometry/SKILL.md) | the 2:1 projection, the floor rule, the diagonal identity, the depth key and the half-cell wall offset | `docs/adr/0013` states the diagonal as `(+1,+1)`; the correct value for its own geometry is `(+0.5,+0.5)` — see `docs/adr/0020` |
+| [`simulating-isometric-physics`](simulating-isometric-physics/SKILL.md) | continuous xy over integer Z, support and edge rules, the one-level step, the screen-only jump parabola, deterministic replay | routing the step through `canCross` looks like deduplication and makes every staircase unwalkable |
+| [`editing-isometric-maps`](editing-isometric-maps/SKILL.md) | picking as a diagonal walk, the RLE column store, autotiling from returned rules, export that fails by absence | hit-testing sprites picks the wrong cell exactly at the diamond edges, where the user aims |
+| [`rotating-isometric-camera`](rotating-isometric-camera/SKILL.md) | the four-view question: rotation as discrete integer state, Z invariance, the `x+y` term that must be recomputed, the art budget nobody measured | the reference engine ships **two** sort implementations and still calls its occlusion fix partial — rotation is not "just a coordinate transform" |
+
+`editing-isometric-maps` also carries the list of what the editor **does not have** — brushes, undo,
+layer hiding by Z, placement feedback, camera rotation. Those are absences with no convention yet,
+and inventing one to fill the table is the failure this library exists to prevent.
+
 ## Knowledge — PixiJS, and what upstream cannot know
 
 The `pixi.js` package publishes its own 26 agent skills, vendored here with provenance. **These ten

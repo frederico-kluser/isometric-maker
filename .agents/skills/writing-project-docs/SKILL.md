@@ -116,6 +116,16 @@ A deleted ADR is a different thing from a superseded one. When a decision's whol
 existing, the file goes away and its row stays in the index, marked `apagada` with the reason
 (`docs/README.md:71@62ab10c3`) — so the number stays taken and the sequence never rewinds.
 
+**And a corrected ADR is a third thing.** When the decision is still right but a fact stated beside
+it is wrong, superseding would be a lie: it marks a decision that is in force as obsolete. The new
+ADR then declares `**Corrige:** ADR NNNN` in the same slot below the status line, and the corrected
+row stays `vigente` in the index with the correction noted — the shape to copy is
+`docs/adr/0020-identidade-da-diagonal-de-picking.md:12@c30746a9`.
+
+The choice between the two is not stylistic. Ask what changed: **the decision** → `Substitui`; **a
+consequence, a number, a claim** → `Corrige`. Both obey the same one-directional rule — the new file
+gains a field, the old file is never touched.
+
 Structure, from the thirteen that exist: `# ADR NNNN — <decision in one line>`, the Quick Start
 blockquote, a `**Status:** aceita · **Data:** YYYY-MM-DD` line, then `## Contexto`, `## Decisão`,
 optionally `## Alternativas consideradas`, `## Consequências`, `## Referências`. Number sequentially

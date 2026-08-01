@@ -73,6 +73,10 @@ The usual mappings:
 | UI panels, HUD elements, pixel fonts | `designing-pixellab-interfaces` |
 | polling, retries, error codes, balance, job lifecycle | `orchestrating-pixellab-jobs` |
 | generating assets, the pipeline CLI, catalog or cost code | `guarding-generation-cost` |
+| screen↔grid conversion, draw order, the depth key, the anchor | `projecting-isometric-geometry` |
+| collision, walkability, steps, jumping, falling, deterministic replay | `simulating-isometric-physics` |
+| placing a piece, picking a cell, painting terrain, autotiling, exporting the map | `editing-isometric-maps` |
+| rotating the camera, more than one view of the map, "efeito 3D" | `rotating-isometric-camera` — and it is an **ADR**, not a ticket |
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
@@ -82,6 +86,12 @@ The usual mappings:
 `routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in
 `tools/pixi-reference/vendor/skills/`. Delegate the renderer half of a task to it rather than picking
 from that set here — it exists so this table does not have to grow by thirty-six rows.
+
+**The three isometric skills are the model, not the renderer, and the split matters.** What is *true*
+about the world — which cell a pixel falls in, what may occupy it, what draws before what — belongs
+to them. How it reaches the screen belongs to `routing-pixijs-work`. A task about a sprite drawn in
+the wrong order needs both: the key comes from `projecting-isometric-geometry`, the sort from
+`composing-pixi-scene`. Loading only the renderer half produces a fix in the wrong layer.
 
 **There is no server, and no skill claims otherwise.** This repository is a local single-user
 isometric editor (`docs/adr/0010-pivo-para-editor-isometrico.md`); `enforcing-server-authority` was

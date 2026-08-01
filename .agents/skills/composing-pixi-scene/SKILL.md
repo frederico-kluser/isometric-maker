@@ -142,9 +142,19 @@ global before the test. This changed in 8.16.0, and the pre-change idiom — pre
 into world coordinates yourself — now double-applies the transform.
 
 That lands squarely here: the world container's transform is non-identity by construction, because it
-*is* the camera. A cull rect computed the old way gets offset and scaled twice, and the symptom is
-content disappearing near the viewport edges as the camera pans, which reads like a bounds bug rather
-than a coordinate-space one.
+*is* the camera. A cull rect computed the old way gets offset and scaled twice.
+
+**The symptom is bigger than it sounds.** `_cullRecursive` returns before descending whenever
+`container.culled` is true, so a wrongly-culled world container skips its **entire subtree** — the
+whole map vanishes, not a fringe of tiles near the edge. The error grows with camera offset, so it
+often reads as "the map disappears once I scroll far enough". Scope it before applying the rule:
+this bites only containers that have an **explicit `cullArea`** *and* a non-identity
+`worldTransform`. Containers without `cullArea` go through `getGlobalBounds`, which was always
+transform-correct and was not touched.
+
+Note the shape of the trap. The documentation said "local space" the whole time; it was the
+**observed** behaviour that changed. Code written by testing what worked breaks here, while code
+written from the docs does not.
 
 Culling is opt-in per container and there is a plugin that runs the cull each frame; get the exact
 names from `inspect-pixi.mjs prop cullable` and `inspect-pixi.mjs exists CullerPlugin`. Turn culling

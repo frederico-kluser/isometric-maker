@@ -55,6 +55,18 @@
     {
       "must_contain": "rotation_urls",
       "why": "null unless status is completed — the reason polling is not optional"
+    },
+    {
+      "must_contain": "a superset",
+      "why": "PixelLab's own MCP advertises proportions/text_guidance_scale/n_directions/shading on create_character; the REST v3 schema rejects them"
+    },
+    {
+      "must_contain": "is a **value**, never a parameter name",
+      "why": "mannequin is the default of template_id; a body with \"mannequin\": true is invalid"
+    },
+    {
+      "must_contain": "No paid call has settled it",
+      "why": "/animate-character names only the 4/8-direction endpoints; the v3 animation path is an unverified bet the studio already makes"
     }
   ],
   "check_provenance": true

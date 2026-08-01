@@ -1,0 +1,42 @@
+{
+  "skill": "projecting-isometric-geometry",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "converter coordenada de tela para celula do grid", "should_trigger": true },
+    { "query": "que celula esta sob o cursor", "should_trigger": true },
+    { "query": "qual a ordem de desenho isometrica", "should_trigger": true },
+    { "query": "a parede aparece na frente do personagem", "should_trigger": true },
+    { "query": "por que a parede fica a meia celula", "should_trigger": true },
+    { "query": "o picking pega o bloco errado", "should_trigger": true },
+    { "query": "quantos pixels vale um nivel de z", "should_trigger": true },
+    { "query": "quanto custa cada geracao no pixellab", "should_trigger": false },
+    { "query": "escrever a mensagem de commit em ingles", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "+ (zStep/tileHeight, zStep/tileHeight)",
+      "why": "the diagonal identity must be written in general form; the 2:1 special case invites the same error when the geometry moves"
+    },
+    {
+      "must_contain": "two Z levels are needed to cross one full cell",
+      "why": "with zStep 16 and tileHeight 32 the step is half a cell, not one — this is the number ADR 0013 got wrong"
+    },
+    {
+      "must_contain": "not one rounding rule among several",
+      "why": "Math.floor is load-bearing, not a stylistic rounding choice; nearest rounding breaks picking"
+    },
+    {
+      "must_contain": "no comparator fix",
+      "why": "the tall sprite and the multi-cell object are model problems; looking for a better sort is the trap"
+    },
+    {
+      "must_contain": "the map format forbids",
+      "why": "cyclic occlusion is prevented by the format, never repaired by the renderer"
+    },
+    {
+      "must_contain": "Cell height is derived, never stored",
+      "why": "storing a height map beside a block map creates two truths about the same terrain"
+    }
+  ],
+  "check_provenance": true
+}

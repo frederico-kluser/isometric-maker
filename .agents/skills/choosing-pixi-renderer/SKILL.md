@@ -121,8 +121,14 @@ attached.
 
 - Which backend the machine this runs on actually reports. Nothing here has ever rendered a frame
   (`docs/00-produto/visao.md:58@613eaec7`), and there is no telemetry and nobody to collect it from.
-- Whether WebGPU on this art style measurably beats WebGL2 here. Untested, and the honest default is
-  to prefer WebGPU with a WebGL2 fallback and revisit with numbers.
+- Whether WebGPU on this art style measurably beats WebGL2 here. Untested — and **the default stays
+  WebGL**, which is also what upstream recommends. `autoDetectRenderer` documents its own priority
+  and its reason: it "will prioritize the WebGL renderer as it is the most tested safe API to use.
+  In the near future as WebGPU becomes more stable and ubiquitous, it will be prioritized over
+  WebGL" (`tools/pixi-reference/vendor/pixi-api.d.ts:8415@e58b8ac3`). The stated risk is
+  implementation divergence between browsers, not missing features and not lower speed — upstream
+  calls WebGPU feature-complete and more performant in the same breath as labelling it experimental.
+  So preferring WebGPU is a compatibility bet, and taking it needs a measurement, not a preference.
 - Which integer factors a real editing session actually wants. That the factor must be an integer is
   decided; that 1×, 2×, 3× is the right set is a guess until someone edits a map.
 

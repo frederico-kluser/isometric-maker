@@ -143,6 +143,43 @@ On `create-character-with-8-directions`: `outline`, `shading` and `detail` are d
 "soft guidance — the model may not follow exactly". They are plain strings, not enums, so a typo
 is accepted silently and simply has no effect.
 
+### PixelLab's own MCP advertises a v3 that does not exist
+
+The vendor's MCP surface exposes a **single** `create_character` tool whose signature is a superset:
+it accepts `proportions`, `text_guidance_scale`, `n_directions` and `shading` alongside a `mode`
+parameter taking `"standard"`, `"pro"` or `"v3"`, and states that those four are *ignored* under
+`mode="v3"`.
+
+The REST schema does not work that way. `CreateCharacterV3Request` declares
+`additionalProperties: false` over eleven fields, and none of those four is among them — they are
+**rejected**, not ignored. An agent that reads the MCP documentation and writes a REST body from it
+produces a request the API refuses.
+
+This is the most reachable wrong answer about v3, because the wrong source is the vendor's own. The
+rule from `querying-pixellab-api` applies at full strength: the vendored spec is the only source, and
+a vendor page that contradicts it loses.
+
+### `template_id` selects a skeleton, never a style
+
+Open string, default `mannequin`, documented values `mannequin`, `bear`, `cat`, `dog`, `horse`,
+`lion`. The spec says it "picks the 3D template the skeleton estimator fits to the generated frames
+so the character can be animated", and that it "must match the body type in `reference_image`".
+Passing `bear` to make the art bear-like does nothing to the art and mis-fits the skeleton.
+
+`mannequin` is a **value**, never a parameter name. A body containing `"mannequin": true` is invalid.
+
+### The open risk this endpoint carries
+
+`/animate-character` describes itself as animating characters "previously created using the
+create-character-with-4-directions or create-character-with-8-directions endpoints", and its
+**Character Requirements** repeat that the character "must have been created with 4 or 8 directions".
+`create-character-v3` is named in neither place — yet its own `template_id` exists so that "the
+character can be animated", and it returns a `character_id`.
+
+The studio already bets on one side of that contradiction. **No paid call has settled it.** If the
+prose is right, the character pipeline breaks after generation with the money already spent. Do not
+present v3 → `/animate-character` as verified; see `docs/adr/0019-create-character-v3-e-o-caminho-do-personagem.md`.
+
 Worse: the character endpoints' prose lists the detail options as low / medium / **high** detail,
 while the spec's named `Detail` enum ends in `highly detailed`. The tileset and image endpoints
 enforce the enum. Copying the character endpoint's wording into a tileset request is a 422.

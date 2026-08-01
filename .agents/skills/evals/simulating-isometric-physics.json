@@ -1,0 +1,41 @@
+{
+  "skill": "simulating-isometric-physics",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o personagem atravessa a parede na diagonal", "should_trigger": true },
+    { "query": "nao consegue subir o degrau", "should_trigger": true },
+    { "query": "o personagem cai pelo chao", "should_trigger": true },
+    { "query": "o pulo esta errado", "should_trigger": true },
+    { "query": "o movimento nao e deterministico", "should_trigger": true },
+    { "query": "vale a pena usar um motor de fisica", "should_trigger": true },
+    { "query": "gerar o tileset do terreno", "should_trigger": false },
+    { "query": "escrever a documentacao em portugues", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "or higher does not climb",
+      "why": "the step climbs exactly one level; z+2 needs two steps or a jump"
+    },
+    {
+      "must_contain": "makes every staircase",
+      "why": "routing the step through canCross looks like deduplication and breaks stairs"
+    },
+    {
+      "must_contain": "affects collision",
+      "why": "the jump parabola is screen-only; collision always tests the integer model z"
+    },
+    {
+      "must_contain": "the position before the collision",
+      "why": "the body stops rather than sliding or tunnelling — sliding is an undecided behaviour"
+    },
+    {
+      "must_contain": "Never write a fractional",
+      "why": "a fractional z means the calculation belongs in screen space, not the model"
+    },
+    {
+      "must_contain": "not a DDA raycast",
+      "why": "trace.ts is an input replay; the name invites confusion with voxel traversal"
+    }
+  ],
+  "check_provenance": true
+}

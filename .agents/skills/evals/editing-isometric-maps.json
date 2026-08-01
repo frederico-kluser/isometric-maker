@@ -1,0 +1,77 @@
+{
+  "skill": "editing-isometric-maps",
+  "min_overlap": 2,
+  "routing": [
+    {
+      "query": "colocar a peca no mapa isometrico",
+      "should_trigger": true
+    },
+    {
+      "query": "clicou na celula errada",
+      "should_trigger": true
+    },
+    {
+      "query": "pintar o terreno com autotile",
+      "should_trigger": true
+    },
+    {
+      "query": "faltou a peca do autotile",
+      "should_trigger": true
+    },
+    {
+      "query": "exportar o projeto e o atlas nao foi encontrado",
+      "should_trigger": true
+    },
+    {
+      "query": "como fazer o desfazer da edicao",
+      "should_trigger": true
+    },
+    {
+      "query": "quanto custa animar em modo pro",
+      "should_trigger": false
+    },
+    {
+      "query": "qual backend de renderizacao escolher",
+      "should_trigger": false
+    },
+    {
+      "query": "empilhar um bloco em cima do outro",
+      "should_trigger": true
+    }
+  ],
+  "invariants": [
+    {
+      "must_contain": "Never hit-test a sprite to find a cell",
+      "why": "isometric sprite bounding boxes overlap by design; hit-testing is wrong exactly at the diamond edges"
+    },
+    {
+      "must_contain": "the first hit is the nearest surface",
+      "why": "the walk must run top-down; bottom-up returns buried cells"
+    },
+    {
+      "must_contain": "never a silent fallback",
+      "why": "substituting a nearby tile hides a tileset that was paid for and came back incomplete"
+    },
+    {
+      "must_contain": "The bit order is a guess",
+      "why": "AB-371 is an open assumption; presenting it as settled launders a guess into a fact"
+    },
+    {
+      "must_contain": "fails with the filename",
+      "why": "a silently missing atlas produces a runtime that loads and draws nothing"
+    },
+    {
+      "must_contain": "substrate but no history",
+      "why": "the tools are pure so edits are reversible in principle, but no stack, history or command object exists"
+    },
+    {
+      "must_contain": "a placed door opens anything",
+      "why": "porta and escada have documented behaviour the model cannot honour; hasEdge takes no type"
+    },
+    {
+      "must_contain": "These are absences, not defects",
+      "why": "what is missing must not be filled with an invented convention"
+    }
+  ],
+  "check_provenance": true
+}

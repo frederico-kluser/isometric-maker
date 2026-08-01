@@ -1,0 +1,65 @@
+{
+  "skill": "rotating-isometric-camera",
+  "min_overlap": 2,
+  "routing": [
+    {
+      "query": "girar a camera do mapa isometrico",
+      "should_trigger": true
+    },
+    {
+      "query": "quero quatro vistas do mapa para dar efeito 3D",
+      "should_trigger": true
+    },
+    {
+      "query": "a ordem de desenho muda quando gira a camera",
+      "should_trigger": true
+    },
+    {
+      "query": "preciso de arte por angulo de camera",
+      "should_trigger": true
+    },
+    {
+      "query": "reindexar a direcao do sprite quando roda a vista",
+      "should_trigger": true
+    },
+    {
+      "query": "quanto custa gerar o personagem",
+      "should_trigger": false
+    },
+    {
+      "query": "rodar os testes do pipeline",
+      "should_trigger": false
+    }
+  ],
+  "invariants": [
+    {
+      "must_contain": "does not override",
+      "why": "Z invariance comes from slicing plus manual reattachment, not from automatic preservation"
+    },
+    {
+      "must_contain": "The sign is not verified",
+      "why": "the ±2 shift per 90 degrees is forced by geometry, but clockwise vs anti-clockwise is not; guessing flips two of four views"
+    },
+    {
+      "must_contain": "clean occlusion answer, only a declaredly partial",
+      "why": "the reference engine ships two sort implementations and its maintainer calls the fix partial"
+    },
+    {
+      "must_contain": "is never rewritten when the camera turns",
+      "why": "rotation is a render-time parameter and never touches the stored map or the project file"
+    },
+    {
+      "must_contain": "make a trend",
+      "why": "one engine rotates and one does not; the claim that almost nobody does it is unsupported"
+    },
+    {
+      "must_contain": "acyclic from one view can be cyclic from another",
+      "why": "rotation changes which configurations hit cyclic occlusion, so the multi-cell ban stays load-bearing"
+    },
+    {
+      "must_contain": "without an ADR",
+      "why": "rotation touches geometry, depth, input, art budget and the project format at once"
+    }
+  ],
+  "check_provenance": true
+}

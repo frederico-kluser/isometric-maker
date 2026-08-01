@@ -39,7 +39,7 @@ The source of truth is `tools/pixi-reference/vendor/`, pinned at pixi.js 8.19.0
 - "Isso é código de cliente que vai para produção, ou é protótipo para ver na tela?"
 - "Qual o orçamento de quadro? 60 fps travado, ou 30 é aceitável nesse caso?"
 - "Quantos sprites simultâneos, na pior hipótese que você consegue imaginar?"
-- "Isso desenha estado que vem do servidor? Se sim, com que frequência ele chega?"
+- "Isso desenha estado do documento em edição, ou é chrome do editor? Com que frequência muda?"
 - "Pode depender de pacote da comunidade, ou só do `pixi.js` que já está fixado?"
 
 The last one is not a formality: several things a renderer needs — tilemap, UI kit, extra filters —
@@ -155,5 +155,5 @@ file answer a question, upstream's own fallback applies: fetch
 
 - `tools/pixi-reference/README.md` — what is vendored, why, and how to regenerate it
 - `.agents/skills/catalog.md` — the full skill index this router sits inside
-- `.agents/skills/enforcing-server-authority/SKILL.md` — the non-negotiables that constrain every
-  client decision made here
+- `.agents/skills/projecting-isometric-geometry/SKILL.md` — the coordinate space and depth key that
+  every renderer decision here has to honour
