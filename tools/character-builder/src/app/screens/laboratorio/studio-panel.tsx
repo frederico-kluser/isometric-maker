@@ -225,6 +225,35 @@ export function StudioPanel() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pending, job]);
 
+	// Detecção de servidor reiniciado durante a geração: o jobs Map é
+	// volátil (api.ts), e sem ele o GET /api/sprite-lab/{hash} retorna 404
+	// pra sempre. Quando o studio já carregou e a chave do job sumiu do mapa
+	// por mais de 15 s, o servidor provavelmente reiniciou.
+	const jobMissingSince = useRef<number | null>(null);
+	useEffect(() => {
+		if (pending === null || studio === undefined) {
+			jobMissingSince.current = null;
+			return;
+		}
+		const keyMissing = studio.jobs?.[pending.key] === undefined;
+		if (!keyMissing) {
+			jobMissingSince.current = null;
+			return;
+		}
+		const now = Date.now();
+		if (jobMissingSince.current === null) {
+			jobMissingSince.current = now;
+			return;
+		}
+		if (now - jobMissingSince.current < 15_000) return;
+		setError(SL.studio.erros.jobPerdido);
+		setPending(null);
+		setButtonState('error');
+		scheduleReset();
+		jobMissingSince.current = null;
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pending, studio]);
+
 	const handleReferenceLoad = (img: LoadedImage): void => {
 		const fit = fitWithinLimit(img.width, img.height);
 		if (fit === null || !fit.resized) {

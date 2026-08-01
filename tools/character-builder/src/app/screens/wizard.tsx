@@ -59,11 +59,11 @@ export function WizardScreen() {
 		<div className="flex flex-col gap-6">
 			<CharacterHeader studio={studio} refresh={refresh} />
 			{/* key reinicia o estado local do import ao trocar de personagem */}
-			<ImportCard key={character.id} refresh={refresh} />
+			<ImportCard key={`${character.id}-import`} refresh={refresh} />
 			{progress.firstRun ? <FirstRun studio={studio} refresh={refresh} /> : null}
 			<StepTrail steps={progress.steps} />
 			{/* key reinicia os formulários locais ao trocar de personagem */}
-			<div className="flex flex-col gap-4" key={character.id}>
+			<div className="flex flex-col gap-4" key={`${character.id}-steps`}>
 				<StepCard
 					title={wizard.config.titulo}
 					note={wizard.config.nota}

@@ -311,6 +311,9 @@ export const laboratorio = {
 			saidasInvalidas: 'Saídas em paralelo devem ser um inteiro entre 1 e 4.',
 			/** job falhou no servidor sem mensagem */
 			jobFalhou: 'O job falhou no servidor.',
+			/** servidor reiniciou durante a geração — o job sumiu do registro */
+			jobPerdido:
+				'O servidor reiniciou durante a geração — tente gerar novamente.',
 		},
 	},
 
