@@ -86,6 +86,17 @@ const CLIENT_ERROR_TEXT: Record<StudioErrorCode, string> = {
  */
 const API_DEFAULT = 'default';
 
+/**
+ * O gatilho do Select mostra o VALOR selecionado, não o rótulo do item — então
+ * sem isto a tela exibia `default` cru, em inglês, apesar de a lista mostrar
+ * "padrão da API". Todo texto que o usuário lê é pt-BR (ADR 0016), e o gatilho
+ * é texto que o usuário lê.
+ */
+const rotuloSelect = (v: unknown, sufixo = ''): string =>
+	v === API_DEFAULT || v === null || v === undefined
+		? SL.studio.form.padraoApi
+		: `${String(v)}${sufixo}`;
+
 type ButtonState = 'idle' | 'running' | 'done' | 'error';
 
 interface PendingRun {
@@ -144,6 +155,12 @@ export function StudioPanel() {
 	const [runBody, setRunBody] = useState<SpriteLabBody | null>(null);
 	const [runSummary, setRunSummary] = useState('');
 	const [result, setResult] = useState<SpriteLabResult | null>(null);
+	/**
+	 * true SÓ quando o POST resolveu na hora — nada foi submetido nesta
+	 * execução. `result.fromCache` não serve: o GET lê o manifesto do disco e
+	 * reporta `fromCache: true` mesmo logo depois de uma geração paga.
+	 */
+	const [semGasto, setSemGasto] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 	const [history, setHistory] = useState<HistoryEntry[]>([]);
 	const nextId = useRef(1);
@@ -161,47 +178,59 @@ export function StudioPanel() {
 
 	const running = buttonState === 'running';
 
-	// Sondagem do resultado: fetch cru, não o helper api — 404 ("ainda
-	// pendente") é controle de fluxo, e o helper transforma qualquer !ok em
-	// exceção. O tick inicial roda na hora: cache hit resolve sem espera.
+	// Sondagem do resultado. O servidor responde 200 com um status NOMEADO
+	// ('gerando' | 'pronto' | 'falhou' | 'desconhecido'); andamento não é mais
+	// 404, então o console do navegador fica limpo e uma falha de verdade
+	// aparece na hora. O tick inicial roda já: cache hit resolve sem espera.
 	useEffect(() => {
 		if (pending === null) return;
 		let cancelled = false;
+		const finish = (message: string): void => {
+			setError(message);
+			setPending(null);
+			setButtonState('error');
+			scheduleReset();
+		};
 		const tick = async (): Promise<void> => {
 			try {
 				const res = await fetch(`/api/sprite-lab/${pending.hash}`);
-				if (res.status === 404) return;
-				if (res.status === 200) {
-					const r = (await res.json()) as SpriteLabResult;
-					if (cancelled) return;
-					const first = r.candidates[0];
-					setResult(r);
-					setSelectedIndex(first?.index ?? null);
-					setPending(null);
-					setButtonState('done');
-					if (first !== undefined) {
-						setHistory((h) => [
-							{
-								id: nextId.current++,
-								at: new Date(),
-								thumbDataUri: `data:image/png;base64,${first.southB64}`,
-								summary: runSummary,
-								fromCache: r.fromCache,
-							},
-							...h,
-						]);
-					}
-					scheduleReset();
+				const body = (await res.json().catch(() => ({}))) as {
+					status?: string;
+					error?: string;
+					result?: SpriteLabResult;
+				};
+				if (cancelled) return;
+				if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+				if (body.status === 'gerando') return;
+				if (body.status === 'falhou' || body.status === 'desconhecido') {
+					finish(body.error ?? SL.studio.erros.jobFalhou);
 					return;
 				}
-				const body = (await res.json().catch(() => ({}))) as { error?: string };
-				throw new Error(body.error ?? `HTTP ${res.status}`);
+				const r = body.result;
+				if (body.status !== 'pronto' || r === undefined) {
+					throw new Error(body.error ?? SL.studio.erros.jobFalhou);
+				}
+				const first = r.candidates[0];
+				setResult(r);
+				setSelectedIndex(first?.index ?? null);
+				setPending(null);
+				setButtonState('done');
+				if (first !== undefined) {
+					setHistory((h) => [
+						{
+							id: nextId.current++,
+							at: new Date(),
+							thumbDataUri: `data:image/png;base64,${first.southB64}`,
+							summary: runSummary,
+							fromCache: r.fromCache,
+						},
+						...h,
+					]);
+				}
+				scheduleReset();
 			} catch (err) {
 				if (cancelled) return;
-				setError(err instanceof Error ? err.message : String(err));
-				setPending(null);
-				setButtonState('error');
-				scheduleReset();
+				finish(err instanceof Error ? err.message : String(err));
 			}
 		};
 		void tick();
@@ -225,34 +254,11 @@ export function StudioPanel() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pending, job]);
 
-	// Detecção de servidor reiniciado durante a geração: o jobs Map é
-	// volátil (api.ts), e sem ele o GET /api/sprite-lab/{hash} retorna 404
-	// pra sempre. Quando o studio já carregou e a chave do job sumiu do mapa
-	// por mais de 15 s, o servidor provavelmente reiniciou.
-	const jobMissingSince = useRef<number | null>(null);
-	useEffect(() => {
-		if (pending === null || studio === undefined) {
-			jobMissingSince.current = null;
-			return;
-		}
-		const keyMissing = studio.jobs?.[pending.key] === undefined;
-		if (!keyMissing) {
-			jobMissingSince.current = null;
-			return;
-		}
-		const now = Date.now();
-		if (jobMissingSince.current === null) {
-			jobMissingSince.current = now;
-			return;
-		}
-		if (now - jobMissingSince.current < 15_000) return;
-		setError(SL.studio.erros.jobPerdido);
-		setPending(null);
-		setButtonState('error');
-		scheduleReset();
-		jobMissingSince.current = null;
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pending, studio]);
+	// A detecção de "servidor reiniciou no meio da geração" saiu daqui: era uma
+	// heurística de 15 s sobre a ausência da chave em studio.jobs, e ela nunca
+	// disparava porque dependia de um snapshot que não era renovado. Agora o
+	// próprio servidor responde status 'desconhecido' nessa situação, e o tick
+	// acima trata na hora.
 
 	const handleReferenceLoad = (img: LoadedImage): void => {
 		const fit = fitWithinLimit(img.width, img.height);
@@ -299,8 +305,9 @@ export function StudioPanel() {
 
 		setError(null);
 		setButtonState('running');
+		setSemGasto(false);
 		try {
-			const accepted = await api<SpriteLabAccepted>('sprite-lab', {
+			const accepted = await api<SpriteLabAccepted | { status: string; result: SpriteLabResult }>('sprite-lab', {
 				method: 'POST',
 				body: JSON.stringify(built.body),
 			});
@@ -308,8 +315,18 @@ export function StudioPanel() {
 			// foi gerado, não o que está no formulário agora.
 			setRunBody(built.body);
 			setRunSummary(resumoStudio(built.body.size, built.body.view, built.body.outputs));
-			setResult(null);
 			setSelectedIndex(null);
+			// Cache total: o servidor devolve o resultado direto, sem job.
+			if ('result' in accepted) {
+				const r = accepted.result;
+				setResult(r);
+				setSemGasto(true);
+				setSelectedIndex(r.candidates[0]?.index ?? null);
+				setButtonState('done');
+				scheduleReset();
+				return;
+			}
+			setResult(null);
 			setPending({ key: accepted.key, hash: accepted.hash });
 		} catch (err) {
 			// Erros 400 do servidor já chegam em pt-BR (SpriteLabValidationError).
@@ -421,7 +438,7 @@ export function StudioPanel() {
 										}}
 									>
 										<SelectTrigger id="studio-size" className="w-full">
-											<SelectValue />
+											<SelectValue>{(v) => rotuloSelect(v, ' px')}</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											{SIZE_PRESETS.map((s) => (
@@ -476,7 +493,7 @@ export function StudioPanel() {
 										}}
 									>
 										<SelectTrigger id="studio-outline" className="w-full">
-											<SelectValue />
+											<SelectValue>{(v) => rotuloSelect(v)}</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value={API_DEFAULT}>
@@ -499,7 +516,7 @@ export function StudioPanel() {
 										}}
 									>
 										<SelectTrigger id="studio-detail" className="w-full">
-											<SelectValue />
+											<SelectValue>{(v) => rotuloSelect(v)}</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value={API_DEFAULT}>
@@ -529,7 +546,7 @@ export function StudioPanel() {
 									}}
 								>
 									<SelectTrigger id="studio-template" className="w-full">
-										<SelectValue />
+										<SelectValue>{(v) => rotuloSelect(v)}</SelectValue>
 									</SelectTrigger>
 									<SelectContent>
 										<SelectItem value={API_DEFAULT}>
@@ -722,7 +739,7 @@ export function StudioPanel() {
 											);
 										})}
 									</div>
-									{result.fromCache ? (
+									{semGasto ? (
 										<Badge variant="outline">{SL.studio.resultado.doCache}</Badge>
 									) : selectedUsage !== undefined ? (
 										<div className="flex flex-wrap items-center gap-2 text-sm">

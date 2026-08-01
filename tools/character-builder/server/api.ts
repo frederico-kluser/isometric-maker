@@ -55,6 +55,15 @@ import {
 	type SpriteLabConfig,
 } from "./sprite-lab.ts";
 import {
+	runWorldBlock,
+	readWorldBlockResult,
+	listWorldBlocks,
+	worldBlockHash,
+	validateWorldBlockConfig,
+	WorldBlockValidationError,
+	type WorldBlockConfig,
+} from "./world-block.ts";
+import {
 	exportWizardBundle,
 	importSpriteBundle,
 	parseSpriteBundle,
@@ -544,11 +553,75 @@ function resolveWizardCharacter(
 	return ch;
 }
 
+/** Extensões que a rota de assets serve, com o content-type de cada uma. */
+const ASSET_TYPES: Readonly<Record<string, string>> = {
+	".png": "image/png",
+	".json": "application/json; charset=utf-8",
+};
+
+/**
+ * Serve um arquivo gerado de dentro de `assets/`, lendo do disco a CADA
+ * requisição.
+ *
+ * O `publicDir` do Vite não serve para isto: ele monta a listagem de arquivos
+ * no boot, e todo asset gerado DEPOIS disso cai no fallback do index.html —
+ * o navegador recebe HTML com status 200 no lugar do PNG e a miniatura
+ * aparece quebrada. Verificado em 2026-08-01: blocos gravados antes do boot
+ * respondiam `image/png`, e os gravados depois, `text/html`.
+ *
+ * Como aqui o arquivo é lido na hora, um asset recém-gerado aparece sem
+ * reiniciar nada — que é o comportamento óbvio para uma ferramenta cujo
+ * trabalho É gerar arquivos.
+ */
+async function serveGeneratedAsset(
+	pathname: string,
+	res: ServerResponse,
+): Promise<boolean> {
+	// `..` nunca chega ao join: o caminho é normalizado e qualquer salto para
+	// fora de ASSETS é 404, não leitura de arquivo arbitrário.
+	const rel = decodeURIComponent(pathname.replace(/^\/+/, ""));
+	if (rel.includes("..") || rel.includes("\0")) return false;
+	const ext = rel.slice(rel.lastIndexOf("."));
+	const type = ASSET_TYPES[ext];
+	if (type === undefined) return false;
+
+	const full = join(ASSETS, rel);
+	if (!full.startsWith(ASSETS)) return false;
+	let body: Buffer;
+	try {
+		body = await readFile(full);
+	} catch {
+		return false;
+	}
+	res.statusCode = 200;
+	res.setHeader("content-type", type);
+	// Sem cache: o mesmo caminho pode ganhar bytes novos numa regeração.
+	res.setHeader("cache-control", "no-store");
+	res.end(body);
+	return true;
+}
+
 export async function handle(
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<boolean> {
 	const url = new URL(req.url ?? "/", "http://local");
+
+	// Assets gerados em runtime, antes do ramo /api/.
+	if (
+		req.method === "GET" &&
+		(url.pathname.startsWith("/world-blocks/") ||
+			url.pathname.startsWith("/sprite-lab/") ||
+			url.pathname.startsWith("/assets/"))
+	) {
+		const rel = url.pathname.startsWith("/assets/")
+			? url.pathname.slice("/assets".length)
+			: url.pathname;
+		if (await serveGeneratedAsset(rel, res)) return true;
+		// Não achou: deixa o Vite tentar (publicDir cobre o que existia no boot).
+		return false;
+	}
+
 	if (!url.pathname.startsWith("/api/")) return false;
 
 	try {
@@ -998,7 +1071,9 @@ export async function handle(
 			// resultado, sem job e sem gasto (idempotência por hash).
 			const cached = await readSpriteLabResult(hash, ASSETS);
 			if (cached) {
-				json(res, 200, cached);
+				// Mesma forma do GET: status nomeado + result. Sem isso a tela
+				// teria que distinguir dois formatos de resposta da mesma rota.
+				json(res, 200, { status: "pronto", result: cached });
 				return true;
 			}
 			const key = `sprite-lab::${hash}`;
@@ -1023,24 +1098,123 @@ export async function handle(
 		if (url.pathname.startsWith("/api/sprite-lab/") && req.method === "GET") {
 			const hash = url.pathname.slice("/api/sprite-lab/".length);
 			// O hash é sempre hex de 16 chars — qualquer outra coisa é 404, não
-			// tentativa de path traversal no manifesto.
+			// tentativa de path traversal no manifesto. Este é o ÚNICO 404 que
+			// sobra nesta rota, e ele significa mesmo "recurso inexistente".
 			if (!/^[a-f0-9]{16}$/i.test(hash)) {
 				json(res, 404, {
 					error: `resultado do sprite-lab "${hash}" não existe`,
 				});
 				return true;
 			}
+
+			// Andamento é RESPOSTA, não erro. Antes esta rota devolvia 404
+			// enquanto o job rodava e a UI sondava em cima disso: o navegador
+			// registrava uma linha vermelha a cada 3 s, o usuário lia aquilo
+			// como falha, e uma falha real do job ficava indistinguível do
+			// caminho feliz. Agora o estado vem nomeado no corpo, com 200.
 			const result = await readSpriteLabResult(hash, ASSETS);
-			if (!result) {
-				// 404 é controle de fluxo: a UI sonda até o manifesto aparecer.
-				json(res, 404, {
-					error:
-						`o resultado do sprite-lab "${hash}" ainda não está pronto — ` +
-						"a geração segue em andamento (ou o job falhou; veja /api/studio)",
+			if (result) {
+				json(res, 200, { status: "pronto", result });
+				return true;
+			}
+			const job = jobs.get(`sprite-lab::${hash}`);
+			if (job?.status === "falhou") {
+				json(res, 200, {
+					status: "falhou",
+					error: job.message ?? "a geração falhou",
 				});
 				return true;
 			}
-			json(res, 200, result);
+			if (job?.status === "gerando") {
+				json(res, 200, { status: "gerando" });
+				return true;
+			}
+			// Sem manifesto e sem job: ou o servidor reiniciou no meio (o mapa
+			// de jobs é volátil), ou o hash nunca rodou aqui. A UI trata como
+			// perdido na hora, em vez de esperar um tempo arbitrário.
+			json(res, 200, {
+				status: "desconhecido",
+				error:
+					`não há resultado nem job para o sprite-lab "${hash}" — ` +
+					"o servidor pode ter reiniciado durante a geração. " +
+					"Gerar de novo com a mesma configuração reaproveita o que já está em disco.",
+			});
+			return true;
+		}
+
+		// ---- blocos do mundo (bancada do create-isometric-tile) --------------------------
+		// Mesma forma do sprite-lab: POST exato ANTES do GET com prefixo, 202
+		// com {key, hash}, e o GET devolve estado NOMEADO com 200 — andamento
+		// nunca é 404.
+		if (url.pathname === "/api/world-block" && req.method === "POST") {
+			const b = await readBody<WorldBlockConfig>(req);
+			try {
+				validateWorldBlockConfig(b);
+			} catch (err) {
+				if (err instanceof WorldBlockValidationError) {
+					json(res, 400, { error: err.message, code: err.code });
+					return true;
+				}
+				throw err;
+			}
+			const hash = worldBlockHash(b);
+			const cached = await readWorldBlockResult(hash, ASSETS);
+			if (cached) {
+				json(res, 200, { status: "pronto", result: cached });
+				return true;
+			}
+			const key = `world-block::${hash}`;
+			spawn(
+				key,
+				`world-block · ${hash}`,
+				async () => {
+					await runWorldBlock(client(), b, {
+						assetsDir: ASSETS,
+						ledgerPath: LEDGER_PATH,
+						onLog: (m) => console.log(m),
+					});
+				},
+				[],
+			);
+			json(res, 202, { key, hash });
+			return true;
+		}
+
+		if (url.pathname.startsWith("/api/world-block/") && req.method === "GET") {
+			const hash = url.pathname.slice("/api/world-block/".length);
+			if (!/^[a-f0-9]{16}$/i.test(hash)) {
+				json(res, 404, { error: `bloco do mundo "${hash}" não existe` });
+				return true;
+			}
+			const result = await readWorldBlockResult(hash, ASSETS);
+			if (result) {
+				json(res, 200, { status: "pronto", result });
+				return true;
+			}
+			const job = jobs.get(`world-block::${hash}`);
+			if (job?.status === "falhou") {
+				json(res, 200, {
+					status: "falhou",
+					error: job.message ?? "a geração falhou",
+				});
+				return true;
+			}
+			if (job?.status === "gerando") {
+				json(res, 200, { status: "gerando" });
+				return true;
+			}
+			json(res, 200, {
+				status: "desconhecido",
+				error:
+					`não há bloco nem job para "${hash}" — o servidor pode ter reiniciado ` +
+					"durante a geração. Gerar de novo com a mesma configuração reaproveita o disco.",
+			});
+			return true;
+		}
+
+		// Catálogo de blocos já gerados: é daqui que o map-builder monta a paleta.
+		if (url.pathname === "/api/world-blocks" && req.method === "GET") {
+			json(res, 200, { blocks: await listWorldBlocks(ASSETS) });
 			return true;
 		}
 

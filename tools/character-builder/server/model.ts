@@ -476,3 +476,70 @@ export function seedStudio(): Studio {
 		cells: {},
 	};
 }
+
+// ---------------------------------------------------------------------------
+// Blocos do mundo — vocabulário do /create-isometric-tile
+// ---------------------------------------------------------------------------
+//
+// Vive AQUI, e não em server/world-block.ts, porque a tela precisa destes
+// enums para montar os selects — e world-block.ts importa node:crypto e
+// node:fs, que o navegador não tem. Importar de lá quebrava o Sprite Studio
+// inteiro com "Module node:crypto has been externalized".
+//
+// Espelho do spec vendorizado (openapi-v2.json). Mudou lá, muda aqui.
+
+/**
+ * As quatro vistas da câmera do editor, em ordem de rotação horária.
+ *
+ * A ordem É o contrato: o map-builder escolhe a arte com
+ * `(facingIndex + rotation) mod 4`, e trocar a ordem aqui gira o mundo
+ * inteiro sem que nada mais mude.
+ */
+export const BLOCK_FACINGS = ['north', 'east', 'south', 'west'] as const;
+export type BlockFacing = (typeof BLOCK_FACINGS)[number];
+
+/** Rótulos pt-BR das faces — a UI e os nomes de arquivo do bundle usam estes. */
+export const FACING_LABELS: Readonly<Record<BlockFacing, string>> = {
+  north: 'norte',
+  east: 'leste',
+  south: 'sul',
+  west: 'oeste',
+};
+
+export const TILE_SHAPES = ['block', 'thick tile', 'thin tile'] as const;
+export type TileShape = (typeof TILE_SHAPES)[number];
+
+export const TILE_OUTLINES = [
+  'single color outline',
+  'selective outline',
+  'lineless',
+] as const;
+export type TileOutline = (typeof TILE_OUTLINES)[number];
+
+export const TILE_SHADINGS = [
+  'flat shading',
+  'basic shading',
+  'medium shading',
+  'detailed shading',
+  'highly detailed shading',
+] as const;
+export type TileShading = (typeof TILE_SHADINGS)[number];
+
+export const TILE_DETAILS = ['low detail', 'medium detail', 'highly detailed'] as const;
+export type TileDetail = (typeof TILE_DETAILS)[number];
+
+/** isometric_tile_size do spec: enum fechado [16, 32]. */
+export const TILE_UNIT_SIZES = [16, 32] as const;
+export type TileUnitSize = (typeof TILE_UNIT_SIZES)[number];
+
+/** image_size sugeridos dentro da faixa 16–64 do spec. */
+export const BLOCK_SIZE_PRESETS = [32, 48, 64] as const;
+export const DEFAULT_BLOCK_SIZE = 48;
+
+/**
+ * Uniforme = 1 geração servindo as 4 vistas (grama, pedra, terra).
+ * Orientado = 1 geração POR vista (uma face com porta, uma quina de muralha).
+ */
+export const FACING_MODES = ['uniform', 'oriented'] as const;
+export type FacingMode = (typeof FACING_MODES)[number];
+

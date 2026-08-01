@@ -93,6 +93,9 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0018`](./adr/0018-artefato-de-exportacao.md) | O artefato de exportação: `project.json` v1 | vigente |
 | [`0019`](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) | `create-character-v3` é o caminho do personagem, e o que isso custa | vigente |
 | [`0020`](./adr/0020-identidade-da-diagonal-de-picking.md) | A diagonal do picking avança `zStep/tileHeight` por nível, não uma célula | vigente |
+| [`0021`](./adr/0021-rotacao-de-camera-em-quatro-vistas.md) | Rotação de câmera em quatro vistas, como parâmetro de vista | vigente |
+| [`0022`](./adr/0022-blocos-do-mundo-isometricos.md) | Blocos do mundo vêm do `/create-isometric-tile`, e o default é uma geração por bloco | vigente |
+| [`0023`](./adr/0023-caminho-de-volta-ao-artefato-pago.md) | Toda geração paga registra o caminho de volta ao artefato, e andamento nunca é 404 | vigente |
 
 ## Skills
 
@@ -102,7 +105,7 @@ Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), 
 
 As quatro do modelo são novas. Três existem porque `packages/iso-core` e `tools/map-builder` tinham 363 testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md) e [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md). A separação entre elas e as do PixiJS é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
 
-A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-camera/SKILL.md), documenta uma decisão que **não** foi tomada: girar a câmera em quatro vistas. Ela existe para que a decisão seja feita com números lidos do OpenRCT2 e do Godot, e não com intuição — inclusive o número que desanima, que é o motor de referência manter duas implementações de ordenação e ainda chamar a correção de oclusão de parcial.
+A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-camera/SKILL.md), reuniu o material para uma decisão que ainda não tinha sido tomada: girar a câmera em quatro vistas. A decisão foi tomada em 2026-08-01 na [ADR 0021](./adr/0021-rotacao-de-camera-em-quatro-vistas.md), com os números lidos do OpenRCT2 e do Godot — inclusive o que desanima, que é o motor de referência manter duas implementações de ordenação e ainda chamar a correção de oclusão de parcial. A skill continua sendo onde esse material mora.
 
 `enforcing-server-authority` foi **retirada com o pivô e não tem sucessora** — o assunto dela deixou de existir.
 
@@ -113,6 +116,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-07-29 | Documentação inicial: manual do PixelLab, design de combate, as oito primeiras ADRs |
 | 2026-07-30 | Sprite Studio; conhecimento do PixelLab e do PixiJS vendorizado em vinte skills; ADR 0009 |
 | 2026-07-30 | **Pivô para o isometric-maker** ([ADR 0010](./adr/0010-pivo-para-editor-isometrico.md)): docs e ADRs de MMORPG apagados, sete ADRs novas, índice reescrito sem entrada inexistente |
+| 2026-08-01 | Rotação de câmera em quatro vistas ([ADR 0021](./adr/0021-rotacao-de-camera-em-quatro-vistas.md)), blocos do mundo pelo `/create-isometric-tile` ([ADR 0022](./adr/0022-blocos-do-mundo-isometricos.md)) e a regra do caminho de volta ao artefato pago ([ADR 0023](./adr/0023-caminho-de-volta-ao-artefato-pago.md)), que corrigiu 14 submissões pagas sem um único PNG em disco |
 | 2026-08-01 | Spec revendorizado; [ADR 0019](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) alinha a decisão de personagem ao código em v3; [ADR 0020](./adr/0020-identidade-da-diagonal-de-picking.md) corrige a diagonal do picking e estreia o campo `**Corrige:**`; quatro skills novas para o modelo isométrico, incluindo a de rotação de câmera |
 
 ## Referências
@@ -122,4 +126,4 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 - [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
 - [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-07-31
+**Última atualização:** 2026-08-01

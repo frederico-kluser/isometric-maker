@@ -98,8 +98,28 @@ interface RecordedCall {
   readonly body?: Record<string, unknown>;
 }
 
+/**
+ * Host fictício das rotation_urls do CharacterDetail. O create-character-v3
+ * entrega os pixels como URL em GET /characters/{id} — nunca dentro do
+ * background job. O fake antigo devolvia base64 no job, uma resposta que a API
+ * real nunca produziu, e por isso a suíte ficou verde enquanto a v3 gastava
+ * dinheiro sem gravar um único PNG (2026-08-01).
+ */
+const FAKE_STORAGE = 'https://storage.fake-mannequin.test';
+const realFetch = globalThis.fetch;
+/** Todas as direções devolvem o MESMO PNG: aqui o que importa é o caminho, não a arte. */
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input.toString();
+  if (url.startsWith(FAKE_STORAGE)) {
+    return new Response(Buffer.from(PNG_DIAGONAL, 'base64'), { status: 200 });
+  }
+  return realFetch(input, init);
+}) as typeof globalThis.fetch;
+
 class FakeClient extends PixelLabClient {
   readonly calls: RecordedCall[] = [];
+  /** character_ids sondados via GET /characters/{id}. */
+  readonly characterReads: string[] = [];
   /** Linha do tempo de início/fim das chamadas — prova de concorrência. */
   readonly events: string[] = [];
   /** Última reference_image submetida ao create-character-v3 (8 direções). */
@@ -170,25 +190,34 @@ class FakeClient extends PixelLabClient {
         });
       }
       if (id === 'job-dir8') {
-        // v3: rotation_urls keyeado por nome de direção — 8 PNGs gerados.
+        // Formato REAL do job concluído da v3: metadado puro, zero pixel.
+        // Os frames moram em GET /characters/{id}.rotation_urls, abaixo.
         return this.ok<T>({
           id,
           status: 'completed',
           created_at: '2026-07-31T00:00:00Z',
           last_response: {
-            rotation_urls: {
-              south:     [PNG_SOUTH],
-              'south-west': [PNG_DIAGONAL],
-              west:      [PNG_WEST],
-              'north-west': [PNG_DIAGONAL],
-              north:     [PNG_NORTH],
-              'north-east': [PNG_DIAGONAL],
-              east:      [PNG_EAST],
-              'south-east': [PNG_DIAGONAL],
-            },
+            character_id: 'remote-char-1',
+            directions_count: 8,
+            directions_type: '8-directions',
+            saved_to_storage: true,
           },
         });
       }
+    }
+
+    if (method === 'GET' && path.startsWith('/characters/')) {
+      const id = decodeURIComponent(path.slice('/characters/'.length));
+      this.characterReads.push(id);
+      const rotation: Record<string, string> = {};
+      for (const d of DIRECTIONS) rotation[d] = `${FAKE_STORAGE}/${d}.png`;
+      return this.ok<T>({
+        id,
+        status: 'completed',
+        directions: 8,
+        size: { width: 64, height: 64 },
+        rotation_urls: rotation,
+      });
     }
 
     throw new Error(`FakeClient: chamada inesperada ${method} ${path}`);

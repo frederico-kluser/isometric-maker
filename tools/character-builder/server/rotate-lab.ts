@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { PixelLabClient } from '../../pixellab-pipeline/src/api.ts';
 import { COST_TABLE, estimateByArea } from '../../pixellab-pipeline/src/cost.ts';
+import { asBase64Image, extractBase64 } from './base64-image.ts';
 import { trackSpend } from './estimate.ts';
 import type { Direction } from './model.ts';
 
@@ -73,7 +74,7 @@ interface RotateLabResponse {
     readonly usd?: number | null;
     readonly generations?: number | null;
   };
-  readonly image?: string;
+  readonly image?: unknown;
 }
 
 // ---- erros nomeados (api.ts mapeia para HTTP 400 na fase 3)
@@ -272,8 +273,14 @@ export async function runRotateLab(
 
   // Do spec: required = image_size, from_image. Todo o resto é opcional e só
   // entra no request quando informado.
+  //
+  // from_image/init_image/mask_image/color_image são Base64Image, ou seja um
+  // OBJETO `{base64}` — não a string crua. Mandar a string devolve
+  // 422 "Input should be a valid dictionary or object to extract fields from",
+  // que era exatamente o estado desta rota até 2026-08-01: o laboratório de
+  // rotação nunca completou uma chamada.
   const params: Record<string, unknown> = {
-    from_image: stripDataUri(input.imageBase64),
+    from_image: asBase64Image(input.imageBase64),
     image_size: input.imageSize,
   };
   if (input.fromDirection !== undefined && input.toDirection !== undefined) {
@@ -285,7 +292,7 @@ export async function runRotateLab(
   if (input.toView !== undefined) params['to_view'] = input.toView;
   if (input.viewChange !== undefined) params['view_change'] = input.viewChange;
   if (input.initImageBase64 !== undefined) {
-    params['init_image'] = stripDataUri(input.initImageBase64);
+    params['init_image'] = asBase64Image(input.initImageBase64);
     if (input.initImageStrength !== undefined) {
       params['init_image_strength'] = input.initImageStrength;
     }
@@ -296,15 +303,16 @@ export async function runRotateLab(
 
   const res = await client.submit<RotateLabResponse>('rotate', params);
 
-  const imageB64 = res.data?.image;
-  if (!imageB64) {
+  // O `image` da resposta também é Base64Image ({base64}), não string —
+  // extractBase64 lê as duas formas (ver server/base64-image.ts).
+  const raw = extractBase64(res.data?.image);
+  if (raw === '') {
     throw new Error(
       `/rotate não devolveu campo "image". Resposta: ${res.raw.slice(0, 200)}`,
     );
   }
 
   // Gravar PNG ANTES de qualquer pós-processamento — a cobrança já aconteceu.
-  const raw = stripDataUri(imageB64);
   await mkdir(dir, { recursive: true });
   await writeFile(path, Buffer.from(raw, 'base64'));
   opts.onLog?.(`[rotate-lab] /rotate → ${path} (${raw.length} chars b64)`);

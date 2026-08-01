@@ -229,7 +229,11 @@ test('primeira execução — UMA chamada, params do par from/to, PNG gravado no
     assert.equal(body['from_direction'], 'south');
     assert.equal(body['to_direction'], 'east');
     assert.equal(body['direction_change'], undefined, 'par from/to não manda direction_change');
-    assert.equal(body['from_image'], FAKE_PNG_B64, 'from_image vai sem prefixo data URI');
+    assert.deepEqual(
+      body['from_image'],
+      { type: 'base64', base64: FAKE_PNG_B64 },
+      'from_image é Base64Image ({base64}), não string crua — string é 422 na API',
+    );
     assert.deepEqual(body['image_size'], { width: 64, height: 64 });
     assert.equal('isometric' in body, false, 'isometric=false é omitido do request (F0-09)');
 
@@ -295,7 +299,11 @@ test('isometric=true entra no request; views, seed e init_image quando informado
     assert.equal(body['from_view'], 'low top-down');
     assert.equal(body['to_view'], 'low top-down');
     assert.equal(body['seed'], 42);
-    assert.equal(body['init_image'], FAKE_PNG_B64, 'init_image vai sem prefixo data URI');
+    assert.deepEqual(
+      body['init_image'],
+      { type: 'base64', base64: FAKE_PNG_B64 },
+      'init_image também é Base64Image',
+    );
     assert.equal(body['init_image_strength'], 300);
   } finally {
     rmSync(dir, { recursive: true, force: true });
