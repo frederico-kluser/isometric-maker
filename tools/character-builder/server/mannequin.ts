@@ -757,8 +757,8 @@ export async function generateDirections8(
   const body: Record<string, unknown> = {
     description: ch.description,
     reference_image: { base64: southRaw },
-    template_id: 'mannequin',
-    view: 'low top-down',
+    template_id: s.lock.templateId ?? 'mannequin',
+    view: s.lock.view ?? 'low top-down',
     seed: ch.seed,
     no_background: true,
     image_size: { width: size, height: size },

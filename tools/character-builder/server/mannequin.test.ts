@@ -524,6 +524,28 @@ test('qualidade do lock vai no request do bitforge', async () => {
   }
 });
 
+test('view e templateId do lock vão no request do create-character-v3', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    store.studio.lock = {
+      frameCount: 8,
+      fps: 8,
+      size: SIZE,
+      view: 'high top-down',
+      templateId: 'dog',
+    };
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
+    await generateDirections8(client, store, CHAR_ID, opts);
+
+    const dir8 = client.calls.find((c) => c.path === '/create-character-v3');
+    assert.equal(dir8?.body?.['view'], 'high top-down');
+    assert.equal(dir8?.body?.['template_id'], 'dog');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('sem qualidade no lock, os campos são omitidos dos requests (F0-09)', async () => {
   const { dir, store, opts } = makeHarness();
   try {

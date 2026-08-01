@@ -50,6 +50,8 @@ import {
 	DIRECTIONS,
 	DETAIL_OPTIONS,
 	OUTLINE_OPTIONS,
+	TEMPLATE_OPTIONS,
+	VIEW_OPTIONS,
 	cellKey,
 	directions8Key,
 	seedStudio,
@@ -65,6 +67,8 @@ import {
 	type Silhouette,
 	type Studio,
 	type TemplateAnimation,
+	type TemplateOption,
+	type ViewOption,
 	type WardrobeItem,
 } from "./model.ts";
 
@@ -561,6 +565,8 @@ export async function handle(
 				silhouette?: Silhouette;
 				detail?: DetailOption;
 				outline?: OutlineOption;
+				view?: ViewOption;
+				templateId?: TemplateOption;
 			}>(req);
 
 			// Só o manequim trava a config; todo personagem derivado herda o lock.
@@ -637,6 +643,20 @@ export async function handle(
 				);
 				return true;
 			}
+			if (b.view !== undefined && !VIEW_OPTIONS.includes(b.view)) {
+				badRequest(
+					res,
+					`view desconhecida: ${String(b.view)} (válidas: ${VIEW_OPTIONS.join(", ")})`,
+				);
+				return true;
+			}
+			if (b.templateId !== undefined && !TEMPLATE_OPTIONS.includes(b.templateId)) {
+				badRequest(
+					res,
+					`templateId desconhecido: ${String(b.templateId)} (válidos: ${TEMPLATE_OPTIONS.join(", ")})`,
+				);
+				return true;
+			}
 
 			s.lock = {
 				frameCount: b.frameCount,
@@ -644,6 +664,8 @@ export async function handle(
 				size: b.size,
 				...(b.detail !== undefined ? { detail: b.detail } : {}),
 				...(b.outline !== undefined ? { outline: b.outline } : {}),
+				...(b.view !== undefined ? { view: b.view } : {}),
+				...(b.templateId !== undefined ? { templateId: b.templateId } : {}),
 			};
 			const idx = s.characters.findIndex((c) => c.id === "manequim");
 			s.characters[idx] = {

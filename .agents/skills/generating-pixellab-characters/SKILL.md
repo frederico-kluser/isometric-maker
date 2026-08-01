@@ -16,29 +16,29 @@ sprite.
 
 ## Injected knowledge
 
-### Four endpoints that all produce "a character with 8 directions"
+### Five endpoints that all produce "a character with 8 directions"
 
 Query them, do not recall them:
 
 ```bash
 S=.agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs
 node $S tag "Character from template"
-node $S endpoint /create-character-with-8-directions
+node $S endpoint /create-character-v3
 node $S flow /create-character-v3
 ```
 
 | Endpoint | Size range | Cost order | What it ignores |
 |---|---|---|---|
-| `/create-character-with-4-directions` | 16–128 | cheapest | — |
+| `/create-character-v3` (reference_image) | 16–256 advisory | ceil(w×h×8 / 65536) gen | `outline`, `detail` |
+| `/create-character-v3` (from-scratch) | 32–256 | 1 + ceil(s²×8 / 65536) gen | — |
 | `/create-character-with-8-directions` `mode='standard'` | 16–128 | 1 generation | — |
 | `/create-character-with-8-directions` `mode='pro'` | 16–128 | 20–40 generations | `outline`, `shading`, `detail`, `proportions`, `text_guidance_scale` |
-| `/create-character-pro` | 32–168 | 20–40 generations | the style-hint fields entirely; it takes `style_description` instead |
-| `/create-character-v3` | 32–256 | formula, see below | `outline`/`detail` **when a reference image is given** |
+| `/create-character-pro` | 32–168 | 20–40 generations | style-hint fields; takes `style_description` |
+| `/create-character-with-4-directions` | 16–128 | cheapest | — |
 
-`mode='standard'` on the 8-direction endpoint is the project's backbone: one generation for all
-eight rotations (`docs/01-pixellab/custos-e-limites.md:70@fe52f3d5`). Every other route costs more,
-and `mode='pro'` costs more **and** discards the style parameters you passed — a silent downgrade,
-not an error.
+`create-character-v3` is the project's backbone since 2026-07-31 — it replaces the 8-directions
+endpoint in the character-builder wizard. The reference_image mode takes a south-facing sprite and
+rotates it into 8 directions directly, collapsing the old cardinals step.
 
 `/create-character-v3` is the only one whose cost is a published formula rather than a table:
 `ceil(w*h*8 / 65536)` generations with a reference image, and `1 + ceil(s*s*8 / 65536)` from scratch
@@ -60,37 +60,32 @@ poll: the money left at submit, and the id is the only way back to the artefact.
 
 ### The canvas is not the size you asked for — and the factor differs per endpoint
 
-Two different inflation rules coexist, and using the wrong one crops heads off:
+Three different inflation rules coexist, and using the wrong one crops heads off:
 
-- `/create-character-with-4-directions` and `/create-character-with-8-directions` inflate by
-  **~40%** — ask 64×64, get roughly 90×90 (`tools/pixellab-pipeline/src/endpoints.ts:80@b6e61f99`).
+- `/create-character-v3` (reference_image): canvas padded **~2x** for animation room, capped at 256.
+  `image_size` is advisory — the model picks the output size.
+- `/create-character-with-8-directions` inflates by **~40%** — ask 64×64, get roughly 90×90
+  (`tools/pixellab-pipeline/src/endpoints.ts:80@7e700048`).
 - `/create-character-pro` pads the persisted canvas to **~2x** the requested frame size.
 
 Crop against the returned metadata, never against the requested value.
 
-### This endpoint has no return *order* — it hands back a dictionary keyed by name
+### v3 reference_image: one image, eight rotations
 
-The `directions` field on `/create-character-with-8-directions` accepts keys in the spec's own
-order — south, south-east, east, north-east, north, north-west, west, south-west — described as a
-"Fixed 8-rotation layout in clockwise order starting from south". That is the *layout* it draws, and
-the request side is all it governs.
+`create-character-v3` with `reference_image` takes a single south-facing sprite (max 256×256,
+base64) and rotates it into 8 directions. `outline` and `detail` are **ignored** when
+`reference_image` is present — the spec says so explicitly. `template_id` picks the skeleton
+template: `mannequin` (biped, default), `bear`, `cat`, `dog`, `horse`, or `lion`. `view` sets
+the camera angle: `low top-down`, `high top-down`, or `side`.
 
-There is no response order to match it against. The spec says this endpoint "creates 8 rotation
-images in a **dictionary format** for easy access by direction name" and "Returns dictionary of
-images by direction name" (`tools/pixellab-pipeline/openapi/openapi-v2.json`, printable with
-`node $S endpoint /create-character-with-8-directions`). The schemas agree: `CharacterRotationUrls`
-is an object with a property per direction, `south`/`west`/`east`/`north` required and the four
-diagonals nullable "(8-dir only)". So **index by direction name, never by position** — there is no
-array whose order you could be reading, only whatever order the JSON keys happened to arrive in, and
-being wrong about it raises nothing.
+The old `directions` map (frozen cardinals) from the 8-directions endpoint does not exist on
+v3 — the model handles rotation internally.
 
-Two related traps in the same neighbourhood. The 200 block still carries an old `images`-by-name
-example while its declared schema is the job response (`background_job_id` + `character_id`) — one
-more reason to read the schema and not the example. And `DIRECTIONS_8` in this repo — S, SW, W, NW,
-N, NE, E, SE (`tools/pixellab-pipeline/src/endpoints.ts:45@b6e61f99`) — is the frame-naming order
-plus the documented return order of a **different** endpoint, `/generate-8-rotations-v2`. Reusing it
-as a positional key into this one's output produces sprites that walk sideways, with no error
-anywhere.
+### Response: dictionary, never an array
+
+All character endpoints return frames keyed by direction name (e.g. `rotation_urls.south`,
+`rotation_urls.south-west`). Index by direction name, never by position — there is no array
+whose order you could be reading.
 
 ### Reference images per direction have rules the spec states only in prose
 
@@ -114,11 +109,16 @@ The project uses `low top-down` everywhere
 endpoints but **not** on every endpoint the same character has to sit next to — omit it on a tileset
 call and the terrain lands in a different projection from the sprite.
 
-### The style hints are hints, and one of them contradicts the named enum
+### The style hints depend on the endpoint
 
-`outline`, `shading` and `detail` are documented as "soft guidance — the model may not follow
-exactly". They are plain strings on the character endpoints, not enums, so a typo is accepted
-silently and simply has no effect.
+On `create-character-v3`: `outline` and `detail` are soft hints that only apply in **from-scratch**
+mode (no `reference_image`). They are **ignored** when a reference image is provided.
+`shading` and `text_guidance_scale` do **not exist** on the v3 endpoint — they are v2-only
+parameters that were not carried forward.
+
+On `create-character-with-8-directions`: `outline`, `shading` and `detail` are documented as
+"soft guidance — the model may not follow exactly". They are plain strings, not enums, so a typo
+is accepted silently and simply has no effect.
 
 Worse: the character endpoints' prose lists the detail options as low / medium / **high** detail,
 while the spec's named `Detail` enum ends in `highly detailed`. The tileset and image endpoints

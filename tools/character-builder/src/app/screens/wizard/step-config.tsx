@@ -45,6 +45,10 @@ import {
 	OUTLINE_OPTIONS,
 	type OutlineOption,
 	type Silhouette,
+	TEMPLATE_OPTIONS,
+	type TemplateOption,
+	VIEW_OPTIONS,
+	type ViewOption,
 } from '../../../../server/model.ts';
 import { configTravada, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
@@ -102,6 +106,8 @@ function ConfigForm({
 	const [fps, setFps] = useState('8');
 	// Default Máxima (decisão do usuário, TASK_PLAN): 128px, qualidade máxima.
 	const [quality, setQuality] = useState<QualityValues>(QUALITY_PRESETS.maxima);
+	const [view, setView] = useState<ViewOption>('low top-down');
+	const [templateId, setTemplateId] = useState<TemplateOption>('mannequin');
 	const [silhouette, setSilhouette] = useState<Silhouette>(
 		progress.character.silhouette,
 	);
@@ -176,6 +182,46 @@ function ConfigForm({
 						</SelectContent>
 					</Select>
 				</div>
+				<div className="flex flex-col gap-2">
+					<span className="text-sm font-medium">{wizard.config.view}</span>
+					<Select
+						value={view}
+						onValueChange={(v) => {
+							if (typeof v === 'string') setView(v as ViewOption);
+						}}
+					>
+						<SelectTrigger className="w-44">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{VIEW_OPTIONS.map((v) => (
+								<SelectItem key={v} value={v}>
+									{wizard.config.viewRotulos[v]}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+				<div className="flex flex-col gap-2">
+					<span className="text-sm font-medium">{wizard.config.template}</span>
+					<Select
+						value={templateId}
+						onValueChange={(v) => {
+							if (typeof v === 'string') setTemplateId(v as TemplateOption);
+						}}
+					>
+						<SelectTrigger className="w-44">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{TEMPLATE_OPTIONS.map((t) => (
+								<SelectItem key={t} value={t}>
+									{wizard.config.templateRotulos[t]}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
 			</div>
 			<Accordion className="rounded-xl border border-border bg-card">
 				<AccordionItem value="avancado">
@@ -225,6 +271,8 @@ function ConfigForm({
 								silhouette,
 								detail: quality.detail,
 								outline: quality.outline,
+								view,
+								templateId,
 							}),
 						}),
 					)

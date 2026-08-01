@@ -2,7 +2,7 @@
 
 > **Quick Start (TL;DR)**
 >
-> Estúdio local de sprites: o wizard constrói o manequim em cadeia derivativa (sul por texto → edição → cardeais → 8 direções), e poses, guarda-roupa e personagens derivados saem dele. O token nunca chega ao navegador.
+> Estúdio local de sprites: o wizard constrói o manequim em cadeia derivativa (sul por texto → edição → 8 direções via create-character-v3), e poses, guarda-roupa e personagens derivados saem dele. O token nunca chega ao navegador.
 >
 > ```bash
 > cd /home/ondokai/Projects/isometric-maker/tools/character-builder
@@ -24,17 +24,16 @@ Cada etapa se apoia na arte da anterior, e cada célula `pronto` é terminal —
 ```text
 1. sul por texto        /create-image-bitforge   descrição → PNG da sul (síncrono)
 2. edição da sul        /edit-image              novo prompt → nova versão (undo é grátis, sem API)
-3. cardeais             /rotate                  south→east ∥ south→north em paralelo, depois south→west
-4. oito direções        /create-character-with-8-directions
-                        directions={south,east,north,west}: diagonais geradas,
-                        cardeais congeladas, prova de congelamento ao final
+3. oito direções        /create-character-v3     reference_image = sprite sul ativo:
+                        o modelo v3 rotaciona sozinho para as 8 direções.
+                        O passo de cardeais (/rotate) foi removido com a migração.
 ```
 
 As decisões de API acima foram confirmadas no spec vendorizado (`/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json`, capturado 2026-07-29) e estão anotadas no cabeçalho de `/home/ondokai/Projects/isometric-maker/tools/character-builder/server/mannequin.ts`.
 
 ## A trava de frames (lock)
 
-Antes da primeira geração, o wizard trava `frameCount` (4, 8 ou 16), `fps` e `size` (16–128) em `studio.json`. Depois do manequim pronto a trava é **imutável**: toda pose, peça e personagem derivado herda, e a UI para de oferecer a escolha. Só o manequim trava; derivados herdam.
+Antes da primeira geração, o wizard trava `frameCount` (4, 8 ou 16), `fps`, `size` (32–256), `view`, e `templateId` em `studio.json`. Depois do manequim pronto a trava é **imutável**: toda pose, peça e personagem derivado herda, e a UI para de oferecer a escolha. Só o manequim trava; derivados herdam.
 
 ## Manequim default: export/import
 

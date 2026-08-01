@@ -113,6 +113,10 @@ export const wizard = {
     fps: 'FPS',
     /** Rótulo do seletor de silhueta */
     silhueta: 'Silhueta',
+    /** Rótulo do seletor de view */
+    view: 'Ângulo',
+    /** Rótulo do seletor de template */
+    template: 'Corpo',
     /** Rótulo do seletor segmentado de preset de qualidade */
     qualidade: 'Qualidade da base',
     /** Nome acessível do seletor segmentado de preset de qualidade */
@@ -153,6 +157,21 @@ export const wizard = {
     },
     /** Botão que trava a configuração */
     travar: 'Travar configuração',
+    /** Rótulos das views */
+    viewRotulos: {
+      'low top-down': 'Top-down baixo',
+      'high top-down': 'Top-down alto',
+      side: 'Lateral',
+    },
+    /** Rótulos dos templates */
+    templateRotulos: {
+      mannequin: 'Humano (manequim)',
+      bear: 'Urso',
+      cat: 'Gato',
+      dog: 'Cachorro',
+      horse: 'Cavalo',
+      lion: 'Leão',
+    },
   },
 
   // ── passo 2: face sul ────────────────────────────────────────

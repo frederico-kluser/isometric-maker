@@ -1,0 +1,202 @@
+{
+  "version": 2,
+  "palette": [
+    "#0d0b0e",
+    "#1c1a21",
+    "#302c35",
+    "#4a444e",
+    "#6b6470",
+    "#918a94",
+    "#c2bcc4",
+    "#eae6ea",
+    "#3b1f1c",
+    "#6b2f26",
+    "#9c4436",
+    "#c96f4a",
+    "#2a2f1c",
+    "#49512c",
+    "#6e7a3e",
+    "#9aa85a",
+    "#1a2430",
+    "#28394d",
+    "#3d5872",
+    "#5f83a3",
+    "#4a3520",
+    "#6f5030",
+    "#9c7345",
+    "#c79d63"
+  ],
+  "characters": [
+    {
+      "id": "manequim",
+      "label": "Manequim base",
+      "silhouette": "humano-medio",
+      "description": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
+      "size": 128,
+      "seed": 1,
+      "wizard": {
+        "etapa": "pronto",
+        "southVersions": [
+          {
+            "prompt": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
+            "at": "2026-07-31T23:56:15.212Z"
+          }
+        ],
+        "activeSouth": 0
+      },
+      "createdAt": "2026-07-31T14:21:41.226Z",
+      "remoteId": "f3150b7f-3d1c-4e74-a608-ab046dbfd7fd"
+    },
+    {
+      "id": "teste",
+      "label": "teste",
+      "description": "aaaa",
+      "silhouette": "humano-medio",
+      "size": 128,
+      "seed": 2996,
+      "wizard": {
+        "etapa": "sul",
+        "southVersions": [],
+        "activeSouth": 0
+      },
+      "createdAt": "2026-08-01T01:27:26.933Z"
+    }
+  ],
+  "poses": [
+    {
+      "id": "parado",
+      "label": "Parado",
+      "kind": "template",
+      "templateId": "breathing-idle",
+      "frameCount": 8,
+      "fps": 6,
+      "builtin": true,
+      "notes": "Template nativo. 1 geração por direção — o caminho barato."
+    },
+    {
+      "id": "caminhando",
+      "label": "Caminhando",
+      "kind": "action",
+      "action": "walking forward at a steady pace",
+      "frameCount": 8,
+      "fps": 8,
+      "builtin": true,
+      "notes": "Não existe template de caminhada normal — só crouched-walking. Vai por texto livre."
+    },
+    {
+      "id": "correndo",
+      "label": "Correndo",
+      "kind": "action",
+      "action": "running forward, arms swinging",
+      "frameCount": 8,
+      "fps": 12,
+      "builtin": true,
+      "notes": "Sem template de corrida. Texto livre."
+    },
+    {
+      "id": "pulando",
+      "label": "Pulando",
+      "kind": "action",
+      "action": "jumping upward, legs tucked",
+      "frameCount": 8,
+      "fps": 10,
+      "builtin": true,
+      "notes": "O template mais próximo é backflip, que é outra coisa. Texto livre."
+    },
+    {
+      "id": "atacando",
+      "label": "Atacando",
+      "kind": "template",
+      "templateId": "attack",
+      "frameCount": 8,
+      "fps": 12,
+      "builtin": true,
+      "notes": "Template nativo. Existem também attack-back, attack-left e attack-right."
+    }
+  ],
+  "wardrobe": [],
+  "cells": {
+    "manequim::__south__": {
+      "key": "manequim::__south__",
+      "status": "pronto",
+      "frames": {
+        "south": [
+          "/assets/wizard/manequim/south-v0.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:56:15.213Z"
+    },
+    "manequim::__cardinal-north__": {
+      "key": "manequim::__cardinal-north__",
+      "status": "pronto",
+      "frames": {
+        "north": [
+          "/assets/wizard/manequim/cardinal-north.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:56:24.333Z"
+    },
+    "manequim::__cardinal-east__": {
+      "key": "manequim::__cardinal-east__",
+      "status": "pronto",
+      "frames": {
+        "east": [
+          "/assets/wizard/manequim/cardinal-east.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:56:42.440Z"
+    },
+    "manequim::__cardinal-west__": {
+      "key": "manequim::__cardinal-west__",
+      "status": "pronto",
+      "frames": {
+        "west": [
+          "/assets/wizard/manequim/cardinal-west.png"
+        ]
+      },
+      "updatedAt": "2026-07-31T23:56:53.296Z"
+    },
+    "manequim::__directions8__": {
+      "key": "manequim::__directions8__",
+      "status": "pronto",
+      "frames": {
+        "south": [
+          "/assets/wizard/manequim_directions8_/south-00.png"
+        ],
+        "south-west": [
+          "/assets/wizard/manequim_directions8_/south-west-00.png"
+        ],
+        "west": [
+          "/assets/wizard/manequim_directions8_/west-00.png"
+        ],
+        "north-west": [
+          "/assets/wizard/manequim_directions8_/north-west-00.png"
+        ],
+        "north": [
+          "/assets/wizard/manequim_directions8_/north-00.png"
+        ],
+        "north-east": [
+          "/assets/wizard/manequim_directions8_/north-east-00.png"
+        ],
+        "east": [
+          "/assets/wizard/manequim_directions8_/east-00.png"
+        ],
+        "south-east": [
+          "/assets/wizard/manequim_directions8_/south-east-00.png"
+        ]
+      },
+      "updatedAt": "2026-08-01T00:04:34.693Z",
+      "jobId": "45332e0f-e515-4f0b-aec6-a7a6103bddc5",
+      "remoteId": "f3150b7f-3d1c-4e74-a608-ab046dbfd7fd"
+    }
+  },
+  "lock": {
+    "frameCount": 8,
+    "fps": 8,
+    "size": 128,
+    "detail": "highly detailed",
+    "shading": "highly detailed shading",
+    "outline": "selective outline",
+    "guidanceScale": 15
+  }
+}

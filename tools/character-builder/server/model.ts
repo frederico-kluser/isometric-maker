@@ -273,6 +273,14 @@ export const OUTLINE_OPTIONS = [
 ] as const;
 export type OutlineOption = (typeof OUTLINE_OPTIONS)[number];
 
+/** Camera views accepted by create-character-v3 (spec-vendorizado 2026-07-31). */
+export const VIEW_OPTIONS = ["low top-down", "high top-down", "side"] as const;
+export type ViewOption = (typeof VIEW_OPTIONS)[number];
+
+/** Skeleton templates for create-character-v3 (spec-vendorizado 2026-07-31). */
+export const TEMPLATE_OPTIONS = ["mannequin", "bear", "cat", "dog", "horse", "lion"] as const;
+export type TemplateOption = (typeof TEMPLATE_OPTIONS)[number];
+
 /**
  * Frame contract the wizard locks BEFORE the base body is generated. Once
  * `wizard.etapa` reaches "pronto" this is immutable: every pose, item and
@@ -293,13 +301,13 @@ export type OutlineOption = (typeof OUTLINE_OPTIONS)[number];
  * OMITTED from the request body (F0-09) so the API defaults apply.
  */
 export interface MannequinLock {
-	/** 4, 8 or 16. The API rejects anything else. */
 	readonly frameCount: 4 | 8 | 16;
 	readonly fps: number;
-	/** Character size in pixels (32–256 for create-character-v3 from-scratch). */
 	readonly size: number;
 	readonly detail?: DetailOption;
 	readonly outline?: OutlineOption;
+	readonly view?: ViewOption;
+	readonly templateId?: TemplateOption;
 }
 
 export interface Studio {

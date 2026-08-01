@@ -172,9 +172,9 @@ test('MannequinLock com qualidade: round-trip JSON preserva os campos', () => {
     fps: 8,
     size: 128,
     detail: 'highly detailed',
-    shading: 'detailed shading',
     outline: 'selective outline',
-    guidanceScale: 8,
+    view: 'low top-down',
+    templateId: 'mannequin',
   };
   const s = seedStudio();
   s.lock = lock;
@@ -183,20 +183,18 @@ test('MannequinLock com qualidade: round-trip JSON preserva os campos', () => {
   assert.deepEqual(
     back.lock,
     lock,
-    'detail/shading/outline/guidanceScale sobrevivem ao studio.json',
+    'detail/outline/view/templateId sobrevivem ao studio.json',
   );
 
   console.log('✓ lock com qualidade persiste (round-trip JSON)');
 });
 
 test('MannequinLock sem qualidade continua válido (v2 é aditivo)', () => {
-  // O lock mínimo de antes não muda de forma: os campos são opcionais e
-  // ausentes significam "default da API" (omitidos do request, F0-09).
   const minimal: MannequinLock = { frameCount: 8, fps: 8, size: 64 };
   assert.equal(minimal.detail, undefined);
-  assert.equal(minimal.shading, undefined);
   assert.equal(minimal.outline, undefined);
-  assert.equal(minimal.guidanceScale, undefined);
+  assert.equal(minimal.view, undefined);
+  assert.equal(minimal.templateId, undefined);
 
   console.log('✓ lock mínimo sem qualidade: válido');
 });

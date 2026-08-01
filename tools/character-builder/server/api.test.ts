@@ -216,6 +216,8 @@ test('config: grava qualidade no lock e persiste no disco', async () => {
     size: 128,
     detail: 'highly detailed',
     outline: 'selective outline',
+    view: 'low top-down',
+    templateId: 'mannequin',
   });
   assert.equal(r.status, 200, `config válida deveria dar 200, veio ${r.status}: ${JSON.stringify(r.json)}`);
 
@@ -226,6 +228,8 @@ test('config: grava qualidade no lock e persiste no disco', async () => {
     size: 128,
     detail: 'highly detailed',
     outline: 'selective outline',
+    view: 'low top-down',
+    templateId: 'mannequin',
   });
 });
 
@@ -253,6 +257,8 @@ test('config: enum de qualidade inválido → 400 listando os válidos', async (
       size: 128,
       detail: 'highly detailed',
       outline: 'selective outline',
+      view: 'low top-down',
+      templateId: 'mannequin',
     },
     'um config inválido não pode regravar o lock',
   );
