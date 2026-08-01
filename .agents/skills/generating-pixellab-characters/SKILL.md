@@ -174,7 +174,7 @@ upstream, in the sprite the character is built from: the `description` of `/crea
 plus its `negative_description` — the one endpoint whose negative is documented as functional
 (`creating-pixellab-images`). Chasing this inside the character request is time spent looking for a
 field that does not exist. This repository solved it in
-`docs/adr/0024-modo-manequim-e-preenchimento-do-quadro.md:1@8e0e5938`.
+`docs/adr/0028-modo-manequim-e-preenchimento-do-quadro.md:1@59ff6552`.
 
 ### The open risk this endpoint carries
 

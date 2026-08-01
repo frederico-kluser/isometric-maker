@@ -1,4 +1,4 @@
-# ADR 0024 — O manequim é prompt, não `template_id`; e o quadro cheio é pós-processamento
+# ADR 0028 — O manequim é prompt, não `template_id`; e o quadro cheio é pós-processamento
 
 > **Quick Start (TL;DR)**
 >

@@ -94,7 +94,7 @@ rodar duas vezes recortaria o recorte e o personagem encolheria a cada execuçã
 
 ## Referências
 
-- [ADR 0024](../adr/0024-modo-manequim-e-preenchimento-do-quadro.md) — a decisão e o porquê
+- [ADR 0028](../adr/0028-modo-manequim-e-preenchimento-do-quadro.md) — a decisão e o porquê
 - [ADR 0019](../adr/0019-create-character-v3-e-o-caminho-do-personagem.md) — por que a v3
 - [`tools/character-builder/server/mannequin-prompt.ts`](../../tools/character-builder/server/mannequin-prompt.ts) — o andaime e os negativos
 - [`tools/character-builder/server/frame-fit.ts`](../../tools/character-builder/server/frame-fit.ts) — o recorte comum
