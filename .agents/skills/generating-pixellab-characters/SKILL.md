@@ -168,6 +168,14 @@ Passing `bear` to make the art bear-like does nothing to the art and mis-fits th
 
 `mannequin` is a **value**, never a parameter name. A body containing `"mannequin": true` is invalid.
 
+**And "I picked mannequin but the character comes out dressed" is not a bug.** There is no parameter
+anywhere on this family that removes clothes, hair or a face. A featureless base body is produced
+upstream, in the sprite the character is built from: the `description` of `/create-image-bitforge`
+plus its `negative_description` — the one endpoint whose negative is documented as functional
+(`creating-pixellab-images`). Chasing this inside the character request is time spent looking for a
+field that does not exist. This repository solved it in
+`docs/adr/0024-modo-manequim-e-preenchimento-do-quadro.md:1@8e0e5938`.
+
 ### The open risk this endpoint carries
 
 `/animate-character` describes itself as animating characters "previously created using the

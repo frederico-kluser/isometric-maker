@@ -80,8 +80,8 @@ common way a correct document becomes a wrong one.
 > "Doc de infra escrita antes de existir infra é ficção." — `AGENTS.md:73@eb529ae5`
 
 The index applies this literally. It lists only files that exist on disk
-(`docs/README.md:11@62ab10c3`), and a numbered folder with no file yet is declared **reserved**
-rather than promised (`docs/README.md:42@62ab10c3`). An earlier version of that index promised
+(`docs/README.md:11@e7614483`), and a numbered folder with no file yet is declared **reserved**
+rather than promised (`docs/README.md:52@e7614483`). An earlier version of that index promised
 dozens of entries it did not have, and the repair was to withdraw the promise, not to rush the
 writing. Never add a row for a file you have not written.
 
@@ -109,12 +109,12 @@ The supersession mechanism is one-directional, and that is the whole point:
 - the **new** ADR declares `**Substitui:** ADR NNNN` on a line immediately below its `**Status:**`
   line — the shape to copy is `docs/adr/0014-pixijs-para-o-editor.md:12@c4bf785c`;
 - the `Situação` column of the ADR table registers it for whoever reads the index, and that column
-  is the only place supersession is visible from outside the new file (`docs/README.md:61@62ab10c3`);
+  is the only place supersession is visible from outside the new file (`docs/README.md:71@e7614483`);
 - the **old file is never touched** — not its status line, not a note at the top, nothing.
 
 A deleted ADR is a different thing from a superseded one. When a decision's whole subject stopped
 existing, the file goes away and its row stays in the index, marked `apagada` with the reason
-(`docs/README.md:71@62ab10c3`) — so the number stays taken and the sequence never rewinds.
+(`docs/README.md:79@e7614483`) — so the number stays taken and the sequence never rewinds.
 
 **And a corrected ADR is a third thing.** When the decision is still right but a fact stated beside
 it is wrong, superseding would be a lie: it marks a decision that is in force as obsolete. The new
@@ -160,9 +160,9 @@ that cite them move in the same commit — never "delete now, repair later".
 1. Write or edit the file.
 2. If it is new, add its row to that section's table in `docs/README.md`. The doc tables carry
    `Arquivo` and `Descrição` only — there is no status column to hedge in
-   (`docs/README.md:17@62ab10c3`). If it is the first file of a folder still listed under **Pastas
+   (`docs/README.md:17@e7614483`). If it is the first file of a folder still listed under **Pastas
    reservadas**, move that folder out of the reserved table and give it a section
-   (`docs/README.md:44-49@62ab10c3`).
+   (`docs/README.md:50-58@e7614483`).
 3. If it is an ADR that revises another, add the `**Substitui:** ADR NNNN` line under the Status
    line and set the older row's `Situação` to `substituída por NNNN`. Do not open the older file.
 4. Update the `**Última atualização:**` line of every file touched.

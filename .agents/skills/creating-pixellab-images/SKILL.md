@@ -86,6 +86,18 @@ the only one whose `negative_description` is documented as functional.
 `bitforge` also carries `skeleton_keypoints` with an explicit warning that sizes other than 16×16,
 32×32 and 64×64 degrade quality.
 
+### How much of the canvas the sprite fills is a parameter, on exactly one endpoint
+
+`coverage_percentage` (0–100, "Percentage of the canvas to cover") exists on
+`/create-image-bitforge` and **nowhere else** in the spec — not on pixflux, not on pixen, not on any
+character endpoint. When a sprite comes back small and centred, this is the only knob that addresses
+it at generation time; everything else is post-processing a canvas you already paid for.
+
+Two consequences worth carrying. Sizing complaints about a **character** cannot be fixed here at all
+— `/create-character-v3` pads its canvas ~2x by design and has no equivalent field
+(`generating-pixellab-characters`). And because the field is per-endpoint, "the API lets you set
+coverage" is false as a general statement; it is true of one model.
+
 ### Prompt enhancement is a separate, separately billed call
 
 `/enhance-pixen-prompt`, `/enhance-character-v3-prompt` and `/enhance-animation-v3-prompt` are all

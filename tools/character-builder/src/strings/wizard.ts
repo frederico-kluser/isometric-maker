@@ -132,8 +132,33 @@ export const wizard = {
     silhueta: 'Silhueta',
     /** Rótulo do seletor de view */
     view: 'Ângulo',
-    /** Rótulo do seletor de template */
-    template: 'Corpo',
+    /**
+     * Rótulo do seletor de template.
+     *
+     * NÃO é "Corpo" nem "Manequim": no spec vendorizado, `template_id` é
+     * "Body type for skeleton reconstruction" — escolhe o esqueleto 3D que o
+     * animador encaixa nos quadros. Não muda o desenho, não tira roupa. Quem
+     * lia "Humano (manequim)" aqui esperava um corpo-base pelado e recebia um
+     * personagem vestido; o rótulo é que estava mentindo.
+     */
+    template: 'Esqueleto para animação',
+    /** Nota sob o seletor de esqueleto, dizendo o que ele NÃO faz */
+    templateNota:
+      'Escolhe o esqueleto que o animador encaixa nos quadros — não muda a aparência. ' +
+      'Para um corpo-base sem roupa, sem cabelo e sem rosto, use o Modo manequim no passo da face sul.',
+    /** Rótulo do campo de cobertura do quadro */
+    cobertura: 'Cobertura do quadro (%)',
+    /** Nota sob o campo de cobertura */
+    coberturaNota:
+      'Quanto do quadro o sprite deve ocupar na geração da sul (coverage_percentage). ' +
+      'Vazio usa o padrão da API; o Modo manequim usa 92.',
+    /** Rótulo do toggle de preenchimento das 8 direções */
+    preencher: 'Preencher o quadro nas 8 direções',
+    /** Nota sob o toggle de preenchimento */
+    preencherNota:
+      'O create-character-v3 estufa a moldura ~2x para dar espaço de animação e não tem como ' +
+      'desligar — sem isto o personagem sai pequeno no centro. O recorte é o mesmo nas 8 ' +
+      'direções e o PNG original fica guardado em raw/.',
     /** Rótulo do seletor segmentado de preset de qualidade */
     qualidade: 'Qualidade da base',
     /** Nome acessível do seletor segmentado de preset de qualidade */
@@ -201,6 +226,22 @@ export const wizard = {
     descricaoRotulo: 'Descrição (em inglês — é o prompt)',
     /** Placeholder da descrição: é prompt, fica em inglês */
     placeholderDescricao: 'a bald, unclothed human base body, facing the viewer',
+    /** Rótulo do toggle que força o corpo de manequim */
+    manequimRotulo: 'Modo manequim',
+    /** Nota do modo manequim: o que ele faz e por que existe */
+    manequimNota:
+      'Força um corpo-base sem roupa, sem cabelo e sem rosto. Com ele ligado o seu texto vira ' +
+      'só o ESTILO — o corpo vem de um andaime fixo somado a uma lista de negativos ' +
+      '(negative_description), que é o que de fato segura roupa e cabelo. O seletor de ' +
+      'esqueleto não faz isso: ele só escolhe o esqueleto da animação.',
+    /** Rótulo do campo de texto quando o modo manequim está ligado */
+    estiloRotulo: 'Estilo (em inglês — é o prompt)',
+    /** Placeholder do estilo: é prompt, fica em inglês */
+    placeholderEstilo: 'ragnarok online 2002 korean pixel art, cel-shaded, bold dark outlines',
+    /** Rótulo do campo de negativo extra */
+    negativoRotulo: 'Negativo extra (opcional, em inglês)',
+    /** Placeholder do negativo extra */
+    placeholderNegativo: 'tattoo, muscles, scars',
     /** Botão que gera a sul */
     gerar: 'Gerar face sul',
     /** Rótulo do campo de nova edição — o valor é o prompt */

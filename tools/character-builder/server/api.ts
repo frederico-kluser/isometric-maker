@@ -653,6 +653,8 @@ export async function handle(
 				outline?: OutlineOption;
 				view?: ViewOption;
 				templateId?: TemplateOption;
+				coverage?: number;
+				fitFrames?: boolean;
 			}>(req);
 
 			// Só o manequim trava a config; todo personagem derivado herda o lock.
@@ -744,6 +746,25 @@ export async function handle(
 				return true;
 			}
 
+			// coverage_percentage do /create-image-bitforge: 0–100 no spec.
+			if (
+				b.coverage !== undefined &&
+				(typeof b.coverage !== "number" ||
+					!Number.isFinite(b.coverage) ||
+					b.coverage < 0 ||
+					b.coverage > 100)
+			) {
+				badRequest(
+					res,
+					"coverage precisa ser um número entre 0 e 100 (coverage_percentage do create-image-bitforge)",
+				);
+				return true;
+			}
+			if (b.fitFrames !== undefined && typeof b.fitFrames !== "boolean") {
+				badRequest(res, "fitFrames precisa ser booleano");
+				return true;
+			}
+
 			s.lock = {
 				frameCount: b.frameCount,
 				fps: b.fps,
@@ -752,6 +773,8 @@ export async function handle(
 				...(b.outline !== undefined ? { outline: b.outline } : {}),
 				...(b.view !== undefined ? { view: b.view } : {}),
 				...(b.templateId !== undefined ? { templateId: b.templateId } : {}),
+				...(b.coverage !== undefined ? { coverage: b.coverage } : {}),
+				...(b.fitFrames !== undefined ? { fitFrames: b.fitFrames } : {}),
 			};
 			const idx = s.characters.findIndex((c) => c.id === "manequim");
 			s.characters[idx] = {
@@ -771,6 +794,8 @@ export async function handle(
 				description?: string;
 				colorImageB64?: string;
 				referenceBase64?: string;
+				mannequin?: boolean;
+				negativePrompt?: string;
 			}>(req);
 			if (
 				typeof b.characterId !== "string" ||
@@ -785,6 +810,34 @@ export async function handle(
 			const s = await load();
 			const ch = resolveWizardCharacter(s, res, characterId);
 			if (!ch) return true;
+			// Modo manequim e negativo são do PERSONAGEM, não do request: a geração
+			// roda em background e mannequin.ts lê o studio.json de novo lá dentro.
+			// Gravar antes do spawn é o que faz o andaime chegar no request.
+			if (b.mannequin !== undefined || b.negativePrompt !== undefined) {
+				if (b.mannequin !== undefined && typeof b.mannequin !== "boolean") {
+					badRequest(res, "mannequin precisa ser booleano");
+					return true;
+				}
+				if (
+					b.negativePrompt !== undefined &&
+					typeof b.negativePrompt !== "string"
+				) {
+					badRequest(res, "negativePrompt precisa ser texto");
+					return true;
+				}
+				const idx = s.characters.findIndex((c) => c.id === ch.id);
+				const atualizado: Character = { ...ch };
+				if (b.mannequin !== undefined) atualizado.mannequin = b.mannequin;
+				if (b.negativePrompt !== undefined) {
+					const negativo = b.negativePrompt.trim();
+					// Campo vazio APAGA o negativo; deixá-lo como undefined explícito
+					// não passa em exactOptionalPropertyTypes e sujaria o studio.json.
+					if (negativo) atualizado.negativePrompt = negativo;
+					else delete atualizado.negativePrompt;
+				}
+				s.characters[idx] = atualizado;
+				await save(s);
+			}
 			// Upload de referência visual para a sul: grava ANTES do spawn —
 			// mannequin.ts lê o arquivo do disco e o envia como init_image.
 			// Aceita b64 puro ou data URI (FileReader.readAsDataURL na UI manda

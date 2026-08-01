@@ -52,7 +52,12 @@ import {
 import { trackSpend } from './estimate.ts';
 import { asBase64Image, extractBase64, stripDataUri } from './base64-image.ts';
 import { waitForCharacterRotations } from './character-detail.ts';
+import { fitFramesOnDisk } from './frame-fit.ts';
 import { parseAndWriteFrames } from './frames.ts';
+import {
+  buildMannequinPrompt,
+  MANNEQUIN_COVERAGE,
+} from './mannequin-prompt.ts';
 // verifyFreezing removido com migração para v3 — o endpoint não tem mapa directions.
 
 import { validateImport } from '../src/import.ts';
@@ -262,11 +267,19 @@ export async function generateSouthFromText(
   const wiz = requireWizard(ch);
   const key = southKey(characterId);
 
+  // Modo manequim: o texto do usuário é ESTILO, o corpo vem do andaime e o
+  // negativo é o que de fato tira roupa, cabelo e rosto. Ver mannequin-prompt.ts.
+  const composed = ch.mannequin
+    ? buildMannequinPrompt(description, ch.negativePrompt)
+    : undefined;
+  const effective = composed?.description ?? description;
+
   const existing = s.cells[key];
-  if (
-    existing?.status === 'pronto' &&
-    wiz.southVersions[wiz.activeSouth]?.prompt === description
-  ) {
+  const ativa = wiz.southVersions[wiz.activeSouth];
+  // Compara a descrição EFETIVA: ligar o modo manequim com o mesmo texto muda o
+  // que sai no request, então não pode ser tratado como repetição. Versões
+  // gravadas antes do modo existir não têm `effective` e caem no `prompt`.
+  if (existing?.status === 'pronto' && (ativa?.effective ?? ativa?.prompt) === effective) {
     opts.onLog?.('[wizard] sul já gerada para este prompt — idempotente, pulando.');
     return;
   }
@@ -278,7 +291,7 @@ export async function generateSouthFromText(
   logGuard('create-image-bitforge (sul por texto)', guardFor(estimate, estimate.point), opts.onLog);
 
   const body: Record<string, unknown> = {
-    description,
+    description: effective,
     image_size: { width: size, height: size },
     view: 'low top-down',
     direction: 'south',
@@ -287,6 +300,16 @@ export async function generateSouthFromText(
   };
   // isometric: OMITIDO quando false (F0-09).
   if (ch.isometric) body['isometric'] = true;
+  // negative_description: existe no CreateImageBitforgeRequest ("Text description
+  // of what to avoid") e é o que realmente segura roupa, cabelo e rosto — o
+  // andaime positivo sozinho não segura. OMITIDO fora do modo manequim quando o
+  // personagem não trouxe negativo próprio.
+  const negative = composed?.negativeDescription ?? ch.negativePrompt?.trim();
+  if (negative) body['negative_description'] = negative;
+  // coverage_percentage (0–100): quanto do quadro o sprite deve ocupar. É o
+  // único endpoint da API que tem esse campo. OMITIDO quando não configurado.
+  const coverage = s.lock?.coverage ?? (ch.mannequin ? MANNEQUIN_COVERAGE : undefined);
+  if (coverage !== undefined) body['coverage_percentage'] = coverage;
   // color_image: OMITIDO sem referência (wizard do manequim). Com referência,
   // prende a paleta do derivado à do manequim (spec: "forced color palette").
   const colorImage = opts.reference?.colorImageB64;
@@ -340,12 +363,21 @@ export async function generateSouthFromText(
   const at = new Date().toISOString();
   ch.wizard = {
     etapa: 'direcoes8',
-    southVersions: [{ prompt: description, at }],
+    southVersions: [
+      {
+        prompt: description,
+        ...(effective !== description ? { effective } : {}),
+        ...(ch.mannequin ? { mannequin: true } : {}),
+        at,
+      },
+    ],
     activeSouth: 0,
   };
   // Character.description é readonly: grava substituindo o elemento no array.
+  // Guarda a descrição EFETIVA: é ela que vai no `description` das 8 direções,
+  // e mandar o texto cru ali reintroduziria a roupa que a sul não tem.
   const idx = s.characters.findIndex((c) => c.id === characterId);
-  if (idx >= 0) s.characters[idx] = { ...ch, description };
+  if (idx >= 0) s.characters[idx] = { ...ch, description: effective };
   await pointSouthCell(store, s, characterId, 0, usage?.usd ?? undefined);
 }
 
@@ -800,6 +832,34 @@ export async function generateDirections8(
     opts.assetsDir,
   );
   if (Object.keys(frames).length === 0) throw new Error('resposta sem imagem');
+
+  // Preencher o quadro. O v3 estufa a moldura ~2x "for animation room" e não tem
+  // como desligar: medido, o personagem sai ocupando 66% da altura de um quadro
+  // 172×172 quando o pedido foi 128. O recorte é comum às 8 direções, senão cada
+  // uma ganharia uma escala diferente. Roda DEPOIS de os PNGs pagos estarem em
+  // disco, e guarda o original em raw/.
+  if (s.lock.fitFrames !== false) {
+    const alvo = s.lock.size;
+    const discos = Object.values(frames)
+      .flat()
+      .map((p) => join(opts.assetsDir, p.replace(/^\/assets\//, '')));
+    try {
+      const fit = await fitFramesOnDisk(discos, { size: alvo });
+      opts.onLog?.(
+        fit.rect
+          ? `[wizard] quadro preenchido: recorte comum ${fit.rect.width}×${fit.rect.height} ` +
+              `→ ${alvo}×${alvo} em ${discos.length} quadros (originais em raw/).`
+          : '[wizard] todos os quadros vieram transparentes — recorte não aplicado.',
+      );
+    } catch (err) {
+      // Pós-processamento nunca derruba uma geração paga: os PNGs crus já estão
+      // em disco e continuam servíveis, só sem o recorte.
+      opts.onLog?.(
+        `[wizard] recorte falhou (${err instanceof Error ? err.message : String(err)}) — ` +
+          'os quadros originais foram mantidos.',
+      );
+    }
+  }
 
   const at = new Date().toISOString();
   s.cells[dKey] = {
