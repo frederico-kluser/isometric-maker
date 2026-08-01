@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/motion-ui/skeleton';
+import { ImportCharacterButton } from './import-character-button.tsx';
 import { CellView } from './poses/cell-view.tsx';
 import { DeletePoseButton } from './poses/delete-pose-button.tsx';
 import { GenerateAllButton, type DispatchOutcome } from './poses/generate-all-button.tsx';
@@ -249,23 +250,26 @@ export function PosesScreen() {
     <TooltipProvider>
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>{t.characterLabel}</Label>
-            <Select
-              value={character.id}
-              onValueChange={(value) => setCharacterId(String(value))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {studio.characters.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>{t.characterLabel}</Label>
+              <Select
+                value={character.id}
+                onValueChange={(value) => setCharacterId(String(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {studio.characters.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <ImportCharacterButton strings={t.importar} refresh={refresh} />
           </div>
           <PoseForm lock={lock} onDone={refresh} />
         </div>

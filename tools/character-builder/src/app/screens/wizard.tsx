@@ -2,6 +2,10 @@
  * Aba Wizard — a cadeia derivativa inteira do personagem selecionado:
  * config → face sul → cardeais → 8 direções → pronto.
  *
+ * O ImportCard no topo é a entrada alternativa: um JSON do Laboratório
+ * (sul pronta) ou do próprio Wizard cai no meio da cadeia sem remover
+ * nada do fluxo original.
+ *
  * A tela não guarda progresso: deriva tudo de `character.wizard.etapa` +
  * células + jobs (wizard-progress.ts — o servidor nunca marca célula do
  * wizard como `gerando`; andamento e falha vivem em studio.jobs) e lê o
@@ -13,6 +17,7 @@ import { wizard } from '../../strings/wizard.ts';
 import { useSelectedCharacter, useStudio } from '../studio-store.tsx';
 import { CharacterHeader } from './wizard/character-header.tsx';
 import { FirstRun } from './wizard/first-run.tsx';
+import { ImportCard } from './wizard/import-card.tsx';
 import { StepCard } from './wizard/step-card.tsx';
 import { ConfigStep } from './wizard/step-config.tsx';
 import { DirectionsStep } from './wizard/step-directions.tsx';
@@ -53,6 +58,8 @@ export function WizardScreen() {
 	return (
 		<div className="flex flex-col gap-6">
 			<CharacterHeader studio={studio} refresh={refresh} />
+			{/* key reinicia o estado local do import ao trocar de personagem */}
+			<ImportCard key={character.id} refresh={refresh} />
 			{progress.firstRun ? <FirstRun studio={studio} refresh={refresh} /> : null}
 			<StepTrail steps={progress.steps} />
 			{/* key reinicia os formulários locais ao trocar de personagem */}

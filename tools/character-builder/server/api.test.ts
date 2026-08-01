@@ -26,9 +26,10 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { deflateSync } from 'node:zlib';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
-  cellKey, seedStudio, wardrobeKey,
+  DIRECTIONS, cellKey, seedStudio, wardrobeKey,
   type Studio, type WardrobeItem,
 } from './model.ts';
 
@@ -126,6 +127,64 @@ async function del(path: string, body: unknown) {
   assert.equal(handled, true, `${path} deveria ser tratada pelo handler`);
   return { status: res.statusCode, json: JSON.parse(res.body) as Record<string, unknown> };
 }
+
+async function get(path: string) {
+  const res = mockRes();
+  const handled = await handle(
+    mockReq('GET', path),
+    res as unknown as ServerResponse,
+  );
+  assert.equal(handled, true, `${path} deveria ser tratada pelo handler`);
+  return { status: res.statusCode, json: JSON.parse(res.body) as Record<string, unknown> };
+}
+
+// ------------------------------------------------------------------ PNGs sintéticos
+
+// Mesmo padrão de sprite-bundle.test.ts / src/import.test.ts: PNG RGB 8bpc
+// mínimo, quadrado, dentro da faixa 32–256 do validateImport.
+
+const CRC_TABLE = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  CRC_TABLE[i] = c;
+}
+
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const b of buf) {
+    c = CRC_TABLE[(c ^ b)! & 0xff]! ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const t = Buffer.from(type, 'ascii');
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+  return Buffer.concat([len, t, data, crc]);
+}
+
+/** PNG RGB 8bpc válido de `size`×`size`; `fill` distingue os bytes entre arquivos. */
+function makePNG(size: number, fill = 0): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // colour type RGB
+  const rowLen = 1 + size * 3;
+  const raw = Buffer.alloc(size * rowLen, fill & 0xff);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const b64 = (buf: Buffer): string => buf.toString('base64');
 
 // ------------------------------------------------------------------ guarda: pose
 
@@ -366,4 +425,202 @@ test('concorrência: duas gerações simultâneas não perdem células nem corro
   assert.equal(s.cells[PECA_KEY]?.status, 'pronto', 'células anteriores intactas');
 
   console.log('✓ 2 gerações concorrentes: as duas células sobrevivem, JSON íntegro');
+});
+
+// ------------------------------------------------------------------ sprite studio: rotas
+
+test('sprite-lab: config inválida → 400 nomeado, sem spawn e sem job', async () => {
+  const r = await post('/api/sprite-lab', { description: '', size: 128, outputs: 1 });
+  assert.equal(r.status, 400, `config inválida deveria dar 400, veio ${r.status}`);
+  assert.equal(r.json['code'], 'description-required');
+  assert.match(String(r.json['error']), /description é obrigatória/);
+
+  // A validação roda ANTES de responder: nenhum job sprite-lab existe.
+  const res = mockRes();
+  await handle(mockReq('GET', '/api/studio'), res as unknown as ServerResponse);
+  const studioResp = JSON.parse(res.body) as { jobs: Record<string, unknown> };
+  assert.ok(
+    !Object.keys(studioResp.jobs).some((k) => k.startsWith('sprite-lab::')),
+    'um 400 de validação não pode registrar job',
+  );
+});
+
+test('sprite-lab: config válida → 202 {key, hash}; o job morre local sem token', async () => {
+  const r = await post('/api/sprite-lab', {
+    description: 'guerreiro careca de teste',
+    size: 128,
+    outputs: 1,
+  });
+  assert.equal(r.status, 202, `config válida deveria dar 202, veio ${r.status}: ${JSON.stringify(r.json)}`);
+  const key = String(r.json['key']);
+  const hash = String(r.json['hash']);
+  assert.match(hash, /^[a-f0-9]{16}$/, 'hash é o sha256 truncado do input');
+  assert.equal(key, `sprite-lab::${hash}`);
+
+  // Sem PIXELLAB_SECRET o spawn morre ao criar o client — prova de que o
+  // trabalho foi disparado, sem rede. O teste só verifica a resposta e o
+  // desfecho local do job (o resultado em si exigiria a API de verdade).
+  let status: string | undefined;
+  let message: string | undefined;
+  for (let i = 0; i < 100; i += 1) {
+    const res = mockRes();
+    await handle(mockReq('GET', '/api/studio'), res as unknown as ServerResponse);
+    const jobs = (JSON.parse(res.body) as { jobs: Record<string, { status: string; message?: string }> }).jobs;
+    if (jobs[key]?.status === 'falhou') {
+      status = jobs[key]?.status;
+      message = jobs[key]?.message;
+      break;
+    }
+    await sleep(20);
+  }
+  assert.equal(status, 'falhou', 'o job deveria ter rodado e falhado localmente');
+  assert.ok(
+    message?.includes('PIXELLAB_SECRET'),
+    `a falha deveria ser a ausência do token, veio: ${message}`,
+  );
+});
+
+test('sprite-lab GET: hash desconhecido → 404 em pt-BR; hash malformado → 404', async () => {
+  const r = await get('/api/sprite-lab/0000000000000000');
+  assert.equal(r.status, 404, `hash desconhecido deveria dar 404, veio ${r.status}`);
+  assert.match(String(r.json['error']), /ainda não está pronto/);
+
+  const malformed = await get('/api/sprite-lab/zzz');
+  assert.equal(malformed.status, 404, 'hash fora do formato hex-16 é 404, não path traversal');
+});
+
+// ------------------------------------------------------------------ wizard: import/export de bundle
+
+// ORDEM IMPORTA: estes testes rodam por último sobre o mesmo studio.json —
+// o lock vigente é {frameCount: 8, fps: 8, size: 128} (gravado pelos testes
+// de config), e o size do bundle PRECISA casar com ele (regra do módulo).
+
+test('wizard import/export: roundtrip com bundle montado em tmpdir', async () => {
+  const wizardBundle = {
+    kind: 'sprite-wizard-directions',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    config: {
+      description: 'herói do roundtrip',
+      view: 'low top-down',
+      size: 128,
+      seed: 42,
+      silhouette: 'humano-medio',
+      frameCount: 8,
+      fps: 8,
+    },
+    remoteId: 'remote-roundtrip-1',
+    south: { b64: b64(makePNG(128, 7)) },
+    directions: Object.fromEntries(
+      DIRECTIONS.map((d, i) => [d, b64(makePNG(128, 10 + i))]),
+    ),
+  };
+
+  const imp = await post('/api/wizard/import', {
+    characterId: 'manequim',
+    bundle: wizardBundle,
+  });
+  assert.equal(imp.status, 200, `import deveria dar 200, veio ${imp.status}: ${JSON.stringify(imp.json)}`);
+  assert.deepEqual(imp.json, { ok: true });
+
+  // O wizard do manequim foi aplicado: etapa pronto + remoteId do bundle, e
+  // os PNGs estão no assets dir de teste (nunca no real).
+  const s = readStudioFile();
+  const man = s.characters.find((c) => c.id === 'manequim');
+  assert.equal(man?.wizard?.etapa, 'pronto');
+  assert.equal(man?.remoteId, 'remote-roundtrip-1');
+  assert.ok(
+    existsSync(join(ASSETS_DIR, 'wizard', 'manequim', 'south-v0.png')),
+    'a sul do bundle foi gravada em assets/wizard/manequim',
+  );
+
+  const exp = await post('/api/wizard/export', { characterId: 'manequim' });
+  assert.equal(exp.status, 200, `export deveria dar 200, veio ${exp.status}: ${JSON.stringify(exp.json)}`);
+  assert.equal(exp.json['kind'], 'sprite-wizard-directions');
+  assert.equal(exp.json['version'], 1);
+  assert.equal(exp.json['remoteId'], 'remote-roundtrip-1');
+  const expConfig = exp.json['config'] as Record<string, unknown>;
+  assert.equal(expConfig['size'], 128);
+  assert.equal(expConfig['seed'], 42);
+  assert.equal(expConfig['silhouette'], 'humano-medio');
+
+  // Os bytes voltam iguais aos que subiram — o roundtrip é lossless.
+  assert.equal(
+    (exp.json['south'] as Record<string, unknown>)['b64'],
+    wizardBundle.south.b64,
+    'sul exportada é byte-idêntica à importada',
+  );
+  const expDirs = exp.json['directions'] as Record<string, string>;
+  assert.deepEqual(Object.keys(expDirs).sort(), [...DIRECTIONS].sort());
+  for (const d of DIRECTIONS) {
+    assert.equal(expDirs[d], wizardBundle.directions[d], `direção ${d} byte-idêntica`);
+  }
+
+  // E o bundle exportado reimporta — a reimportação é idempotente.
+  const re = await post('/api/wizard/import', {
+    characterId: 'manequim',
+    bundle: exp.json,
+  });
+  assert.equal(re.status, 200, `reimport do exportado deveria dar 200, veio ${re.status}`);
+});
+
+test('wizard/export: personagem inexistente → 400 nomeado', async () => {
+  const r = await post('/api/wizard/export', { characterId: 'fantasma' });
+  assert.equal(r.status, 400, `export de personagem inexistente deveria dar 400, veio ${r.status}`);
+  assert.match(String(r.json['error']), /não existe/);
+});
+
+// ------------------------------------------------------------------ characters/import
+
+test('characters/import: cria personagem derivado e devolve o Character', async () => {
+  const labBundle = {
+    kind: 'sprite-lab-south',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    config: {
+      description: 'vilão de teste',
+      view: 'low top-down',
+      size: 128,
+      seed: 9,
+      noBackground: true,
+      enhancePrompt: false,
+    },
+    selected: { index: 0, seed: 9, b64: b64(makePNG(128, 21)) },
+    candidates: [{ index: 0, seed: 9, b64: b64(makePNG(128, 21)) }],
+  };
+
+  const r = await post('/api/characters/import', {
+    label: 'Vilão Importado',
+    bundle: labBundle,
+  });
+  assert.equal(r.status, 200, `import deveria dar 200, veio ${r.status}: ${JSON.stringify(r.json)}`);
+  // A UI lê character.id — o Character criado é a resposta.
+  assert.equal(r.json['id'], 'vilao-importado');
+  assert.equal(r.json['label'], 'Vilão Importado');
+  // Bundle de lab: wizard na etapa direcoes8, SEM remoteId (descartado).
+  assert.equal((r.json['wizard'] as Record<string, unknown>)['etapa'], 'direcoes8');
+  assert.equal(r.json['remoteId'], undefined);
+
+  // Persistiu no studio.json, com a célula da sul pronta.
+  const s = readStudioFile();
+  assert.ok(s.characters.some((c) => c.id === 'vilao-importado'));
+  assert.equal(s.cells['vilao-importado::__south__']?.status, 'pronto');
+  assert.ok(
+    existsSync(join(ASSETS_DIR, 'wizard', 'vilao-importado', 'south-v0.png')),
+    'a sul do personagem importado foi gravada no assets dir de teste',
+  );
+});
+
+test('characters/import: bundle de kind desconhecido ("config normal") → 400', async () => {
+  const r = await post('/api/characters/import', {
+    label: 'Config Normal',
+    bundle: { kind: 'wizard-config', version: 1, frameCount: 8, fps: 8 },
+  });
+  assert.equal(r.status, 400, `kind desconhecido deveria dar 400, veio ${r.status}`);
+  assert.match(String(r.json['error']), /kind/);
+  assert.match(String(r.json['error']), /sprite-lab-south/);
+
+  // Nada foi criado nem gravado.
+  assert.ok(!readStudioFile().characters.some((c) => c.id === 'config-normal'));
+  assert.ok(!existsSync(join(ASSETS_DIR, 'wizard', 'config-normal')));
 });

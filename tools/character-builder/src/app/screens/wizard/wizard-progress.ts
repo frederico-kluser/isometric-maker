@@ -2,15 +2,14 @@
  * Derivação pura do progresso do wizard a partir do studio v2.
  *
  * O passo ativo sai de `character.wizard.etapa` + status das células
- * (`southKey`, `cardinalKey`, `directions8Key`), e a trilha inteira é
- * derivada daqui — sem estado paralelo.
+ * (`southKey`, `directions8Key`), e a trilha inteira é derivada daqui —
+ * sem estado paralelo.
  *
  * Os JOBS entram na derivação porque o servidor nunca marca célula do
  * wizard como `gerando` (o spawn do api.ts escreve célula só na falha):
  * o andamento real vive em `studio.jobs[chave].status`, e a mensagem de
  * erro chega primeiro em `studio.jobs[chave].message` quando o job falha.
- * As chaves são as mesmas que o spawn usa: southKey, cardinalsBatchKey
- * (o lote das três cardeais) e directions8Key.
+ * As chaves são as mesmas que o spawn usa: southKey e directions8Key.
  *
  * Separado da UI para rodar sob `node --test` sem DOM.
  */

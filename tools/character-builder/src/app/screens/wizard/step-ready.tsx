@@ -1,11 +1,13 @@
 /**
  * Passo 5 — pronto: corpo-base fechado nas 8 direções.
  *
- * No manequim, as duas ações do contrato: exportar como default do projeto
- * (o servidor grava packages/game-assets/manequim e devolve o bundle, que a
- * tela baixa como .json via Blob) e refazer o manequim — destrutivo, por
- * isso hold-to-confirm em vez de clique simples. Personagem derivado pronto
- * não tem essas ações: o default é sempre o manequim.
+ * Todo personagem pronto exporta o bundle do wizard em JSON (ExportButton —
+ * é o arquivo que poses, itens e o próprio wizard importam). No manequim há
+ * ainda as duas ações do contrato: exportar como default do projeto (o
+ * servidor grava packages/game-assets/manequim e devolve o bundle, que a tela
+ * baixa como .json via Blob) e refazer o manequim — destrutivo, por isso
+ * hold-to-confirm em vez de clique simples. Personagem derivado pronto não
+ * tem essas duas: o default é sempre o manequim.
  */
 import { Download, RotateCcw } from 'lucide-react';
 import { HoldToConfirmButton } from '@/components/motion-ui/hold-to-confirm';
@@ -13,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
+import { ExportButton } from './export-button.tsx';
 import { useAction } from './use-action.ts';
 import type { WizardProgress } from './wizard-progress.ts';
 
@@ -36,8 +39,10 @@ export function ReadyStep({
 					? wizard.pronto.textoManequim
 					: wizard.pronto.textoDerivado}
 			</p>
+			<ExportButton characterId={progress.character.id} refresh={refresh} />
 			{isMannequin ? (
 				<>
+					<Separator />
 					<div className="flex flex-col gap-2">
 						<ActionButton
 							state={exportAction.state}

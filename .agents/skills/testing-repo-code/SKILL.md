@@ -27,10 +27,16 @@ node --test --test-name-pattern="extrusion" src/*.test.ts   # one test
 ```
 
 Tests are co-located as `src/<module>.test.ts` and import from `node:test` and
-`node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@d28e4f8a`).
+`node:assert/strict` (`tools/pixellab-pipeline/src/atlas.test.ts:13@10c1307a`).
 
-`tools/character-builder` has a test script (`tools/character-builder/package.json`).
-It runs `npm test` covering 7 files: rotate, animate, frames, idempotence, import, strings, affine.
+`tools/character-builder` has a test script (`tools/character-builder/package.json:10@47c81737`).
+It runs `npm test` over `server/*.test.ts` and `src/**/*.test.ts` — 18 files, 190 tests: 9 in
+`server/` (api, frames, mannequin, mannequin-io, model, rotate, rotate-lab, sprite-lab,
+sprite-bundle) and 9 in `src/` (import, strings, and screen suites for wizard, laboratório,
+poses and itens). The Sprite Studio modules are covered — `sprite-lab.test.ts` (24 tests) and
+`sprite-bundle.test.ts` (17) run against fakes, never the network
+(`tools/character-builder/server/sprite-lab.test.ts:1@f64ccfc2`,
+`tools/character-builder/server/sprite-bundle.test.ts:1@cb00a165`).
 
 ### What is covered, and what is not
 

@@ -1,6 +1,7 @@
 /**
- * Trilha de progresso do wizard: os cinco passos da cadeia derivativa com o
- * estado de cada um (concluído / atual / pendente).
+ * Trilha de progresso do wizard: os quatro passos da cadeia derivativa v3 com
+ * o estado de cada um (concluído / atual / pendente). O passo de cardeais foi
+ * removido com a migração v3.
  *
  * Código novo porque o registry @motion não tem stepper — são `<ol>` +
  * tokens shadcn; o movimento da tela fica por conta dos componentes de ação.
@@ -13,7 +14,6 @@ import type { WizardStep, WizardStepId } from './wizard-progress.ts';
 const STEP_LABEL: Record<WizardStepId, string> = {
 	config: wizard.trilha.passos.config,
 	sul: wizard.trilha.passos.sul,
-	cardeais: wizard.trilha.passos.cardeais,
 	direcoes8: wizard.trilha.passos.direcoes8,
 	pronto: wizard.trilha.passos.pronto,
 };

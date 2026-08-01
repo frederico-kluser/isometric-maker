@@ -1,0 +1,697 @@
+/**
+ * Teste da bancada v3 (Sprite Studio) com cliente falso.
+ *
+ * Propriedades verificadas (sem rede):
+ *   1. Validação ANTES de gastar: description (obrigatória, teto 2000 do spec),
+ *      view/size/seed/outputs nas faixas do spec, outline/detail/templateId nos
+ *      enums de model.ts, referência que não decodifica, e o par proibido
+ *      enhance_prompt+reference_image (422 garantido na API) — tudo com erro
+ *      nomeado e ZERO chamadas.
+ *   2. N submissões EM PARALELO (prova por interleaving de eventos), seeds
+ *      determinísticas (informada ou derivada do hash), candidato i = base+i.
+ *   3. Extração do frame `south` POR CHAVE — PNGs distintos por direção.
+ *   4. Idempotência por candidato: cache total = zero chamadas e fromCache;
+ *      cache parcial = só a posição apagada é regenerada; data URI e b64 puro
+ *      da mesma referência colidem; `outputs` entra no hash.
+ *   5. outline/detail OMITIDOS com reference_image (a v3 os ignora) e
+ *      incluídos sem ela; enhance_prompt omitido quando false (F0-09);
+ *      no_background default true; view default 'low top-down'.
+ *   6. Ledger ndjson por submissão (usage cru + enhanced_prompt/enhance_usage
+ *      quando presentes) — e não reescrito em hit de cache.
+ *   7. readSpriteLabResult: null para ausente/incompleto, resultado do disco
+ *      para hash conhecido.
+ *
+ * Execute com: node --test server/sprite-lab.test.ts
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { deflateSync } from 'node:zlib';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import { PixelLabClient, type ApiResult } from '../../pixellab-pipeline/src/api.ts';
+import { DIRECTIONS, type Direction } from './model.ts';
+import {
+  runSpriteLab,
+  readSpriteLabResult,
+  SpriteLabValidationError,
+  type SpriteLabConfig,
+  type SpriteLabErrorCode,
+} from './sprite-lab.ts';
+
+// ------------------------------------------------------------------ PNGs sintéticos
+
+const CRC_TABLE = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  CRC_TABLE[i] = c;
+}
+
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const b of buf) {
+    c = CRC_TABLE[(c ^ b) & 0xff]! ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const t = Buffer.from(type, 'ascii');
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+  return Buffer.concat([len, t, data, crc]);
+}
+
+/** PNG RGB 8bpc válido; `fill` distingue arquivos (é como provamos quem é south). */
+function makePNG(width: number, height: number, fill = 0): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // colour type RGB
+  const rowLen = 1 + width * 3;
+  const raw = Buffer.alloc(height * rowLen, fill & 0xff);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** Um PNG distinto por direção — south tem fill 10. */
+const PNG_BY_DIRECTION: Record<Direction, string> = Object.fromEntries(
+  DIRECTIONS.map((d, i) => [d, makePNG(8, 8, (i + 1) * 10).toString('base64')]),
+) as Record<Direction, string>;
+
+/** Referência de upload (não é nenhuma das direções). */
+const REF_B64 = makePNG(8, 8, 99).toString('base64');
+
+// ------------------------------------------------------------------ client falso
+
+class FakeClient extends PixelLabClient {
+  /** Bodies recebidos no POST /create-character-v3, em ordem. */
+  readonly bodies: Array<Record<string, unknown>> = [];
+  /** Linha do tempo start/end das submissões — prova de concorrência. */
+  readonly events: string[] = [];
+  /** Atraso do submit para que as N submissões só se sobreponham se paralelas. */
+  submitDelayMs = 5;
+  /** Simula enhance_prompt=true: devolve enhanced_prompt + enhance_usage. */
+  includeEnhance = false;
+  /** Simula resposta quebrada: rotation_urls sem a chave south. */
+  omitSouth = false;
+
+  constructor() {
+    super('fake-token-for-test-only');
+  }
+
+  override async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<ApiResult<T>> {
+    if (method === 'POST' && path === '/create-character-v3') {
+      const b = (body ?? {}) as Record<string, unknown>;
+      this.bodies.push(b);
+      const seed = String(b['seed']);
+      this.events.push(`start:${seed}`);
+      await new Promise((resolve) => setTimeout(resolve, this.submitDelayMs));
+      this.events.push(`end:${seed}`);
+      const data: Record<string, unknown> = {
+        background_job_id: `job-${seed}`,
+        character_id: `char-${seed}`,
+        status: 'processing',
+        usage: { type: 'usd', usd: 0.041 },
+      };
+      if (this.includeEnhance) {
+        data['enhanced_prompt'] = `enhanced: ${String(b['description'])}`;
+        data['enhance_usage'] = { type: 'usd', usd: 0.001 };
+      }
+      return this.ok<T>(data);
+    }
+
+    if (method === 'GET' && path.startsWith('/background-jobs/')) {
+      const id = path.slice('/background-jobs/'.length);
+      // v3: rotation_urls keyeado por nome de direção — 8 PNGs gerados.
+      const rotation: Record<string, string[]> = {};
+      for (const d of DIRECTIONS) {
+        if (this.omitSouth && d === 'south') continue;
+        rotation[d] = [PNG_BY_DIRECTION[d]];
+      }
+      return this.ok<T>({
+        id,
+        status: 'completed',
+        created_at: '2026-08-01T00:00:00Z',
+        last_response: { rotation_urls: rotation },
+      });
+    }
+
+    throw new Error(`FakeClient: chamada inesperada ${method} ${path}`);
+  }
+
+  private ok<T>(data: unknown): ApiResult<T> {
+    const usage = (data as { usage?: ApiResult<T>['usage'] }).usage;
+    return {
+      data: data as T,
+      status: 200,
+      raw: JSON.stringify(data),
+      ...(usage ? { usage } : {}),
+    };
+  }
+}
+
+// ------------------------------------------------------------------ helpers
+
+function tmpDir(): string {
+  const dir = join(tmpdir(), `sprite-lab-test-${randomBytes(4).toString('hex')}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function baseConfig(): SpriteLabConfig {
+  return {
+    description: 'bald naked humanoid mannequin, grey skin',
+    size: 64,
+    outputs: 1,
+  };
+}
+
+function opts(dir: string, logs?: string[]) {
+  return {
+    assetsDir: join(dir, 'assets'),
+    ledgerPath: join(dir, 'assets', 'ledger.ndjson'),
+    ...(logs ? { onLog: (m: string) => logs.push(m) } : {}),
+  };
+}
+
+function readLedger(dir: string): Array<Record<string, unknown>> {
+  const path = join(dir, 'assets', 'ledger.ndjson');
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf-8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+async function assertValidation(
+  config: SpriteLabConfig,
+  code: SpriteLabErrorCode,
+): Promise<void> {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    await assert.rejects(
+      runSpriteLab(client, config, opts(dir)),
+      (err: unknown) => {
+        assert.ok(err instanceof SpriteLabValidationError, `esperava SpriteLabValidationError, veio ${String(err)}`);
+        assert.equal(err.code, code);
+        return true;
+      },
+    );
+    assert.equal(client.bodies.length, 0, `validação ${code} não pode chamar a API`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------------------------------------ validação (antes de gastar)
+
+test('description ausente, vazia ou whitespace → description-required', async () => {
+  await assertValidation({ ...baseConfig(), description: '' }, 'description-required');
+  await assertValidation({ ...baseConfig(), description: '   ' }, 'description-required');
+  const semDesc = { size: 64, outputs: 1 } as SpriteLabConfig;
+  await assertValidation(semDesc, 'description-required');
+});
+
+test('description acima de 2000 caracteres (teto do spec) → description-too-long', async () => {
+  await assertValidation({ ...baseConfig(), description: 'x'.repeat(2001) }, 'description-too-long');
+});
+
+test('view fora do enum CameraView → view-enum', async () => {
+  await assertValidation(
+    { ...baseConfig(), view: 'isometric' } as unknown as SpriteLabConfig,
+    'view-enum',
+  );
+});
+
+test('size fora da faixa 32–256 do V3OutputImageSize → size-range', async () => {
+  await assertValidation({ ...baseConfig(), size: 31 }, 'size-range');
+  await assertValidation({ ...baseConfig(), size: 257 }, 'size-range');
+  await assertValidation({ ...baseConfig(), size: 64.5 }, 'size-range');
+  const semSize = { description: 'x', outputs: 1 } as SpriteLabConfig;
+  await assertValidation(semSize, 'size-range');
+});
+
+test('outputs fora de 1–4 → outputs-range', async () => {
+  await assertValidation({ ...baseConfig(), outputs: 0 }, 'outputs-range');
+  await assertValidation({ ...baseConfig(), outputs: 5 }, 'outputs-range');
+  await assertValidation({ ...baseConfig(), outputs: 1.5 }, 'outputs-range');
+  const semOutputs = { description: 'x', size: 64 } as SpriteLabConfig;
+  await assertValidation(semOutputs, 'outputs-range');
+});
+
+test('seed negativa ou não-inteira → seed-range', async () => {
+  await assertValidation({ ...baseConfig(), seed: -1 }, 'seed-range');
+  await assertValidation({ ...baseConfig(), seed: 1.5 }, 'seed-range');
+});
+
+test('outline/detail/templateId fora dos enums de model.ts → erros nomeados', async () => {
+  await assertValidation(
+    { ...baseConfig(), outline: 'grosso' } as unknown as SpriteLabConfig,
+    'outline-enum',
+  );
+  await assertValidation(
+    { ...baseConfig(), detail: 'high detail' } as unknown as SpriteLabConfig,
+    'detail-enum',
+  );
+  await assertValidation(
+    { ...baseConfig(), templateId: 'goblin' } as unknown as SpriteLabConfig,
+    'template-enum',
+  );
+});
+
+test('referência que não decodifica para bytes → reference-invalid', async () => {
+  await assertValidation({ ...baseConfig(), referenceImageBase64: '' }, 'reference-invalid');
+  await assertValidation(
+    { ...baseConfig(), referenceImageBase64: 'data:image/png;base64,' },
+    'reference-invalid',
+  );
+});
+
+test('enhancePrompt junto com referenceImageBase64 → enhance-with-reference (422 na API)', async () => {
+  await assertValidation(
+    { ...baseConfig(), enhancePrompt: true, referenceImageBase64: REF_B64 },
+    'enhance-with-reference',
+  );
+});
+
+// ------------------------------------------------------------------ execução
+
+test('primeira execução — UMA submissão, params da config, south extraído e gravado', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const logs: string[] = [];
+
+    const result = await runSpriteLab(client, { ...baseConfig(), seed: 42 }, opts(dir, logs));
+
+    assert.equal(client.bodies.length, 1, 'bancada com outputs=1 faz exatamente UMA submissão');
+    const body = client.bodies[0];
+    assert.ok(body, 'body da submissão registrado');
+    assert.equal(body['description'], baseConfig().description);
+    assert.equal(body['view'], 'low top-down', 'view default é low top-down (ADR 0005)');
+    assert.deepEqual(body['image_size'], { width: 64, height: 64 });
+    assert.equal(body['seed'], 42);
+    assert.equal(body['no_background'], true, 'no_background default true');
+    assert.equal('template_id' in body, false, 'template_id ausente é omitido (default da API)');
+    assert.equal('enhance_prompt' in body, false, 'enhance_prompt=false é omitido (F0-09)');
+    assert.equal('reference_image' in body, false);
+    assert.equal('outline' in body, false);
+    assert.equal('detail' in body, false);
+
+    assert.equal(result.fromCache, false);
+    assert.equal(result.candidates.length, 1);
+    const cand = result.candidates[0];
+    assert.ok(cand);
+    assert.equal(cand.index, 0);
+    assert.equal(cand.seed, 42);
+    assert.equal(cand.southB64, PNG_BY_DIRECTION['south'], 'south extraído POR CHAVE');
+    assert.equal(cand.usage?.usd, 0.041);
+
+    // PNG gravado em disco quando a função retorna — e é o south, não outra direção.
+    const dirCand = join(dir, 'assets', 'sprite-lab', `${result.hash}-cand0`);
+    const southPath = join(dirCand, 'south-00.png');
+    assert.ok(existsSync(southPath), 'south-00.png existe no disco');
+    assert.equal(readFileSync(southPath).toString('base64'), PNG_BY_DIRECTION['south']);
+    assert.equal(
+      readFileSync(join(dirCand, 'north-00.png')).toString('base64'),
+      PNG_BY_DIRECTION['north'],
+      'as outras 7 direções ficam em disco como subproduto',
+    );
+
+    // Estimativa logada — informa, nunca recusa.
+    assert.ok(
+      logs.some((m) => m.includes('[guard]') && m.includes('preço estimado')),
+      'log de estimativa emitido antes da submissão',
+    );
+
+    // Ledger: uma linha com o usage cru.
+    const lines = readLedger(dir);
+    assert.equal(lines.length, 1);
+    const entry = lines[0];
+    assert.ok(entry);
+    assert.equal(entry['endpoint'], 'create-character-v3');
+    assert.equal(entry['lab'], true);
+    assert.equal(entry['hash'], result.hash);
+    assert.equal(entry['index'], 0);
+    assert.equal(entry['usd'], 0.041);
+    assert.equal(entry['unit'], 'usd');
+    assert.equal(entry['generations'], null);
+    assert.equal('enhanced_prompt' in entry, false, 'sem enhance, ledger não tem enhanced_prompt');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('outputs=3 — 3 submissões EM PARALELO, seeds base+i', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+
+    const result = await runSpriteLab(client, { ...baseConfig(), seed: 42, outputs: 3 }, opts(dir));
+
+    assert.equal(client.bodies.length, 3, 'outputs=3 → 3 submissões');
+    assert.deepEqual(
+      client.bodies.map((b) => b['seed']),
+      [42, 43, 44],
+      'candidato i recebe seed base+i',
+    );
+
+    // Prova de concorrência: com o submit atrasado, os três starts vêm antes
+    // de qualquer end — se fossem sequenciais, alternariam start/end.
+    const firstEnd = client.events.findIndex((e) => e.startsWith('end:'));
+    const lastStart = client.events.reduce(
+      (acc, e, i) => (e.startsWith('start:') ? i : acc),
+      -1,
+    );
+    assert.ok(
+      lastStart !== -1 && firstEnd !== -1 && lastStart < firstEnd,
+      `submissões não foram paralelas: ${client.events.join(', ')}`,
+    );
+
+    assert.equal(result.candidates.length, 3);
+    assert.deepEqual(
+      result.candidates.map((c) => c.seed),
+      [42, 43, 44],
+    );
+    for (let i = 0; i < 3; i += 1) {
+      assert.ok(
+        existsSync(join(dir, 'assets', 'sprite-lab', `${result.hash}-cand${i}`, 'south-00.png')),
+        `PNG do candidato ${i} gravado`,
+      );
+    }
+    assert.equal(readLedger(dir).length, 3, 'uma linha de ledger por submissão');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sem seed informada, a base deriva do hash e é determinística', async () => {
+  const dir1 = tmpDir();
+  const dir2 = tmpDir();
+  try {
+    const client1 = new FakeClient();
+    const r1 = await runSpriteLab(client1, { ...baseConfig(), outputs: 2 }, opts(dir1));
+    const seeds1 = client1.bodies.map((b) => b['seed']);
+    assert.equal(seeds1.length, 2);
+    assert.ok(
+      seeds1.every((s) => typeof s === 'number' && Number.isInteger(s) && (s as number) >= 0),
+      'seeds derivadas são inteiros >= 0 (spec)',
+    );
+    assert.equal(seeds1[1], (seeds1[0] as number) + 1, 'candidato i = base+i');
+
+    const client2 = new FakeClient();
+    const r2 = await runSpriteLab(client2, { ...baseConfig(), outputs: 2 }, opts(dir2));
+    assert.deepEqual(
+      client2.bodies.map((b) => b['seed']),
+      seeds1,
+      'mesma config sem seed → mesmas seeds (derivadas do hash)',
+    );
+    assert.equal(r2.hash, r1.hash, 'mesma config → mesmo hash');
+  } finally {
+    rmSync(dir1, { recursive: true, force: true });
+    rmSync(dir2, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ idempotência
+
+test('segunda execução com a mesma config — ZERO submissões e fromCache', async () => {
+  const dir = tmpDir();
+  try {
+    const config = { ...baseConfig(), seed: 42, outputs: 2 };
+
+    const client1 = new FakeClient();
+    const first = await runSpriteLab(client1, config, opts(dir));
+    assert.equal(client1.bodies.length, 2);
+
+    const client2 = new FakeClient();
+    const logs: string[] = [];
+    const second = await runSpriteLab(client2, config, opts(dir, logs));
+    assert.equal(client2.bodies.length, 0, 'cache total → sem chamada à API');
+    assert.equal(second.fromCache, true);
+    assert.equal(second.hash, first.hash);
+    assert.deepEqual(
+      second.candidates.map((c) => c.southB64),
+      first.candidates.map((c) => c.southB64),
+    );
+    assert.equal(
+      second.candidates.every((c) => c.usage === undefined),
+      true,
+      'hit de cache não tem usage (não houve chamada)',
+    );
+
+    assert.equal(readLedger(dir).length, 2, 'ledger não é reescrito no hit de cache');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cache por candidato — apagar um PNG refaz só aquela posição', async () => {
+  const dir = tmpDir();
+  try {
+    const config = { ...baseConfig(), seed: 42, outputs: 2 };
+
+    const client1 = new FakeClient();
+    const first = await runSpriteLab(client1, config, opts(dir));
+    assert.equal(client1.bodies.length, 2);
+
+    rmSync(join(dir, 'assets', 'sprite-lab', `${first.hash}-cand1`), { recursive: true, force: true });
+
+    const client2 = new FakeClient();
+    const second = await runSpriteLab(client2, config, opts(dir));
+    assert.equal(client2.bodies.length, 1, 'só o candidato apagado é regenerado');
+    assert.equal(client2.bodies[0]?.['seed'], 43, 'a posição 1 é a da seed 43');
+    assert.equal(second.fromCache, false);
+    assert.equal(second.candidates[0]?.usage, undefined, 'candidato 0 veio do cache');
+    assert.ok(second.candidates[1]?.usage, 'candidato 1 tem usage da nova submissão');
+    assert.equal(readLedger(dir).length, 3, 'ledger acumula uma linha por submissão');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('data URI e b64 puro da mesma referência colidem no hash', async () => {
+  const dir = tmpDir();
+  try {
+    const client1 = new FakeClient();
+    await runSpriteLab(
+      client1,
+      { ...baseConfig(), referenceImageBase64: `data:image/png;base64,${REF_B64}` },
+      opts(dir),
+    );
+    assert.equal(client1.bodies.length, 1);
+
+    const client2 = new FakeClient();
+    const second = await runSpriteLab(
+      client2,
+      { ...baseConfig(), referenceImageBase64: REF_B64 },
+      opts(dir),
+    );
+    assert.equal(client2.bodies.length, 0, 'data URI e b64 puro são o mesmo input');
+    assert.equal(second.fromCache, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('outputs entra no hash — mesma config com outputs diferente não reusa cache', async () => {
+  const dir = tmpDir();
+  try {
+    const client1 = new FakeClient();
+    await runSpriteLab(client1, { ...baseConfig(), seed: 42, outputs: 1 }, opts(dir));
+    assert.equal(client1.bodies.length, 1);
+
+    const client2 = new FakeClient();
+    const second = await runSpriteLab(client2, { ...baseConfig(), seed: 42, outputs: 2 }, opts(dir));
+    assert.equal(client2.bodies.length, 2, 'outputs mudou → hash mudou → nada é reutilizado');
+    assert.equal(second.fromCache, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ request: reference / outline / detail / enhance
+
+test('com reference_image, outline/detail são OMITIDOS do request (a v3 os ignora) e a omissão é logada', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const logs: string[] = [];
+
+    await runSpriteLab(
+      client,
+      {
+        ...baseConfig(),
+        referenceImageBase64: REF_B64,
+        outline: 'lineless',
+        detail: 'highly detailed',
+        templateId: 'cat',
+      },
+      opts(dir, logs),
+    );
+
+    const body = client.bodies[0];
+    assert.ok(body);
+    assert.deepEqual(body['reference_image'], { base64: REF_B64 }, 'referência vai como Base64Image sem data URI');
+    assert.equal('outline' in body, false, 'a v3 ignora outline com reference_image');
+    assert.equal('detail' in body, false, 'a v3 ignora detail com reference_image');
+    assert.equal(body['template_id'], 'cat');
+    assert.ok(
+      logs.some((m) => m.includes('outline/detail omitidos')),
+      'omissão de outline/detail registrada no log',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sem reference_image, outline/detail entram no request quando informados', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+
+    await runSpriteLab(
+      client,
+      { ...baseConfig(), outline: 'lineless', detail: 'low detail' },
+      opts(dir),
+    );
+
+    const body = client.bodies[0];
+    assert.ok(body);
+    assert.equal(body['outline'], 'lineless');
+    assert.equal(body['detail'], 'low detail');
+    assert.equal('reference_image' in body, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('enhancePrompt=true entra no request e enhanced_prompt/enhance_usage vão ao ledger', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    client.includeEnhance = true;
+
+    await runSpriteLab(client, { ...baseConfig(), enhancePrompt: true }, opts(dir));
+
+    const body = client.bodies[0];
+    assert.ok(body);
+    assert.equal(body['enhance_prompt'], true);
+
+    const lines = readLedger(dir);
+    assert.equal(lines.length, 1);
+    const entry = lines[0];
+    assert.ok(entry);
+    assert.equal(entry['enhanced_prompt'], `enhanced: ${baseConfig().description}`);
+    assert.deepEqual(entry['enhance_usage'], { type: 'usd', usd: 0.001 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('noBackground=false é enviado; view explícita respeitada', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+
+    await runSpriteLab(
+      client,
+      { ...baseConfig(), noBackground: false, view: 'side' },
+      opts(dir),
+    );
+
+    const body = client.bodies[0];
+    assert.ok(body);
+    assert.equal(body['no_background'], false);
+    assert.equal(body['view'], 'side');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ resposta sem south
+
+test('resposta sem a chave south → erro explícito (frames.ts recusa direção ausente)', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    client.omitSouth = true;
+
+    await assert.rejects(
+      runSpriteLab(client, baseConfig(), opts(dir)),
+      /south/,
+    );
+    assert.equal(client.bodies.length, 1, 'a submissão aconteceu — o erro é da resposta');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ readSpriteLabResult
+
+test('readSpriteLabResult — null para hash desconhecido', async () => {
+  const dir = tmpDir();
+  try {
+    assert.equal(await readSpriteLabResult('0000000000000000', join(dir, 'assets')), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readSpriteLabResult — devolve o resultado do disco após uma execução', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const first = await runSpriteLab(client, { ...baseConfig(), seed: 42, outputs: 2 }, opts(dir));
+
+    const read = await readSpriteLabResult(first.hash, join(dir, 'assets'));
+    assert.ok(read, 'resultado deveria ser lido do disco');
+    assert.equal(read.hash, first.hash);
+    assert.equal(read.fromCache, true, 'leitura do disco é sempre cache');
+    assert.equal(read.candidates.length, 2);
+    assert.deepEqual(
+      read.candidates.map((c) => c.seed),
+      [42, 43],
+    );
+    assert.deepEqual(
+      read.candidates.map((c) => c.southB64),
+      first.candidates.map((c) => c.southB64),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readSpriteLabResult — null quando um PNG do manifesto sumiu', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const first = await runSpriteLab(client, { ...baseConfig(), seed: 42, outputs: 2 }, opts(dir));
+
+    rmSync(join(dir, 'assets', 'sprite-lab', `${first.hash}-cand1`), { recursive: true, force: true });
+
+    assert.equal(
+      await readSpriteLabResult(first.hash, join(dir, 'assets')),
+      null,
+      'resultado incompleto não é resultado',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

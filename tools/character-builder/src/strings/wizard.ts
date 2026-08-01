@@ -79,6 +79,23 @@ export const wizard = {
     ouGereDoZero: 'ou descreva e gere do zero abaixo',
   },
 
+  // ── card de importação no topo da trilha (entrada alternativa) ──
+  importar: {
+    /** Título do card de importação */
+    titulo: 'Importar de um arquivo',
+    /** Texto do card: o que entra e para onde o wizard vai depois */
+    texto:
+      'Importa a face sul pronta do Laboratório para continuar nas 8 direções, ' +
+      'ou restaura um personagem completo exportado pelo Wizard.',
+    /** Botão que abre o seletor de arquivo .json */
+    escolher: 'Escolher arquivo (.json)',
+    /** Erro local quando o arquivo escolhido não é um JSON legível */
+    arquivoInvalido:
+      'não consegui ler o arquivo — escolha um .json exportado pelo Laboratório ou pelo Wizard',
+    /** Erro local quando o kind do JSON não é do Laboratório nem do Wizard */
+    tipoDesconhecido: 'este arquivo não é uma saída do Laboratório nem do Wizard',
+  },
+
   // ── trilha de progresso ──────────────────────────────────────
   trilha: {
     /** Nome acessível da lista de passos */
@@ -253,6 +270,12 @@ export const wizard = {
     /** Nota do que a exportação faz */
     exportarNota:
       'Grava o bundle em packages/game-assets/manequim e baixa uma cópia em JSON.',
+    /** Botão de exportar o bundle do wizard (sul + 8 direções) */
+    exportarJson: 'Exportar JSON do wizard',
+    /** Nota do que o JSON do wizard contém e quem o consome */
+    exportarJsonNota:
+      'Baixa a sul e as 8 direções em base64 junto com a config — poses, itens ' +
+      'e o próprio wizard importam este arquivo.',
     /** Botão de refazer o manequim (ação destrutiva, hold-to-confirm) */
     refazer: 'Refazer o manequim',
     /** Ajuda do hold-to-confirm (ligada por aria-describedby) */

@@ -2,7 +2,7 @@
 
 > **Quick Start (TL;DR)**
 >
-> Estúdio local de sprites: o wizard constrói o manequim em cadeia derivativa (sul por texto → edição → 8 direções via create-character-v3), e poses, guarda-roupa e personagens derivados saem dele. O token nunca chega ao navegador.
+> Estúdio local de sprites: o Laboratório (Sprite Studio) cria a pose sul via create-character-v3 com N saídas em paralelo e exporta JSON; o wizard importa esse bundle, deriva as 8 direções e exporta JSON de volta — e poses, guarda-roupa e personagens derivados saem daí. O token nunca chega ao navegador.
 >
 > ```bash
 > cd /home/ondokai/Projects/isometric-maker/tools/character-builder
@@ -31,9 +31,13 @@ Cada etapa se apoia na arte da anterior, e cada célula `pronto` é terminal —
 
 As decisões de API acima foram confirmadas no spec vendorizado (`/home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline/openapi/openapi-v2.json`, capturado 2026-07-29) e estão anotadas no cabeçalho de `/home/ondokai/Projects/isometric-maker/tools/character-builder/server/mannequin.ts`.
 
+A cadeia também pode **começar no meio**, por import de bundle JSON (detalhes em *Bundles JSON*, abaixo): um bundle `sprite-lab-south` aplica a sul escolhida no Laboratório e estaciona o wizard na etapa `direcoes8`; um bundle `sprite-wizard-directions` entrega o personagem direto em `pronto`, com remoteId. Qualquer outro `kind` — uma "config normal" do estúdio, por exemplo — é recusado com erro nomeado.
+
 ## A trava de frames (lock)
 
 Antes da primeira geração, o wizard trava `frameCount` (4, 8 ou 16), `fps`, `size` (32–256), `view`, e `templateId` em `studio.json`. Depois do manequim pronto a trava é **imutável**: toda pose, peça e personagem derivado herda, e a UI para de oferecer a escolha. Só o manequim trava; derivados herdam.
+
+Um import de bundle interage com a trava: studio **sem** lock trava na hora com `{frameCount, fps, size}` do bundle (o bundle do laboratório não carrega frames, então cai no default `{frameCount: 8, fps: 8}`); studio **com** lock exige que o `size` do bundle bata, senão o import é recusado — o lock é imutável depois de travado.
 
 ## Manequim default: export/import
 
@@ -45,12 +49,21 @@ O manequim é o personagem mais caro do estúdio (sul + 3 rotações + 8 direç�
 
 Com o manequim pronto, a aba Wizard cria personagens derivados, que percorrem o **mesmo wizard** com estado próprio. O que os prende ao manequim é a sul ativa dele indo como `color_image` (paleta forçada) na geração da sul e nas 8 direções — mecanismo que existe nos dois endpoints, confirmado no spec. Sem o arquivo da sul no disco, o derivado segue sem referência e só perde a paleta travada (avisado no log do servidor, não é erro).
 
+## Bundles JSON: Laboratório → Wizard → Poses/Itens
+
+Além do manequim default, circulam dois bundles de sprite em JSON (PNGs em base64 + a config que os gerou). O parse e a validação vivem em `/home/ondokai/Projects/isometric-maker/tools/character-builder/server/sprite-bundle.ts`: **toda** a validação (schema, PNGs via `validateImport`, regras de lock e de alvo) roda antes de gravar o primeiro byte, e os erros nomeiam o campo ofensor. Como o manequim default, import é filesystem e validação — **nunca rede**.
+
+- **`sprite-lab-south`** — export do Laboratório (download client-side): a sul escolhida entre os N candidatos + todos os candidatos + a config. O Wizard importa (`POST /api/wizard/import`), aplica a sul e segue para as 8 direções.
+- **`sprite-wizard-directions`** — export do Wizard (`POST /api/wizard/export`, exige etapa `pronto`): sul + 8 direções + config + remoteId. Importar no Wizard entrega o personagem pronto; importar em Poses ou Itens (`POST /api/characters/import`) cria um **personagem derivado** já com as células prontas e o remoteId carregado.
+
+Duas garantias de simetria: reimportar o mesmo bundle no mesmo alvo produz as mesmas escritas (o `at` das células vem do `exportedAt` do bundle, não do relógio), e num import de bundle de laboratório o remoteId antigo é **descartado** — a sul mudou, então o id remoto apontaria para arte velha.
+
 ## As quatro abas
 
 - **Wizard** — a cadeia derivativa acima, por personagem, com as versões da sul e o atalho de import do default.
 - **Poses** — grade poses × 8 direções; passar o mouse numa célula pronta anima o ciclo. `frameCount` visível e travado.
 - **Itens** — guarda-roupa: cadastro guiado em sheet, cards com preview animado, peça presa à silhueta. Uma peça só vale entre personagens da **mesma silhueta** — o estúdio recusa a combinação impossível antes de gastar.
-- **Laboratório** — playground livre do `/rotate`: par from/to_direction ou ângulos, troca de view, init_image. Uma chamada por execução, idempotente por hash, resultado lado a lado e histórico da sessão. O único número exibido é o `usage` que a própria API devolveu na chamada.
+- **Laboratório** — o **Sprite Studio**: bancada livre do `/create-character-v3` com todas as configs do endpoint (description, view, size 32–256, seed, no_background, outline, detail, enhance_prompt, template_id, reference_image — a tela redimensiona para o teto de 256×256 no cliente, com smoothing desligado) e N saídas em paralelo (1–4, seeds determinísticas base+i). De cada candidato a bancada extrai só o frame `south` — a v3 sempre produz as 8 direções, e os outros 7 frames ficam em disco como subproduto. Exporta o JSON `sprite-lab-south`. O teto de 4 saídas paralelas é **decisão do projeto**: a v3 documenta o 429 "Concurrency limit reached" mas não publica número em lugar nenhum. O playground do `/rotate` sobrevive como sub-seção da aba: par from/to_direction ou ângulos, idempotente por hash, resultado lado a lado. O único número exibido é o `usage` que a própria API devolveu.
 
 ## O detalhe que muda o desenho
 
@@ -86,7 +99,9 @@ server/model.ts           studio.json v2: tipos, chaves de célula, estado semen
 server/api.ts             rotas /api/*, registro de jobs, escrita dos PNGs
 server/mannequin.ts       wizard: sul, edição, cardeais, 8 direções
 server/mannequin-io.ts    export/import do manequim default (sem rede)
-server/rotate-lab.ts      laboratório de rotação (playground do /rotate)
+server/rotate-lab.ts      playground do /rotate (sub-seção do Laboratório)
+server/sprite-lab.ts      Sprite Studio: N candidatos v3 em paralelo, extrai a sul
+server/sprite-bundle.ts   bundles JSON (lab/wizard): validação total, import/export sem rede
 server/freeze-proof.ts    prova de que as cardeais sobreviveram congeladas
 src/app/                  shell + as 4 telas (React)
 src/strings/              todo texto visível, pt-BR, acesso por propriedade
@@ -117,4 +132,4 @@ Três decisões, e o porquê de cada uma:
 - `/home/ondokai/Projects/isometric-maker/docs/adr/0012-guard-de-orcamento-informativo.md` — o guard informa e nunca recusa
 - `/home/ondokai/Projects/isometric-maker/docs/02-personagem/guarda-roupa-e-silhueta.md` — silhueta como restrição real
 
-**Última atualização:** 2026-07-31
+**Última atualização:** 2026-08-01

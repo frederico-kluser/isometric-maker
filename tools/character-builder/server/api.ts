@@ -47,6 +47,19 @@ import {
 	type RotateLabInput,
 } from "./rotate-lab.ts";
 import {
+	runSpriteLab,
+	readSpriteLabResult,
+	spriteLabHash,
+	validateSpriteLabConfig,
+	SpriteLabValidationError,
+	type SpriteLabConfig,
+} from "./sprite-lab.ts";
+import {
+	exportWizardBundle,
+	importSpriteBundle,
+	parseSpriteBundle,
+} from "./sprite-bundle.ts";
+import {
 	DIRECTIONS,
 	DETAIL_OPTIONS,
 	OUTLINE_OPTIONS,
@@ -899,6 +912,50 @@ export async function handle(
 			return true;
 		}
 
+		// ---- wizard: import/export de bundle (Sprite Studio) ------------------------------
+		if (url.pathname === "/api/wizard/import" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string; bundle?: unknown }>(req);
+			if (typeof b.characterId !== "string" || b.bundle === undefined) {
+				badRequest(res, "characterId e bundle são obrigatórios");
+				return true;
+			}
+			try {
+				// parseSpriteBundle valida TUDO (schema + PNGs) antes do primeiro
+				// byte escrito; importSpriteBundle reseta o wizard do alvo e aplica
+				// o bundle (lab → etapa direcoes8; wizard → pronto + remoteId).
+				const bundle = parseSpriteBundle(b.bundle);
+				await importSpriteBundle(
+					store,
+					bundle,
+					{ kind: "existing", characterId: b.characterId },
+					ASSETS,
+				);
+			} catch (err) {
+				// Erros nomeiam o campo ofensor — vão ao usuário como 400.
+				badRequest(res, err instanceof Error ? err.message : String(err));
+				return true;
+			}
+			json(res, 200, { ok: true });
+			return true;
+		}
+
+		if (url.pathname === "/api/wizard/export" && req.method === "POST") {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			try {
+				// Exige etapa 'pronto' — exportar trabalho incompleto seria congelar
+				// uma base aberta (a regra é do módulo, que lança erro nomeado).
+				const bundle = await exportWizardBundle(store, b.characterId, ASSETS);
+				json(res, 200, bundle);
+			} catch (err) {
+				badRequest(res, err instanceof Error ? err.message : String(err));
+			}
+			return true;
+		}
+
 		// ---- laboratório de rotação -----------------------------------------------------
 		if (url.pathname === "/api/rotate-lab" && req.method === "POST") {
 			const b = await readBody<RotateLabInput>(req);
@@ -917,6 +974,73 @@ export async function handle(
 				}
 				throw err;
 			}
+			return true;
+		}
+
+		// ---- sprite studio (bancada v3) ---------------------------------------------------
+		// ORDEM IMPORTA: o POST exato vem ANTES do GET com prefixo — sem isso um
+		// POST /api/sprite-lab cairia no ramo do GET com hash vazio.
+		if (url.pathname === "/api/sprite-lab" && req.method === "POST") {
+			const b = await readBody<SpriteLabConfig>(req);
+			// Validação TOTAL antes de responder: config inválida é 400 nomeado —
+			// sem job, sem disco, sem API.
+			try {
+				validateSpriteLabConfig(b);
+			} catch (err) {
+				if (err instanceof SpriteLabValidationError) {
+					json(res, 400, { error: err.message, code: err.code });
+					return true;
+				}
+				throw err;
+			}
+			const hash = spriteLabHash(b);
+			// Cache hit: o manifesto e os PNGs já estão em disco — 200 com o
+			// resultado, sem job e sem gasto (idempotência por hash).
+			const cached = await readSpriteLabResult(hash, ASSETS);
+			if (cached) {
+				json(res, 200, cached);
+				return true;
+			}
+			const key = `sprite-lab::${hash}`;
+			// cellKeys []: a bancada não tem célula no studio — o andamento chega
+			// à UI pelo registro de jobs e o resultado pelo GET abaixo.
+			spawn(
+				key,
+				`sprite-lab · ${hash}`,
+				async () => {
+					await runSpriteLab(client(), b, {
+						assetsDir: ASSETS,
+						ledgerPath: LEDGER_PATH,
+						onLog: (m) => console.log(m),
+					});
+				},
+				[],
+			);
+			json(res, 202, { key, hash });
+			return true;
+		}
+
+		if (url.pathname.startsWith("/api/sprite-lab/") && req.method === "GET") {
+			const hash = url.pathname.slice("/api/sprite-lab/".length);
+			// O hash é sempre hex de 16 chars — qualquer outra coisa é 404, não
+			// tentativa de path traversal no manifesto.
+			if (!/^[a-f0-9]{16}$/i.test(hash)) {
+				json(res, 404, {
+					error: `resultado do sprite-lab "${hash}" não existe`,
+				});
+				return true;
+			}
+			const result = await readSpriteLabResult(hash, ASSETS);
+			if (!result) {
+				// 404 é controle de fluxo: a UI sonda até o manifesto aparecer.
+				json(res, 404, {
+					error:
+						`o resultado do sprite-lab "${hash}" ainda não está pronto — ` +
+						"a geração segue em andamento (ou o job falhou; veja /api/studio)",
+				});
+				return true;
+			}
+			json(res, 200, result);
 			return true;
 		}
 
@@ -983,6 +1107,43 @@ export async function handle(
 			s.characters.push(ch);
 			await save(s);
 			json(res, 200, ch);
+			return true;
+		}
+
+		if (url.pathname === "/api/characters/import" && req.method === "POST") {
+			const b = await readBody<{ label?: string; bundle?: unknown }>(req);
+			if (
+				typeof b.label !== "string" ||
+				b.label.trim() === "" ||
+				b.bundle === undefined
+			) {
+				badRequest(res, "label e bundle são obrigatórios");
+				return true;
+			}
+			try {
+				// Personagem NOVO derivado de um bundle do estúdio (id = slug do
+				// label; conflito de id é 400 nomeado pelo módulo). O wizard dele
+				// nasce no estado que o bundle carrega: lab → direcoes8; wizard →
+				// pronto + remoteId.
+				const bundle = parseSpriteBundle(b.bundle);
+				const { characterId } = await importSpriteBundle(
+					store,
+					bundle,
+					{ kind: "new", label: b.label },
+					ASSETS,
+				);
+				// A UI lê character.id — devolve o Character recém-criado.
+				const s = await load();
+				const created = s.characters.find((c) => c.id === characterId);
+				if (!created) {
+					throw new Error(
+						`personagem "${characterId}" não encontrado após o import`,
+					);
+				}
+				json(res, 200, created);
+			} catch (err) {
+				badRequest(res, err instanceof Error ? err.message : String(err));
+			}
 			return true;
 		}
 

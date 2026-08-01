@@ -16,7 +16,7 @@ sprite.
 
 ## Injected knowledge
 
-### Five endpoints that all produce "a character with 8 directions"
+### Four endpoints that all produce "a character with 8 directions" — six rows, because v3 and the 8-directions endpoint appear once per mode
 
 Query them, do not recall them:
 
@@ -73,9 +73,14 @@ Crop against the returned metadata, never against the requested value.
 
 ### v3 reference_image: one image, eight rotations
 
-`create-character-v3` with `reference_image` takes a single south-facing sprite (max 256×256,
-base64) and rotates it into 8 directions. `outline` and `detail` are **ignored** when
-`reference_image` is present — the spec says so explicitly. `template_id` picks the 3D skeleton
+`create-character-v3` with `reference_image` takes a single south-facing sprite (max 256×256)
+and rotates it into 8 directions. `reference_image` is a `Base64Image` **object** —
+`{type:'base64', base64, format:'png'}` — not a bare base64 string; only `base64` is required,
+the other two fields carry schema defaults. `image_size` is likewise an object,
+`V3OutputImageSize` `{width, height}`, both required integers 32–256 — while the endpoint prose
+still claims 16–256 for from-scratch, a contradiction inside the spec itself that stays open.
+`outline` and `detail` are **ignored** when `reference_image` is present — the spec says so
+explicitly. `template_id` picks the 3D skeleton
 template the estimator fits to the generated frames (six values in the spec:
 `mannequin` (biped, default), `bear`, `cat`, `dog`, `horse`, `lion` for quadrupeds).
 **Must match the body type in `reference_image`.** `view` sets
@@ -128,6 +133,12 @@ mode (no `reference_image`). They are **ignored** when a reference image is prov
 `shading` and `text_guidance_scale` do **not exist** on the v3 endpoint — they are v2-only
 parameters that were not carried forward.
 
+`enhance_prompt` (v3, from-scratch only) is a second bill line, not a free switch: it costs an
+**additional 0.05 generations**, returned separately from generation `usage` as `enhance_usage`,
+with the expanded text in `enhanced_prompt`. Combined with `reference_image` the API answers
+**422** — the field description says so, and the character-builder refuses the pair before
+spending (`tools/character-builder/server/sprite-lab.ts:218@eb6f3fe7`).
+
 On `create-character-with-8-directions`: `outline`, `shading` and `detail` are documented as
 "soft guidance — the model may not follow exactly". They are plain strings, not enums, so a typo
 is accepted silently and simply has no effect.
@@ -150,6 +161,33 @@ enforce the enum. Copying the character endpoint's wording into a tileset reques
 The ZIP is the cheapest way to get everything at once: `rotations/`, `animations/`, and a
 `metadata.json` carrying keypoints for every frame — which is what makes pixel-accurate collision
 possible without re-deriving it.
+
+### 429 is documented; its number is not
+
+The v3 response list includes `429 Concurrency limit reached`, but no spec field, skill, or
+pipeline module documents **how many** concurrent jobs trip it. The Sprite Studio's ceiling of
+4 parallel v3 submissions is a **project decision**, not an API fact
+(`tools/character-builder/server/sprite-lab.ts:170@eb6f3fe7`) — never quote 4 back to a user as
+a documented API limit.
+
+### The character-builder Sprite Studio pipeline (repo flow, not API shape)
+
+The studio's Laboratório is a v3 workbench (`server/sprite-lab.ts` in `tools/character-builder`):
+it fires N parallel `create-character-v3` submissions (1–4, deterministic seeds base+i) with
+every knob of the endpoint exposed, then keeps only the `south` frame of each candidate — the
+endpoint always produces all 8 directions, and the other 7 land on disk as byproduct. The
+workbench exports a `sprite-lab-south` JSON client-side; the wizard imports **only**
+`sprite-lab-south` or `sprite-wizard-directions` bundles — any other `kind` is refused by name
+(`tools/character-builder/server/sprite-bundle.ts:5@3da6fb26`) — continues to the 8 directions
+through the v3 reference mode, and exports everything back as base64 JSON. Poses and wardrobe
+import the wizard bundle as a derived character.
+
+Reading the frames of a v3 job goes through one parser
+(`tools/character-builder/server/frames.ts:76@da9dd168`): `last_response.images` (new format) or
+`rotation_urls` (old) — a dictionary keyed by direction name, with all 8 canonical keys
+mandatory. `storage_urls` wins over inline base64; `skeletons` only becomes a boolean flag; the
+south pose is `frames['south'][0]`. Keying by name, never by index, is what keeps east and west
+from being silently swapped.
 
 ## References
 

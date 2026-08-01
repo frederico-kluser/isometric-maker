@@ -3,11 +3,12 @@
  *
  * Cobre, sem tocar a API de verdade:
  *   1. fluxo sul → edição → undo (versões e activeSouth);
- *   2. paralelismo das cardeais: E ∥ N concorrentes, W só depois;
+ *   2. paralelismo das cardeais do rotateCardinals (legado pré-v3): E ∥ N
+ *      concorrentes, W só depois;
  *   3. idempotência em cada passo (segunda execução não chama a API);
- *   4. directions8 exige studio.lock;
- *   5. directions8 monta o mapa directions com as 4 cardeais certas;
- *   6. erro explícito quando falta cardeal.
+ *   4. directions8 exige studio.lock e a sul pronta;
+ *   5. directions8 envia a sul ativa como reference_image do create-character-v3;
+ *   6. qualidade do lock threadada no bitforge e omitida quando ausente (F0-09).
  *
  * Execute com: node --test server/mannequin.test.ts
  */
@@ -101,8 +102,8 @@ class FakeClient extends PixelLabClient {
   readonly calls: RecordedCall[] = [];
   /** Linha do tempo de início/fim das chamadas — prova de concorrência. */
   readonly events: string[] = [];
-  /** Último mapa directions submetido ao endpoint de 8 direções. */
-  lastDirections: Record<string, { type: 'base64'; base64: string }> | undefined;
+  /** Última reference_image submetida ao create-character-v3 (8 direções). */
+  lastDirections: { base64: string } | undefined;
   editSeq = 0;
   /** Atraso do /rotate para que E e N só se sobreponham se forem concorrentes. */
   rotateDelayMs = 5;
@@ -149,7 +150,7 @@ class FakeClient extends PixelLabClient {
     }
 
     if (method === 'POST' && path === '/create-character-v3') {
-      this.lastDirections = b?.['reference_image'] as { type: 'base64'; base64: string } | undefined;
+      this.lastDirections = b?.['reference_image'] as { base64: string } | undefined;
       return this.ok<T>({
         background_job_id: 'job-dir8',
         character_id: 'remote-char-1',
@@ -260,7 +261,7 @@ test('fluxo sul → edição → undo: versões e activeSouth', async () => {
     assert.equal(wiz.southVersions.length, 1);
     assert.equal(wiz.southVersions[0]?.prompt, 'guerreiro careca');
     assert.equal(wiz.activeSouth, 0);
-    assert.equal(wiz.etapa, 'cardeais');
+    assert.equal(wiz.etapa, 'direcoes8');
     assert.equal(store.studio.characters[0]?.description, 'guerreiro careca');
     assert.deepEqual(store.studio.cells[southKey(CHAR_ID)]?.frames, {
       south: [`/assets/wizard/${CHAR_ID}/south-v0.png`],

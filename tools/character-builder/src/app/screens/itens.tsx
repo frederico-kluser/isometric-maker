@@ -37,6 +37,7 @@ import {
   progressoGeracoes,
   resumoDisparoPecas,
 } from '../../strings/itens.ts';
+import { ImportCharacterButton } from './import-character-button.tsx';
 import { WardrobeCard } from './itens/wardrobe-card.tsx';
 import { ItemDetail } from './itens/item-detail.tsx';
 import { CreateItemSheet } from './itens/create-item-sheet.tsx';
@@ -276,6 +277,7 @@ export function ItensScreen() {
             <Badge variant="outline">
               {S.itens.silhuetas[character.silhouette]}
             </Badge>
+            <ImportCharacterButton strings={S.itens.importar} refresh={refresh} />
             {studio.wardrobe.length > 0 && (
               <GenerateAllItemsButton
                 hasRemoteId={character.remoteId !== undefined}

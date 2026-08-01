@@ -47,8 +47,8 @@ a guide in this same machine going stale and being wrong by an order of magnitud
 This spec is fetched from `/v2/openapi.json`, but it already contains v3 endpoints —
 `/create-character-v3`, `/generate-8-rotations-v3`, `/animate-with-text-v3`, `/inpaint-v3` —
 alongside their v2 predecessors. The v3 operationIds and schemas share the `/v2/` URL prefix
-regardless of the label. There is no separate `/v3/openapi.json` — the URL returns 404 as of
-2026-07-29 — so this single snapshot is the whole surface.
+regardless of the label. There is no separate `/v3/openapi.json` — the URL returned 404 when the
+snapshot was captured — so this single snapshot is the whole surface.
 
 ### One command instead of a 387 KB file
 

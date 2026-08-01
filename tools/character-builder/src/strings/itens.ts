@@ -125,6 +125,43 @@ export const itens = {
   },
   /** Prefixo da mensagem quando o POST de geração falha */
   erroGerar: 'Não consegui iniciar a geração.',
+  /** Sheet de importação — idêntico ao de poses.ts, cada tela é dona das suas */
+  importar: {
+    /** Botão no cabeçalho que abre o sheet de importação */
+    botao: 'Importar personagem (JSON)',
+    /** Título do sheet */
+    titulo: 'Importar personagem de um JSON',
+    /** Rótulo acessível do botão de fechar o sheet */
+    fechar: 'Fechar',
+    /** Texto curto: o que a importação aceita e de onde vêm os arquivos */
+    explicacao:
+      'Importa o JSON exportado pelo Wizard (personagem com as 8 direções ' +
+      'prontas) ou a pose sul exportada pelo Laboratório — nesse caso o ' +
+      'personagem novo continua no Wizard, na etapa das direções.',
+    /** Rótulo do campo de nome do personagem novo */
+    nomeLabel: 'Nome do novo personagem',
+    /** Placeholder do campo de nome — exemplo em pt-BR */
+    nomePlaceholder: 'Cavaleiro andarilho',
+    /** Rótulo do seletor de arquivo */
+    arquivoLabel: 'Arquivo JSON',
+    /** Botão do seletor enquanto nenhum arquivo foi escolhido */
+    arquivoEscolher: 'Escolher arquivo .json…',
+    /** Botão de envio */
+    enviar: 'Importar personagem',
+    /** Botão enquanto a importação está em andamento */
+    enviando: 'importando…',
+    /** Botão logo após a importação bem-sucedida */
+    importado: 'Personagem importado',
+    /** Botão quando a importação falhou (estado transitório) */
+    erroEnvio: 'Não foi possível importar',
+    /** Erro quando o arquivo escolhido não é um JSON válido */
+    arquivoInvalido: 'Não consegui ler este arquivo — não é um JSON válido.',
+    /** Erro quando o JSON não é um dos bundles exportados pelo estúdio */
+    kindInvalido:
+      'Este JSON não é um personagem exportado pelo estúdio. A importação ' +
+      'aceita só o JSON do Wizard (sprite-wizard-directions) ou o do ' +
+      'Laboratório (sprite-lab-south).',
+  },
 } as const;
 
 // Completude em tempo de compilação: toda silhueta e todo slot do model têm

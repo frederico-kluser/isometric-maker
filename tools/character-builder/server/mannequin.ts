@@ -183,15 +183,12 @@ function logGuard(
 
 /**
  * Threading dos campos de qualidade do lock para o corpo do request:
- * detail/shading/outline vão com o nome próprio e guidanceScale vira
- * text_guidance_scale. Cada campo é OMITIDO quando ausente no lock (F0-09) —
- * ausente = default da API. extra_guidance_scale NUNCA é enviado: o spec o
- * marca como deprecated.
+ * detail/outline vão com o nome próprio. Cada campo é OMITIDO quando ausente
+ * no lock (F0-09) — ausente = default da API.
  *
- * Vale para /create-image-bitforge (enums estritos) e para
- * /create-character-with-8-directions (string livre, "soft guidance" — o
- * modelo pode não seguir à risca, e o mode 'pro' os ignora; o wizard usa
- * 'standard').
+ * Só o /create-image-bitforge recebe estes campos (enums estritos): em modo
+ * reference_image o create-character-v3 os IGNORA, e shading /
+ * text_guidance_scale NÃO EXISTEM no v3 — por isso saíram daqui.
  */
 function threadQuality(
   lock: MannequinLock | undefined,
@@ -199,9 +196,7 @@ function threadQuality(
 ): void {
   if (!lock) return;
   if (lock.detail !== undefined) body['detail'] = lock.detail;
-  if (lock.shading !== undefined) body['shading'] = lock.shading;
   if (lock.outline !== undefined) body['outline'] = lock.outline;
-  if (lock.guidanceScale !== undefined) body['text_guidance_scale'] = lock.guidanceScale;
 }
 
 function guardFor(estimate: CostEstimate, maxSingleAssetUsd: number): BudgetReport {
@@ -312,8 +307,8 @@ export async function generateSouthFromText(
   // prende a paleta do derivado à do manequim (spec: "forced color palette").
   const colorImage = opts.reference?.colorImageB64;
   if (colorImage) body['color_image'] = asBase64Image(colorImage);
-  // Qualidade do lock (detail/shading/outline/text_guidance_scale) — cada
-  // campo omitido quando ausente (F0-09).
+  // Qualidade do lock (detail/outline) — cada campo omitido quando ausente
+  // (F0-09).
   threadQuality(s.lock, body);
   // Referência visual da sul (upload do usuário em reference.png): vai como
   // init_image com strength 500 — a faixa oficial 400–600 é a de "variações
@@ -356,9 +351,11 @@ export async function generateSouthFromText(
   });
 
   // Gerar do zero reinicia o histórico de edições: versão única, activeSouth = 0.
+  // A sul pronta leva direto às 8 direções — o passo de cardeais foi removido
+  // com a migração v3.
   const at = new Date().toISOString();
   ch.wizard = {
-    etapa: 'cardeais',
+    etapa: 'direcoes8',
     southVersions: [{ prompt: description, at }],
     activeSouth: 0,
   };
