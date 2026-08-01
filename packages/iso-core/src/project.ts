@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { CANONICAL_CUBE } from './iso-cube.ts';
 import { type MapData, MULTI_CELL_ERROR, validateMapObject } from './map.ts';
 
 // ---------------------------------------------------------------------------
@@ -39,10 +40,21 @@ export type Project = ProjectV1;
 
 const SCHEMA_VERSION = 1 as const;
 
+/**
+ * Geometria padrão: a canônica do cubo (`iso-cube.ts`).
+ *
+ * Era `64 / 32 / 16`, e esse `16` era o erro: para `W = 64` um cubo pede
+ * `zStep = 39`, então o bloco saía com **40,8 % da altura de um cubo** — uma
+ * laje. Derivar daqui em vez de repetir três números evita que o editor e a
+ * geração voltem a discordar sobre o que é um bloco.
+ *
+ * O `zStep` É a aresta vertical do cubo, e não pode ser outra coisa: empilhar
+ * sobe exatamente a altura do bloco, senão a coluna abre vão ou se enterra.
+ */
 const GEOMETRIA_PADRAO: ProjectGeometry = {
-  tileWidth: 64,
-  tileHeight: 32,
-  zStep: 16,
+  tileWidth: CANONICAL_CUBE.tileWidth,
+  tileHeight: CANONICAL_CUBE.tileHeight,
+  zStep: CANONICAL_CUBE.cubeHeight,
 } as const;
 
 // ---------------------------------------------------------------------------

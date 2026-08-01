@@ -17,6 +17,7 @@ import {
   cellToScreen,
   centerOn,
   depthAt,
+  framedCamera,
   screenToCell,
   viewToWorldPx,
   type Camera,
@@ -26,7 +27,8 @@ import { blockAt, columnHeight, maxOccupiedZ, pick3d, pickColumnTop } from './pi
 const GEOM = DEFAULT_GEOMETRY;
 
 function cam(rotation: Rotation, zoom = 1, panX = 0, panY = 0): Camera {
-  return { rotation, zoom, panX, panY };
+  // Parada: a rotação contínua coincide com a discreta.
+  return { rotation, turn: rotation, zoom, panX, panY };
 }
 
 /** Centro do losango da célula, em pixels de tela — é onde um clique "óbvio" cai. */
@@ -124,7 +126,7 @@ test('centerOn põe o conteúdo no centro do viewport em todas as vistas', () =>
     { x: 5, y: 0, z: 3 },
   ];
   for (const r of ROTATIONS) {
-    const camera = centerOn(cells, r, 800, 600, 2, GEOM);
+    const camera = framedCamera(cells, r, 800, 600, 2, GEOM);
     const xs = cells.map((c) => cellToScreen(c, camera, GEOM).x);
     const ys = cells.map((c) => cellToScreen(c, camera, GEOM).y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -137,8 +139,14 @@ test('centerOn põe o conteúdo no centro do viewport em todas as vistas', () =>
 });
 
 test('centerOn com mapa vazio ainda devolve uma câmera utilizável', () => {
-  const camera = centerOn([], 1, 800, 600, 2, GEOM);
-  assert.deepEqual(camera, { rotation: 1, panX: 400, panY: 300, zoom: 2 });
+  assert.deepEqual(centerOn([], 1, 800, 600, 2, GEOM), { panX: 400, panY: 300 });
+  assert.deepEqual(framedCamera([], 1, 800, 600, 2, GEOM), {
+    rotation: 1,
+    turn: 1,
+    panX: 400,
+    panY: 300,
+    zoom: 2,
+  });
 });
 
 // ------------------------------------------------------------------ picking

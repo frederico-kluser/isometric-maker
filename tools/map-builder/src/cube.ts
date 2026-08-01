@@ -1,66 +1,40 @@
 /**
- * Desenho procedural do cubo isométrico.
+ * Cubo isométrico no navegador — a mesma forma do molde, em canvas.
  *
- * Serve a dois propósitos que parecem um só e não são:
+ * Este arquivo **não desenha mais nada por conta própria**. A forma vem inteira
+ * de `@isometric-maker/iso-core/cube-raster`, que é o mesmo código que gera o
+ * PNG do molde mandado à PixelLab. Antes havia duas implementações da mesma
+ * geometria — uma aqui, outra no gerador — e elas discordavam: o editor
+ * desenhava a face lateral com `zStep = 16` px enquanto a arte gerada vinha com
+ * 20 a 22. O preview mentia sobre onde a peça ia cair.
  *
- *   1. **Arte de reserva.** Um bloco sem sprite gerado ainda precisa aparecer.
- *      Sem isto o editor só é utilizável DEPOIS de gastar dinheiro na API — e
- *      "precisa pagar para ver se funciona" é o oposto do que este repositório
- *      quer.
- *   2. **Cubo de preview.** O cursor de colocação é um cubo semitransparente,
- *      e ele nunca poderia vir de arte gerada: precisa ser translúcido,
- *      colorido pelo estado (válido/inválido) e existir mesmo sobre o vazio.
+ * O que sobrou aqui é a ponte para o DOM: `Uint8ClampedArray` → `ImageData` →
+ * `<canvas>` → textura do PixiJS.
  *
- * ## A forma
+ * ## Dois usos, uma forma
  *
- * Um cubo isométrico dimétrico 2:1 tem exatamente três faces visíveis — topo,
- * esquerda e direita — e é assim que o gênero desenha. A geometria sai da
- * mesma projeção de `camera.ts`, então o cubo costura no grid por construção,
- * não por ajuste manual:
- *
- * ```text
- *        (w/2, 0)          topo:      losango de w × h
- *        /       \         esquerda:  paralelogramo de w/2 × (h/2 + d)
- *   (0,h/2)     (w,h/2)    direita:   espelho da esquerda
- *        \       /
- *        (w/2, h)  ← base do losango do topo
- *        |       |         d = profundidade vertical (zStep)
- *        (0, h/2+d) … (w, h/2+d)
- * ```
- *
- * As três faces recebem tons diferentes do mesmo matiz. Esse degradê é o que
- * lê como volume: com uma cor só, um campo de cubos vira uma mancha chapada.
+ *   1. **Arte de reserva.** Um bloco sem sprite gerado precisa aparecer. Sem
+ *      isso o editor só é utilizável DEPOIS de gastar dinheiro na API.
+ *   2. **Cubo de preview.** O cursor de colocação é um cubo semitransparente, e
+ *      ele nunca poderia vir de arte gerada: precisa ser translúcido, colorido
+ *      pelo estado e existir mesmo sobre o vazio.
  */
+import {
+  CANONICAL_CUBE,
+  type IsoCubeGeometry,
+} from '@isometric-maker/iso-core/iso-cube';
+import {
+  materialShader,
+  paletteFromHue,
+  rasterizeCube,
+  rasterizeDiamond,
+  type CubePalette,
+  type Rgba,
+  type RgbaImage,
+} from '@isometric-maker/iso-core/cube-raster';
 
-export interface CubeGeometry {
-  readonly tileWidth: number;
-  readonly tileHeight: number;
-  /** Altura vertical das faces laterais, em pixels. */
-  readonly depth: number;
-}
-
-export interface CubeShades {
-  readonly top: string;
-  readonly left: string;
-  readonly right: string;
-  readonly outline?: string | undefined;
-}
-
-/**
- * Tons de uma face a partir de um matiz.
- *
- * Topo mais claro, direita intermediária, esquerda mais escura — é a convenção
- * de luz do gênero (fonte alta, à direita). Manter o mesmo matiz nas três é o
- * que faz o cubo parecer um objeto, e não três polígonos vizinhos.
- */
-export function shadesFromHue(hue: number, saturation = 45): CubeShades {
-  return {
-    top: `hsl(${hue} ${saturation}% 62%)`,
-    right: `hsl(${hue} ${saturation}% 47%)`,
-    left: `hsl(${hue} ${saturation}% 34%)`,
-    outline: `hsl(${hue} ${saturation}% 22%)`,
-  };
-}
+export type { IsoCubeGeometry } from '@isometric-maker/iso-core/iso-cube';
+export { CANONICAL_CUBE } from '@isometric-maker/iso-core/iso-cube';
 
 /** Matiz estável derivado de um identificador — a mesma peça tem sempre a mesma cor. */
 export function hueFromId(id: string): number {
@@ -69,138 +43,89 @@ export function hueFromId(id: string): number {
   return h;
 }
 
-/**
- * Desenha o cubo num contexto 2D já posicionado, com a origem no canto
- * superior esquerdo do bounding box.
- *
- * Extraído para função porque as duas chamadas — textura de bloco e cubo de
- * preview — precisam da MESMA forma. Duas implementações da mesma geometria é
- * como o preview passa a mentir sobre onde a peça vai cair.
- */
-export function paintCube(
-  ctx: CanvasRenderingContext2D,
-  geom: CubeGeometry,
-  shades: CubeShades,
-  alpha = 1,
-): void {
-  const w = geom.tileWidth;
-  const h = geom.tileHeight;
-  const d = geom.depth;
-  const hw = w / 2;
-  const hh = h / 2;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-
-  // Topo: o losango do grid.
-  ctx.beginPath();
-  ctx.moveTo(hw, 0);
-  ctx.lineTo(w, hh);
-  ctx.lineTo(hw, h);
-  ctx.lineTo(0, hh);
-  ctx.closePath();
-  ctx.fillStyle = shades.top;
-  ctx.fill();
-
-  // Face esquerda: desce da aresta oeste do losango.
-  ctx.beginPath();
-  ctx.moveTo(0, hh);
-  ctx.lineTo(hw, h);
-  ctx.lineTo(hw, h + d);
-  ctx.lineTo(0, hh + d);
-  ctx.closePath();
-  ctx.fillStyle = shades.left;
-  ctx.fill();
-
-  // Face direita: desce da aresta leste.
-  ctx.beginPath();
-  ctx.moveTo(w, hh);
-  ctx.lineTo(hw, h);
-  ctx.lineTo(hw, h + d);
-  ctx.lineTo(w, hh + d);
-  ctx.closePath();
-  ctx.fillStyle = shades.right;
-  ctx.fill();
-
-  if (shades.outline !== undefined) {
-    ctx.strokeStyle = shades.outline;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(hw, 0);
-    ctx.lineTo(w, hh);
-    ctx.lineTo(w, hh + d);
-    ctx.lineTo(hw, h + d);
-    ctx.lineTo(0, hh + d);
-    ctx.lineTo(0, hh);
-    ctx.closePath();
-    ctx.stroke();
-    // As duas arestas internas que separam as três faces.
-    ctx.beginPath();
-    ctx.moveTo(0, hh);
-    ctx.lineTo(hw, h);
-    ctx.lineTo(w, hh);
-    ctx.moveTo(hw, h);
-    ctx.lineTo(hw, h + d);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
-/**
- * Canvas com um cubo isométrico desenhado, pronto para virar textura.
- *
- * O canvas tem exatamente o bounding box do cubo — `tileWidth` de largura e
- * `tileHeight + depth` de altura —, então o sprite resultante ancora no mesmo
- * ponto que a projeção calcula, sem offset mágico em lugar nenhum.
- */
-export function makeCubeCanvas(
-  geom: CubeGeometry,
-  shades: CubeShades,
-  alpha = 1,
-): HTMLCanvasElement {
+/** Buffer RGBA → canvas, com suavização desligada. */
+function toCanvas(img: RgbaImage): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = geom.tileWidth;
-  canvas.height = geom.tileHeight + geom.depth;
+  canvas.width = img.width;
+  canvas.height = img.height;
   const ctx = canvas.getContext('2d');
   if (ctx === null) throw new Error('canvas 2d indisponível');
   ctx.imageSmoothingEnabled = false;
-  paintCube(ctx, geom, shades, alpha);
+  // `createImageData` + `set` em vez do construtor de `ImageData`: o construtor
+  // exige um `Uint8ClampedArray` cujo buffer o TypeScript sabe não ser
+  // compartilhado, e o buffer que vem do iso-core é genérico. Copiar aqui custa
+  // um sprite — que é desenhado uma vez por peça, não por quadro.
+  const data = ctx.createImageData(img.width, img.height);
+  data.data.set(img.data);
+  ctx.putImageData(data, 0, 0);
   return canvas;
+}
+
+/**
+ * Canvas com o cubo desenhado, pronto para virar textura.
+ *
+ * O canvas tem exatamente o bounding box do cubo — `spriteWidth × spriteHeight`
+ * —, então o sprite ancora no mesmo ponto que a projeção calcula, sem offset
+ * mágico em lugar nenhum.
+ */
+export function makeCubeCanvas(
+  palette: CubePalette,
+  geom: IsoCubeGeometry = CANONICAL_CUBE,
+  alpha = 1,
+): HTMLCanvasElement {
+  return toCanvas(rasterizeCube(palette, geom, { alpha, outline: true }));
+}
+
+/** Cubo a partir de um matiz — o caminho curto para a arte de reserva. */
+export function makeCubeCanvasFromHue(
+  hue: number,
+  geom: IsoCubeGeometry = CANONICAL_CUBE,
+  alpha = 1,
+  saturation = 0.45,
+): HTMLCanvasElement {
+  return makeCubeCanvas(paletteFromHue(hue, saturation), geom, alpha);
+}
+
+/**
+ * As QUATRO vistas de um cubo procedural.
+ *
+ * Mesmo tom de face nas quatro — a luz é presa à câmera — e desenho de material
+ * diferente em cada. É o que faz girar a câmera ler como volume: o bloco mostra
+ * outro pedaço de si, não a mesma figura deslizando.
+ */
+export function makeCubeViewsFromHue(
+  hue: number,
+  geom: IsoCubeGeometry = CANONICAL_CUBE,
+  saturation = 0.45,
+): HTMLCanvasElement[] {
+  return [0, 1, 2, 3].map((view) =>
+    toCanvas(
+      rasterizeCube(paletteFromHue(hue, saturation), geom, {
+        outline: true,
+        shader: materialShader(hue, view, saturation),
+      }),
+    ),
+  );
 }
 
 /**
  * Canvas do losango do grid — só o topo, sem laterais.
  *
- * É o que desenha o chão vazio: sem uma malha visível, um mapa vazio é uma
- * tela preta e não há onde clicar com intenção.
+ * É o que desenha o chão vazio: sem uma malha visível, um mapa vazio é uma tela
+ * preta e não há onde clicar com intenção.
  */
 export function makeDiamondCanvas(
-  tileWidth: number,
-  tileHeight: number,
-  stroke: string,
-  fill?: string,
+  geom: IsoCubeGeometry,
+  stroke: Rgba,
+  fill?: Rgba,
 ): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = tileWidth;
-  canvas.height = tileHeight;
-  const ctx = canvas.getContext('2d');
-  if (ctx === null) throw new Error('canvas 2d indisponível');
-  ctx.imageSmoothingEnabled = false;
-  const hw = tileWidth / 2;
-  const hh = tileHeight / 2;
-  ctx.beginPath();
-  ctx.moveTo(hw, 0.5);
-  ctx.lineTo(tileWidth - 0.5, hh);
-  ctx.lineTo(hw, tileHeight - 0.5);
-  ctx.lineTo(0.5, hh);
-  ctx.closePath();
-  if (fill !== undefined) {
-    ctx.fillStyle = fill;
-    ctx.fill();
-  }
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  return canvas;
+  return toCanvas(rasterizeDiamond(geom, stroke, fill));
 }
+
+/** `#rrggbb` ou `rgba(...)` não; aqui a cor é estruturada, como no iso-core. */
+export function rgba(r: number, g: number, b: number, a = 255): Rgba {
+  return { r, g, b, a };
+}
+
+export { paletteFromHue } from '@isometric-maker/iso-core/cube-raster';
+export type { CubePalette, Rgba } from '@isometric-maker/iso-core/cube-raster';

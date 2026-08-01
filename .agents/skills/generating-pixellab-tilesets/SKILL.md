@@ -67,6 +67,32 @@ other counts at `transition_size=1.0`.
   height variation the map can express.
 - Tiles Pro: `tile_size` 16–256, 32 recommended.
 
+### The isometric tile has no proportion parameter — `init_image` is the only lever
+
+`/create-isometric-tile` cannot be told how tall the block is. `isometric_tile_shape` is the closest
+thing, and the spec describes it only as "~15%, ~25%, ~50% of canvas height". Measured across the five
+paid blocks in this project (48×48, `shape='block'`): the top diamond came out 2:1 in all five, and
+the **vertical edge varied between 20 and 22 px** block to block. Blocks that do not share a height do
+not stack.
+
+What the endpoint does have is `init_image` plus `init_image_strength` (integer 1–999, default 300).
+That is the lever this project uses: a cube drawn in code goes as the initial image
+(`docs/adr/0025-molde-como-referencia-de-geracao.md`).
+
+Two traps ride along:
+
+- **`init_image_strength` has inverted polarity versus Stable Diffusion.** It sets how much noise is
+  added before generation, so **higher means closer to the reference**. Anyone applying
+  `denoising_strength` intuition tunes it backwards.
+- **`style_image` and `style_strength` do not exist on this endpoint**, and its request schema
+  declares `additionalProperties: false` — sending them is a rejection, not a silent ignore. They do
+  exist on `/create-image-bitforge`, `/generate-image-v2`, `/create-tiles-pro` and others in the same
+  API, which is exactly what makes assuming them here so easy.
+
+A geometrically true cube in 2:1 dimetric has vertical edge `d = W·√6/4 ≈ 0.6124·W`, so a correct cube
+sprite is ~11% taller than square — never `W/2`
+(`packages/iso-core/src/iso-cube.ts`, `docs/adr/0024-cubo-isometrico-canonico.md`).
+
 ### Perspective on tilesets is a narrower enum than everywhere else
 
 The tileset enum is narrower than the general one: `TilesetCameraView` = low top-down, high top-down

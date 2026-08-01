@@ -58,7 +58,15 @@ import {
 } from '../../pixellab-pipeline/src/cost.ts';
 import { asBase64Image, extractBase64 } from './base64-image.ts';
 import { trackSpend } from './estimate.ts';
-import { toPngBytes } from './png.ts';
+import { isPng, toPngBytes } from './png.ts';
+import {
+  BLOCK_GEOMETRY,
+  blockImageSize,
+  normalizeBlockPng,
+  normalizeBlockRgba,
+  resolveReference,
+  type ResolvedReference,
+} from './cube-mould.ts';
 import {
   BLOCK_FACINGS,
   FACING_LABELS,
@@ -130,7 +138,45 @@ export interface WorldBlockConfig {
    * vistas do mesmo bloco derivam de cor e param de parecer o mesmo bloco.
    */
   readonly lockPalette?: boolean;
+  /**
+   * Qual geometria usar. Default `'canonica'`.
+   *
+   * `'canonica'` manda o molde como `init_image`, pede o `image_size` exato do
+   * cubo (48×53) e alinha o resultado à âncora do molde. `'legado'` reproduz
+   * byte a byte o comportamento anterior — canvas quadrado de `size`, sem
+   * referência, sem alinhamento — e existe por UM motivo: manter o hash dos
+   * blocos já pagos. Trocar o hash de um asset pago é fazê-lo ser gerado de
+   * novo, e isso é dinheiro.
+   */
+  readonly geometry?: BlockGeometryMode;
+  /**
+   * PNG (base64 puro) de uma referência do usuário, que substitui o molde.
+   *
+   * Só é aceita se tiver a MESMA proporção do molde. Referência em outra
+   * proporção não é outro estilo — é outra projeção, e outra projeção não
+   * encaixa no mesmo grid. Recusada, o molde entra no lugar e a UI recebe o
+   * motivo.
+   */
+  readonly referencePngB64?: string;
+  /** `init_image_strength` do spec, 1–999. Omitido usa o default deste módulo. */
+  readonly initImageStrength?: number;
 }
+
+export const BLOCK_GEOMETRY_MODES = ['canonica', 'legado'] as const;
+export type BlockGeometryMode = (typeof BLOCK_GEOMETRY_MODES)[number];
+
+/**
+ * Força do `init_image` na geração de bloco.
+ *
+ * O default do endpoint é 300 numa faixa de 1 a 999. Aqui vai mais alto: o
+ * molde precisa mandar na FORMA, e o prompt no material. Com 300 o modelo trata
+ * a referência como sugestão e a aresta vertical volta a variar de bloco para
+ * bloco — que é exatamente o problema que a referência existe para resolver.
+ *
+ * **Não verificado:** qual valor a PixelLab considera "forte". 480 é escolha
+ * deste projeto, ajustável por configuração, não número lido de documentação.
+ */
+export const DEFAULT_INIT_IMAGE_STRENGTH = 480;
 
 export interface WorldBlockFace {
   readonly facing: BlockFacing;
@@ -182,7 +228,10 @@ export type WorldBlockErrorCode =
   | 'detail-enum'
   | 'guidance-range'
   | 'seed-range'
-  | 'facing-mode-enum';
+  | 'facing-mode-enum'
+  | 'geometry-enum'
+  | 'init-strength-range'
+  | 'reference-not-png';
 
 export class WorldBlockValidationError extends Error {
   readonly code: WorldBlockErrorCode;
@@ -285,6 +334,38 @@ function validate(config: WorldBlockConfig): void {
       `facingMode inválido: "${String(config.facingMode)}". Opções: ${FACING_MODES.join(', ')}.`,
     );
   }
+  if (config.geometry !== undefined && !inEnum(config.geometry, BLOCK_GEOMETRY_MODES)) {
+    throw new WorldBlockValidationError(
+      'geometry-enum',
+      `geometry inválida: "${String(config.geometry)}". Opções: ${BLOCK_GEOMETRY_MODES.join(', ')}.`,
+    );
+  }
+  if (
+    config.initImageStrength !== undefined &&
+    (!Number.isInteger(config.initImageStrength) ||
+      config.initImageStrength < 1 ||
+      config.initImageStrength > 999)
+  ) {
+    throw new WorldBlockValidationError(
+      'init-strength-range',
+      `initImageStrength fora da faixa do spec: inteiro entre 1 e 999 ` +
+        `(recebido ${String(config.initImageStrength)}).`,
+    );
+  }
+  if (config.referencePngB64 !== undefined && config.referencePngB64 !== '') {
+    let buf: Buffer;
+    try {
+      buf = Buffer.from(config.referencePngB64, 'base64');
+    } catch {
+      buf = Buffer.alloc(0);
+    }
+    if (!isPng(buf)) {
+      throw new WorldBlockValidationError(
+        'reference-not-png',
+        'A referência enviada não é um PNG. Mande um PNG com a mesma proporção do molde.',
+      );
+    }
+  }
 }
 
 /** Costura de integração para a rota POST /api/world-block. */
@@ -314,7 +395,20 @@ export function facingPrompt(description: string, facing: BlockFacing): string {
 
 // ---- idempotência
 
-/** sha256 de TODA a config — inclusive o modo de face. */
+/**
+ * sha256 de TODA a config — inclusive o modo de face.
+ *
+ * ## O acréscimo é condicional, e isso não é elegância
+ *
+ * Os campos novos (`geometry`, referência, força do `init_image`) só entram no
+ * hash quando `geometry === 'canonica'`. Em `'legado'` a string hasheada é
+ * **byte a byte a mesma de antes**, e é essa igualdade que faz os cinco blocos
+ * já pagos continuarem batendo com o cache.
+ *
+ * Mudar o hash de um asset pago não é refatoração: é gerar de novo, e gerar de
+ * novo custa dinheiro real. O teste `hash legado é idêntico ao anterior` existe
+ * para que essa propriedade não morra numa limpeza futura.
+ */
 function inputHash(config: WorldBlockConfig): string {
   const h = createHash('sha256');
   h.update(`desc=${config.description}`);
@@ -328,7 +422,25 @@ function inputHash(config: WorldBlockConfig): string {
   h.update(`|seed=${config.seed ?? ''}`);
   h.update(`|facingMode=${config.facingMode ?? 'uniform'}`);
   h.update(`|lockPalette=${config.lockPalette ?? true}`);
+
+  if (geometryMode(config) === 'canonica') {
+    const geom = BLOCK_GEOMETRY;
+    h.update(`|geom=${geom.tileWidth}x${geom.tileHeight}x${geom.cubeHeight}`);
+    h.update(`|initStrength=${config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH}`);
+    // A referência entra pelo CONTEÚDO, não pelo nome: duas referências
+    // idênticas com nomes diferentes têm de bater no mesmo cache.
+    const ref = config.referencePngB64 ?? '';
+    h.update(
+      `|ref=${ref === '' ? 'molde' : createHash('sha256').update(ref).digest('hex').slice(0, 16)}`,
+    );
+  }
+
   return h.digest('hex').slice(0, 16);
+}
+
+/** Default explícito num lugar só — a canônica. */
+function geometryMode(config: WorldBlockConfig): BlockGeometryMode {
+  return config.geometry ?? 'canonica';
 }
 
 /** O MESMO hash que runWorldBlock usa — a rota monta a chave do job com ele. */
@@ -386,6 +498,21 @@ function guardFor(estimate: CostEstimate, maxSingleAssetUsd: number): BudgetRepo
 
 // ---- manifesto
 
+/**
+ * Geometria gravada no manifesto.
+ *
+ * Existe para que o editor não tenha de adivinhar: um bloco em disco declara em
+ * que projeção foi desenhado, e quem desenha lê. Bloco antigo não tem o campo, e
+ * `undefined` significa "legado" — aditivo, as duas formas são válidas.
+ */
+interface ManifestGeometry {
+  readonly tileWidth: number;
+  readonly tileHeight: number;
+  readonly cubeHeight: number;
+  readonly spriteWidth: number;
+  readonly spriteHeight: number;
+}
+
 interface WorldBlockManifest {
   readonly version: 1;
   readonly hash: string;
@@ -393,6 +520,10 @@ interface WorldBlockManifest {
   readonly size: number;
   readonly shape: TileShape;
   readonly description: string;
+  readonly geometryMode?: BlockGeometryMode;
+  readonly geometry?: ManifestGeometry;
+  /** De onde veio a referência mandada como `init_image`. */
+  readonly reference?: { readonly source: string; readonly width: number; readonly height: number };
   readonly faces: ReadonlyArray<{
     readonly facing: BlockFacing;
     readonly seed: number;
@@ -447,6 +578,93 @@ export interface WorldBlockSummary {
   readonly facingMode: FacingMode;
   /** Face → caminho público servido pelo Vite (publicDir = assets/). */
   readonly faceUrls: Readonly<Record<BlockFacing, string>>;
+  /** Projeção em que este bloco está desenhado. */
+  readonly geometry: ManifestGeometry;
+  /**
+   * `true` quando as URLs apontam para a versão alinhada ao molde, em
+   * `canon/`. `false` quando a arte é a original, na geometria em que nasceu.
+   */
+  readonly canonical: boolean;
+}
+
+/** Onde mora a versão alinhada ao molde. NUNCA sobrescreve o artefato pago. */
+function canonPngPath(assetsDir: string, hash: string, facing: BlockFacing): string {
+  return join(blockDir(assetsDir, hash), 'canon', `${facing}.png`);
+}
+
+/** Geometria em que o bloco de `manifest` está desenhado. */
+function manifestGeometry(manifest: WorldBlockManifest): ManifestGeometry {
+  if (manifest.geometry) return manifest.geometry;
+  // Bloco anterior ao molde: canvas quadrado de `size`, aresta vertical
+  // desconhecida. O que se sabe com certeza é o tamanho do canvas.
+  return {
+    tileWidth: manifest.size,
+    tileHeight: manifest.size / 2,
+    cubeHeight: 0,
+    spriteWidth: manifest.size,
+    spriteHeight: manifest.size,
+  };
+}
+
+const CANON_GEOMETRY: ManifestGeometry = {
+  tileWidth: BLOCK_GEOMETRY.tileWidth,
+  tileHeight: BLOCK_GEOMETRY.tileHeight,
+  cubeHeight: BLOCK_GEOMETRY.cubeHeight,
+  spriteWidth: BLOCK_GEOMETRY.spriteWidth,
+  spriteHeight: BLOCK_GEOMETRY.spriteHeight,
+};
+
+export interface CanonizeReport {
+  readonly hash: string;
+  readonly faces: ReadonlyArray<{
+    readonly facing: BlockFacing;
+    readonly coverage: number;
+    readonly offsetX: number;
+    readonly offsetY: number;
+    readonly clipped: number;
+    readonly extended: number;
+  }>;
+  readonly avisos: readonly string[];
+}
+
+/**
+ * Alinha ao molde a arte JÁ PAGA de um bloco, sem chamar a API.
+ *
+ * Grava em `<hash>/canon/<face>.png`; o PNG original fica intacto. É assim que
+ * os blocos gerados antes do molde passam a encaixar no grid sem custar nada —
+ * e é por isso que o alinhamento é um passo separado, e não algo embutido na
+ * geração: um conserto que exige pagar de novo não é conserto.
+ */
+export async function canonizeWorldBlock(
+  hash: string,
+  assetsDir: string,
+): Promise<CanonizeReport> {
+  const dir = join(blockDir(assetsDir, hash), 'canon');
+  await mkdir(dir, { recursive: true });
+
+  const faces: CanonizeReport['faces'][number][] = [];
+  const avisos: string[] = [];
+
+  for (const facing of BLOCK_FACINGS) {
+    const src = facePngPath(assetsDir, hash, facing);
+    if (!existsSync(src)) {
+      avisos.push(`A face ${FACING_LABELS[facing]} não existe em disco e ficou de fora.`);
+      continue;
+    }
+    const { png, report } = normalizeBlockPng(await readFile(src));
+    await writeFile(canonPngPath(assetsDir, hash, facing), png);
+    faces.push({
+      facing,
+      coverage: report.coverage,
+      offsetX: report.offsetX,
+      offsetY: report.offsetY,
+      clipped: report.clipped,
+      extended: report.extended,
+    });
+    for (const a of report.avisos) avisos.push(`${FACING_LABELS[facing]}: ${a}`);
+  }
+
+  return { hash, faces, avisos };
 }
 
 /**
@@ -476,8 +694,14 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
     if (manifest.hash !== hash) continue;
     if (!BLOCK_FACINGS.every((f) => existsSync(facePngPath(assetsDir, hash, f)))) continue;
 
+    // A versão alinhada ao molde tem preferência quando existe: é a que encaixa
+    // no grid. Só as quatro faces contam — três faces canônicas e uma original
+    // dariam um bloco que muda de proporção ao girar a câmera.
+    const canonical = BLOCK_FACINGS.every((f) => existsSync(canonPngPath(assetsDir, hash, f)));
+    const prefix = canonical ? `/world-blocks/${hash}/canon` : `/world-blocks/${hash}`;
+
     const faceUrls = Object.fromEntries(
-      BLOCK_FACINGS.map((f) => [f, `/world-blocks/${hash}/${f}.png`]),
+      BLOCK_FACINGS.map((f) => [f, `${prefix}/${f}.png`]),
     ) as Record<BlockFacing, string>;
 
     out.push({
@@ -487,6 +711,8 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
       shape: manifest.shape,
       facingMode: manifest.facingMode,
       faceUrls,
+      geometry: canonical ? CANON_GEOMETRY : manifestGeometry(manifest),
+      canonical,
     });
   }
 
@@ -582,6 +808,29 @@ export async function runWorldBlock(
   const shape = config.shape ?? 'block';
   const mode: FacingMode = config.facingMode ?? 'uniform';
   const lockPalette = config.lockPalette ?? true;
+  const geomMode = geometryMode(config);
+  const canonica = geomMode === 'canonica';
+
+  // Canvas: na canônica é o bounding box EXATO do cubo — retangular, porque o
+  // cubo é retangular. O spec permite width e height independentes de 16 a 64,
+  // e mandar quadrado só desperdiça linhas transparentes onde a arte poderia
+  // ter resolução.
+  const imageSize = canonica
+    ? blockImageSize()
+    : { width: config.size, height: config.size };
+
+  const reference: ResolvedReference | null = canonica
+    ? resolveReference(
+        config.referencePngB64 ? Buffer.from(config.referencePngB64, 'base64') : undefined,
+      )
+    : null;
+  if (reference?.recusa) opts.onLog?.(`[world-block] ${reference.recusa}`);
+  if (reference) {
+    opts.onLog?.(
+      `[world-block] referência: ${reference.source} (${reference.width}×${reference.height}), ` +
+        `init_image_strength=${config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH}.`,
+    );
+  }
 
   const missing = BLOCK_FACINGS.filter(
     (f) => !existsSync(facePngPath(opts.assetsDir, hash, f)),
@@ -592,7 +841,10 @@ export async function runWorldBlock(
   } else {
     // Uniforme paga UMA geração mesmo faltando as quatro faces.
     const calls = mode === 'uniform' ? 1 : missing.length;
-    const single = estimateByArea(COST_TABLE['create-isometric-tile'], config.size * config.size);
+    const single = estimateByArea(
+      COST_TABLE['create-isometric-tile'],
+      imageSize.width * imageSize.height,
+    );
     const estimate: CostEstimate = {
       low: single.low * calls,
       point: single.point * calls,
@@ -631,7 +883,7 @@ export async function runWorldBlock(
     // no request quando informado.
     const params: Record<string, unknown> = {
       description: mode === 'oriented' ? facingPrompt(config.description, facing) : config.description,
-      image_size: { width: config.size, height: config.size },
+      image_size: imageSize,
       isometric_tile_shape: shape,
       seed,
     };
@@ -643,6 +895,12 @@ export async function runWorldBlock(
       params['text_guidance_scale'] = config.textGuidanceScale;
     }
     if (colorImageB64 !== undefined) params['color_image'] = asBase64Image(colorImageB64);
+    // O molde entra como imagem inicial: é a ÚNICA alavanca de proporção que o
+    // endpoint oferece — não há parâmetro de aresta vertical nem de razão.
+    if (reference) {
+      params['init_image'] = asBase64Image(reference.base64);
+      params['init_image_strength'] = config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH;
+    }
 
     const res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
     generated += 1;
@@ -670,9 +928,39 @@ export async function runWorldBlock(
     // (verificado contra a API em 2026-08-01: 48×48 chega com exatos 9216
     // bytes). Gravar isso como `.png` produz arquivo que nenhum navegador abre
     // — e a geração já foi paga. Ver server/png.ts.
-    const png = toPngBytes(Buffer.from(b64, 'base64'), config.size, config.size);
+    const bruto = Buffer.from(b64, 'base64');
+    const png = toPngBytes(bruto, imageSize.width, imageSize.height);
     await writeFile(path, png);
     opts.onLog?.(`[world-block] face ${facing} → ${path} (seed ${seed}, ${png.length} bytes PNG)`);
+
+    // Alinhamento ao molde, gravado AO LADO do original. O artefato pago nunca
+    // é sobrescrito: se o alinhamento estiver errado um dia, o que se perde é a
+    // correção, não a geração.
+    if (canonica) {
+      // Falha aqui NÃO derruba a geração. O PNG pago já está em disco duas
+      // linhas acima; perder a execução inteira por um pós-processamento seria
+      // jogar fora dinheiro por um problema de alinhamento — que dá para
+      // refazer depois com `canonizeWorldBlock`, de graça.
+      try {
+        const canonizado = isPng(bruto)
+          ? normalizeBlockPng(bruto)
+          : normalizeBlockRgba(bruto, imageSize.width, imageSize.height);
+        await mkdir(join(blockDir(opts.assetsDir, hash), 'canon'), { recursive: true });
+        await writeFile(canonPngPath(opts.assetsDir, hash, facing), canonizado.png);
+        const r = canonizado.report;
+        opts.onLog?.(
+          `[world-block] face ${facing} alinhada: deslocamento (${r.offsetX}, ${r.offsetY}), ` +
+            `cobertura ${(r.coverage * 100).toFixed(0)} %, ${r.clipped} px recortados.`,
+        );
+        for (const a of r.avisos) opts.onLog?.(`[world-block]   aviso: ${a}`);
+      } catch (err) {
+        opts.onLog?.(
+          `[world-block] a face ${facing} foi gerada e gravada, mas não deu para alinhá-la ao ` +
+            `molde (${err instanceof Error ? err.message : String(err)}). ` +
+            'A arte original está salva; rode a canonização depois, sem custo.',
+        );
+      }
+    }
 
     return {
       facing,
@@ -699,10 +987,18 @@ export async function runWorldBlock(
     // cópias em disco para que o consumidor nunca precise saber do modo.
     const north = await generateFace('north', base);
     faces = [north];
+    const canonNorth = canonPngPath(opts.assetsDir, hash, 'north');
     for (const facing of BLOCK_FACINGS.slice(1) as readonly BlockFacing[]) {
       const path = facePngPath(opts.assetsDir, hash, facing);
       if (!existsSync(path)) {
         await writeFile(path, Buffer.from(north.pngB64, 'base64'));
+      }
+      // A cópia precisa incluir a versão alinhada: sem isto o catálogo veria
+      // uma face canônica e três originais, e `listWorldBlocks` — que só aceita
+      // as quatro — cairia de volta na arte desalinhada sem dizer por quê.
+      const canonPath = canonPngPath(opts.assetsDir, hash, facing);
+      if (canonica && existsSync(canonNorth) && !existsSync(canonPath)) {
+        await writeFile(canonPath, await readFile(canonNorth));
       }
       faces.push({
         facing,
@@ -737,6 +1033,17 @@ export async function runWorldBlock(
       size: config.size,
       shape,
       description: config.description,
+      geometryMode: geomMode,
+      ...(canonica ? { geometry: CANON_GEOMETRY } : {}),
+      ...(reference
+        ? {
+            reference: {
+              source: reference.source,
+              width: reference.width,
+              height: reference.height,
+            },
+          }
+        : {}),
       faces: faces.map((f) => ({
         facing: f.facing,
         seed: f.seed,

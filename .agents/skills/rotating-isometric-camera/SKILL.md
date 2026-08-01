@@ -16,11 +16,43 @@ this codebase — the boundary is marked throughout.
 
 ## The status here, first
 
-`packages/iso-core` has no rotation state, `tools/map-builder` has no rotation control, and no ADR
-records a decision either way. Adopting rotation is an architecture decision, not a feature ticket.
+**The decision was taken and rotation is implemented.** `packages/iso-core/src/rotation.ts` holds the
+four discrete views, `rotation-tween.ts` the animated transition between them, and
+`tools/map-builder` has the control. Two ADRs record it: `0021` (rotation as a view parameter) and
+`0026` (the animated turn).
 
-**Do not implement it inline.** The material here exists so the decision can be made with numbers
-instead of intuition.
+What follows is still the material the decision was made from, plus what the implementation added.
+Read it before touching rotation — the traps are all still live.
+
+### The turn is animated, and only the position interpolates
+
+Flipping `rotation` from 0 to 1 in one frame does not read as a turn; it reads as a cut, and whoever
+was editing loses track of where they were. So the grid coordinate rotates through a **continuous**
+angle and is projected by the same single formula, over 280 ms with a symmetric cubic ease.
+
+**The sprite is never rotated.** Pixel art rotated by any angle that is not a multiple of 90° gets
+resampled, and resampling destroys the pixel grid — the art you paid for is a smear for the whole
+transition. That single constraint rules out the obvious solution of spinning the container, and it
+is why the *facing* cross-fades instead: source view underneath, opaque; target view on top, at the
+eased progress. Two semi-transparent copies would let the background show through mid-turn.
+
+The depth key is recomputed each frame from the **continuous** coordinate: during a 90° turn two
+blocks genuinely swap depth, and the continuous key makes the swap happen at the geometrically right
+instant instead of all at once at one end.
+
+The framing is recomputed each frame too. Without it the map describes an arc and leaves the screen
+halfway, because turning flips the sign of `x − y`.
+
+**Nothing external corroborates the timing or the curve.** A research pass looking for how commercial
+isometric games do this transition — cross-fade, container tween, easing, duration, and the behaviour
+of specific titles — produced **zero claims that survived verification**. 280 ms and the cubic ease
+are this project's choice, in a named constant.
+
+### During a turn there is no cell under the cursor
+
+`screenToCell` uses the discrete `rotation`, never the continuous `turn`, and the placement preview
+is hidden while the camera moves. Inventing a cell from a fractional rotation puts the piece
+somewhere arbitrary.
 
 ## What is verified, from engines in production
 
@@ -148,30 +180,48 @@ order. Rotation does not create that problem, but it changes which configuration
 scene that is acyclic from one view can be cyclic from another. Treat the format restriction as
 load-bearing for rotation too, not as something rotation could relax.
 
-## If the decision is taken, the order of work
+## What the four views cost in art, and what they do not
 
-1. **Settle the sign** of the direction shift against this project's atlas. Cheap, and everything
-   visual depends on it.
-2. **Rotate before computing the key**, one path, not four expressions.
-3. **Budget the art**, not the maths. The transform is arithmetic; the wall, ramp and roof variants
-   are the real cost and are unmeasured.
-4. **Expect occlusion to stay imperfect.** Plan the mitigation, not the solution.
+A `uniform` world block has **one** artwork reused across all four views — that is what uniform means,
+and it is what makes a block cost one generation instead of four
+(`docs/adr/0022-blocos-do-mundo-isometricos.md`). Turning the camera on one does not change its
+drawing, and the cross-fade correctly has nothing to show. Four genuinely distinct views of generated
+art require `oriented` mode and four generations.
+
+Procedural cubes vary per view for free: same face tone, different material grain
+(`packages/iso-core/src/cube-raster.ts`, `materialShader`).
+
+**The light is fixed to the CAMERA, not the world.** Top brightest, right middle, left darkest — in
+all four views, always. Fixing it to the world would need four artworks for shading alone and would
+make the same piece change colour as the camera turns, which reads as a bug rather than as lighting.
+The corollary: **no drop shadow on anything rotatable.** A pre-rendered shadow cannot turn, so it
+would point the wrong way in three of the four views.
 
 ## Rules
 
 - **Never store rotated coordinates.** Rotation is a view parameter; the document does not change.
 - **Never rotate `z`.** It is invariant, and in the depth key it is the term that already works.
+- **Never rotate a pixel-art sprite by a non-multiple of 90°.** Interpolate the position; cross-fade
+  the facing.
+- **Never pick a cell from the continuous `turn`.** Picking reads the discrete `rotation`.
+- **Never take the long way round.** From view 3 to view 0 is `+1`, not `−3`; a half turn is
+  genuinely ambiguous and must break the tie by a declared rule.
 - **Never assume the direction shift's sign.** Verify it against the atlas.
 - **Never generalise entity reindexing to tiles and walls.** They are different mechanisms.
-- **Never promise clean occlusion.** The reference engine does not have it.
-- **Never implement rotation without an ADR.** It touches geometry, depth, input, art budget and the
-  project format at once.
+- **Never promise clean occlusion.** The reference engine does not have it, and mid-turn is where it
+  shows most.
+- **Never present the turn's duration or easing as a community convention.** Nothing external
+  verified them.
 
 ## References
 
+- `docs/adr/0021-rotacao-de-camera-em-quatro-vistas.md` — rotation as a view parameter, discrete
+- `docs/adr/0026-giro-de-camera-animado.md` — the animated turn, and what research failed to find
+- `packages/iso-core/src/rotation.ts` — the four discrete views and the reindexing
+- `packages/iso-core/src/rotation-tween.ts` — continuous rotation, easing and the short path
 - `packages/iso-core/src/depth.ts` — the key whose `x+y` term rotation invalidates
-- `packages/iso-core/src/geometry.ts` — the projection this would pre-transform into
-- `docs/adr/0013-geometria-isometrica-64x32-z16.md` — the geometry Godot independently corroborates
+- `packages/iso-core/src/geometry.ts` — the projection this pre-transforms into
+- `tools/map-builder/src/scene.ts` — the cross-fade and the ticker loop
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the unrotated coordinate rules
 - `.agents/skills/composing-pixi-scene/SKILL.md` — where draw order is applied in this renderer
 - OpenRCT2, `src/openrct2/world/Location.hpp` and `src/openrct2/interface/Viewport.cpp` — rotation

@@ -88,10 +88,49 @@ export const blocos = {
       'http://localhost:5175 e recarregue para vê-las na paleta.',
   },
 
+  molde: {
+    titulo: 'Molde do cubo',
+    descricao:
+      'Toda geração vai acompanhada deste molde como imagem inicial (init_image). ' +
+      'É a única alavanca de proporção que o endpoint oferece — não existe ' +
+      'parâmetro de aresta vertical nem de razão.',
+    geometria: (w: number, h: number, d: number) =>
+      `Losango ${w}×${h} px, aresta vertical ${d} px, sprite ${w}×${h + d} px. ` +
+      'Um cubo de verdade: mesma medida em largura, profundidade e altura.',
+    porQueCinza:
+      'O molde é acromático de propósito: init_image carrega forma E cor, e um ' +
+      'molde colorido faria todo bloco nascer da cor dele.',
+    referenciaRotulo: 'Referência própria (substitui o molde)',
+    referenciaNota:
+      'Só é aceita se tiver a MESMA proporção do molde — em qualquer tamanho. ' +
+      'Outra proporção não é outro estilo, é outra projeção, e outra projeção não ' +
+      'encaixa no mesmo grid.',
+    referenciaEscolher: 'Escolher PNG…',
+    referenciaLimpar: 'Voltar ao molde',
+    referenciaAceita: (w: number, h: number) => `Referência aceita: ${w}×${h} px.`,
+    semReferencia: 'Usando o molde do projeto.',
+    geometriaRotulo: 'Geometria',
+    geometriaCanonica: 'Canônica (com molde)',
+    geometriaLegado: 'Legado (sem molde)',
+    geometriaNota:
+      'Legado reproduz o comportamento anterior e existe por um motivo só: manter ' +
+      'o hash dos blocos já pagos. Trocar o hash de um asset pago é gerá-lo de novo.',
+    tamanhoDoMolde: (w: number, h: number) => `${w}×${h} px — vem do molde`,
+  },
+
   catalogo: {
     titulo: 'Catálogo',
     vazio: 'Nenhum bloco completo em disco ainda.',
     recarregar: 'Recarregar',
+    alinhar: 'Alinhar ao molde',
+    alinhando: 'Alinhando…',
+    alinhado: 'Alinhado',
+    alinharNota:
+      'Alinhar reposiciona a arte já paga sobre a âncora do molde e completa a base. ' +
+      'Não chama a API, não custa nada e não toca no PNG original.',
+    jaAlinhado: 'Já alinhado',
+    naoAlinhado: 'Fora do molde',
+    cobertura: (pct: number) => `cobertura ${pct}%`,
   },
 
   erros: {

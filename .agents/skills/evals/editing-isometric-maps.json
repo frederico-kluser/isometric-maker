@@ -61,8 +61,8 @@
       "why": "a silently missing atlas produces a runtime that loads and draws nothing"
     },
     {
-      "must_contain": "substrate but no history",
-      "why": "the tools are pure so edits are reversible in principle, but no stack, history or command object exists"
+      "must_contain": "moving a block changes its id",
+      "why": "the instance id is derived from the position, so a block is the contents of a cell and not an entity that walks; treating it as stable breaks any consumer that tracks blocks across edits"
     },
     {
       "must_contain": "a placed door opens anything",
@@ -71,6 +71,10 @@
     {
       "must_contain": "These are absences, not defects",
       "why": "what is missing must not be filled with an invented convention"
+    },
+    {
+      "must_contain": "authored as RLE columns",
+      "why": "authoring format and export format are deliberately different; collapsing them either bloats the project file or forces the physics consumer to decode RLE"
     }
   ],
   "check_provenance": true

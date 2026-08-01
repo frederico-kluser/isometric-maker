@@ -167,8 +167,17 @@ is not an implementation detail, and picking one silently locks in door behaviou
   trap — an occupant listed in a voxel whose geometry extends past it, so the first non-empty voxel
   is not the nearest hit — cannot occur here. If multi-cell footprints are ever allowed, that trap
   arrives with them and the traversal needs a containment test.
-- **No push, no slide, no friction, no mass.** Nothing in the model has velocity beyond a constant
-  speed.
+- **No push, no slide, no friction, no mass — in the SIMULATION.** The **data** now exists and the
+  simulation ignores it: `packages/iso-core/src/block-catalog.ts` gives every material `solid`,
+  `friction`, `density`, `movementCost` and `harmful`, and `map-instances.ts` resolves each placed
+  block into a self-contained record carrying them. `collision.ts` still reads the block store
+  directly and consults none of it. Wiring them is a task, not a defect — and the numbers themselves
+  are **this project's choice, not measured or sourced**: only the densities have any relation to the
+  real world. Say so when quoting them.
+- **Grid-space AABB exists, and it is grid-space on purpose.** `aabbOf` returns cell coordinates,
+  half-open at the top so neighbours touch without overlapping. Collision in screen pixels would
+  solve in diamonds what was already a cube, and it is exactly where camera rotation would break
+  everything — the screen changes view, the world does not.
 
 **On bringing in a 2D physics engine:** the honest position is that this has not been evaluated
 against sources. The structural obstacle is stated plainly — every 2D engine simulates a plane, and
@@ -188,9 +197,17 @@ should be labelled as such wherever it is repeated.
 - **Do not route the step through `canCross`.** It looks like deduplication and it breaks stairs.
 - **A behaviour that is absent is absent, not broken.** Sliding, ramps and pushing are new features
   needing a decision, not defects to patch.
+- **Never present the material numbers as measured.** Friction and movement cost are this project's
+  starting point, in a table so that changing them is changing a table.
+- **`kind` and `material` are orthogonal.** What a block is made of (friction, density) is not what
+  it is in the world (`solid`, `platform`, `liquid`, `decoration`). Stone can be a solid cube or a
+  platform you walk on and pass under; conflating them means inventing a material per case.
 
 ## References
 
+- `docs/adr/0027-exportacao-v2-instancias-e-materiais.md` — instances, materials and grid-space AABB
+- `packages/iso-core/src/block-catalog.ts` — the material table and the block kinds
+- `packages/iso-core/src/map-instances.ts` — the physics-ready view of the map
 - `packages/iso-core/src/movement.ts` — the fixed logic step and the determinism contract
 - `packages/iso-core/src/collision.ts` — `canEnter`, `canCross`, the diagonal rule
 - `packages/iso-core/src/step-up.ts` — the one-level step and why it avoids `canCross`
