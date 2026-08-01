@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { crc32, deflateSync } from 'node:zlib';
@@ -28,6 +28,9 @@ import {
   generateSouthFromText, editSouth, undoSouth, rotateCardinals, generateDirections8,
   type StudioStore, type WizardOpts,
 } from './mannequin.ts';
+import {
+  MANNEQUIN_BODY, MANNEQUIN_COVERAGE, MANNEQUIN_NEGATIVE,
+} from './mannequin-prompt.ts';
 
 // ------------------------------------------------------------------ PNGs falsos
 
@@ -625,6 +628,143 @@ test('south com reference.png envia init_image + strength 500; sem, omite', asyn
     const dir8 = client.calls.find((c) => c.path === '/create-character-v3');
     assert.ok(!('init_image' in (dir8?.body ?? {})), '8 direções não recebe init_image');
     assert.ok(!('init_image_strength' in (dir8?.body ?? {})));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ modo manequim
+
+test('modo manequim: o texto vira estilo, e negative_description + coverage_percentage saem no request', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    const ch = store.studio.characters[0]!;
+    ch.mannequin = true;
+
+    await generateSouthFromText(client, store, CHAR_ID, 'ragnarok online 2002 style', opts);
+
+    const body = client.calls.find((c) => c.path === '/create-image-bitforge')?.body ?? {};
+    const description = String(body['description']);
+    assert.ok(
+      description.startsWith('ragnarok online 2002 style,'),
+      'o texto do usuário entra como estilo, na frente',
+    );
+    assert.ok(description.includes(MANNEQUIN_BODY), 'o corpo vem do andaime');
+    assert.equal(body['negative_description'], MANNEQUIN_NEGATIVE);
+    assert.equal(body['coverage_percentage'], MANNEQUIN_COVERAGE);
+
+    // O histórico guarda o que o usuário escreveu; a descrição efetiva é a que
+    // vai para o v3 — mandar o texto cru lá reintroduziria a roupa.
+    const wiz = wizardOf(store);
+    assert.equal(wiz.southVersions[0]?.prompt, 'ragnarok online 2002 style');
+    assert.equal(wiz.southVersions[0]?.mannequin, true);
+    assert.equal(wiz.southVersions[0]?.effective, description);
+    assert.equal(store.studio.characters[0]?.description, description);
+
+    await generateDirections8(client, store, CHAR_ID, opts);
+    const dir8 = client.calls.find((c) => c.path === '/create-character-v3');
+    assert.equal(dir8?.body?.['description'], description);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fora do modo manequim, negative_description e coverage_percentage são omitidos (F0-09)', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'um mago de robe azul', opts);
+
+    const body = client.calls.find((c) => c.path === '/create-image-bitforge')?.body ?? {};
+    assert.equal(body['description'], 'um mago de robe azul');
+    assert.ok(!('negative_description' in body));
+    assert.ok(!('coverage_percentage' in body));
+    assert.equal(wizardOf(store).southVersions[0]?.effective, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('negativo extra do personagem entra sem o modo manequim ligado', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    store.studio.characters[0]!.negativePrompt = 'tattoo, scars';
+
+    await generateSouthFromText(client, store, CHAR_ID, 'um guerreiro', opts);
+    const body = client.calls.find((c) => c.path === '/create-image-bitforge')?.body ?? {};
+    assert.equal(body['negative_description'], 'tattoo, scars');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ligar o modo manequim com o mesmo texto NÃO é idempotente — o request muda', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'mesmo texto', opts);
+    assert.equal(client.count('/create-image-bitforge'), 1);
+
+    // Repetir sem mudar nada continua idempotente.
+    await generateSouthFromText(client, store, CHAR_ID, 'mesmo texto', opts);
+    assert.equal(client.count('/create-image-bitforge'), 1);
+
+    // Ligar o manequim muda a descrição efetiva: tem de gerar de novo.
+    store.studio.characters[0]!.mannequin = true;
+    await generateSouthFromText(client, store, CHAR_ID, 'mesmo texto', opts);
+    assert.equal(client.count('/create-image-bitforge'), 2);
+
+    // E aí volta a ser idempotente com o modo ligado.
+    await generateSouthFromText(client, store, CHAR_ID, 'mesmo texto', opts);
+    assert.equal(client.count('/create-image-bitforge'), 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ preenchimento do quadro
+
+test('as 8 direções passam pelo preenchimento e o PNG pago fica em raw/', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
+    await generateDirections8(client, store, CHAR_ID, opts);
+
+    const frames = store.studio.cells[directions8Key(CHAR_ID)]?.frames ?? {};
+    const publicos = Object.values(frames).flat();
+    assert.equal(publicos.length, 8);
+    for (const p of publicos) {
+      const disco = join(opts.assetsDir, p.replace(/^\/assets\//, ''));
+      const cru = join(dirname(disco), 'raw', basename(disco));
+      assert.ok(existsSync(disco), `${p} deveria existir`);
+      assert.ok(existsSync(cru), `a cópia crua de ${p} deveria existir em raw/`);
+      assert.equal(
+        readFileSync(cru).toString('base64'),
+        PNG_DIAGONAL,
+        'raw/ guarda exatamente o que a API entregou',
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fitFrames: false no lock deixa os quadros como vieram, sem raw/', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    store.studio.lock = { frameCount: 8, fps: 8, size: SIZE, fitFrames: false };
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
+    await generateDirections8(client, store, CHAR_ID, opts);
+
+    const frames = store.studio.cells[directions8Key(CHAR_ID)]?.frames ?? {};
+    const primeiro = Object.values(frames).flat()[0]!;
+    const disco = join(opts.assetsDir, primeiro.replace(/^\/assets\//, ''));
+    assert.equal(readFileSync(disco).toString('base64'), PNG_DIAGONAL);
+    assert.ok(!existsSync(join(dirname(disco), 'raw')), 'sem recorte, sem raw/');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

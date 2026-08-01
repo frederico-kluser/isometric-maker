@@ -30,7 +30,7 @@ Two consequences that look like style and are not:
 
 ### Why those two are load-bearing
 
-`tools/character-builder/server/api.ts:15@8fb78ce5` imports the pipeline's client **across package
+`tools/character-builder/server/api.ts:34@6e5b3f33` imports the pipeline's client **across package
 boundaries by relative path**: `'../../pixellab-pipeline/src/api.ts'`. There is no dependency
 declared for it in `tools/character-builder/package.json@47dd51fc` — the coupling is a filesystem path,
 which is why `server.fs.allow` is widened in `tools/character-builder/vite.config.ts:12@6a436967`.

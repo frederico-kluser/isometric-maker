@@ -147,7 +147,18 @@ export type WizardStage = "sul" | "direcoes8" | "pronto";
 /** One accepted version of the south face. The art itself lives in the cell
  *  under `southKey(characterId)` — this history keeps the prompt that made it. */
 export interface SouthVersion {
+	/** What the user typed. In mannequin mode this is the STYLE, not the body. */
 	readonly prompt: string;
+	/**
+	 * What was actually sent as `description`. Differs from `prompt` only in
+	 * mannequin mode, where the body scaffold is appended.
+	 *
+	 * Idempotency compares this, falling back to `prompt` when absent — which is
+	 * what keeps versions written before mannequin mode existed comparable.
+	 */
+	readonly effective?: string;
+	/** Whether the mannequin scaffold produced this version. */
+	readonly mannequin?: boolean;
 	readonly at: string;
 }
 
@@ -172,6 +183,18 @@ export interface Character {
 	readonly description: string;
 	readonly size: number;
 	readonly seed: number;
+	/**
+	 * Force a featureless base body: the user's text becomes STYLE only, and the
+	 * body comes from `mannequin-prompt.ts` plus `negative_description`.
+	 *
+	 * Per character, not global, and that is the point: the base body is a
+	 * mannequin, every character derived from it is supposed to be dressed.
+	 * `template_id: 'mannequin'` does NOT do this — it only picks the skeleton
+	 * the animator fits, per the vendored spec.
+	 */
+	mannequin?: boolean;
+	/** Extra `negative_description` terms, appended to the mannequin defaults. */
+	negativePrompt?: string;
 	/**
 	 * Wizard progress, when the character goes through the wizard. Absent on
 	 * characters authored the old way — v2 is additive, both shapes are valid.
@@ -308,6 +331,21 @@ export interface MannequinLock {
 	readonly outline?: OutlineOption;
 	readonly view?: ViewOption;
 	readonly templateId?: TemplateOption;
+	/**
+	 * `coverage_percentage` of `/create-image-bitforge` (0–100, "Percentage of
+	 * the canvas to cover"). The field exists on that endpoint ALONE — the v3
+	 * endpoint has nothing like it. Absent = omitted from the request (F0-09).
+	 */
+	readonly coverage?: number;
+	/**
+	 * Trim the shared transparent margin off the 8 directions and resample them
+	 * to `size`, so the sprite fills the frame.
+	 *
+	 * Absent counts as ON. `create-character-v3` pads the canvas ~2x "for
+	 * animation room" and offers no flag to stop it, so a frame that fills is
+	 * only reachable by post-processing. The paid original is kept in `raw/`.
+	 */
+	readonly fitFrames?: boolean;
 }
 
 export interface Studio {

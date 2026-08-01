@@ -29,6 +29,7 @@ import {
 	SegmentedToggleOption,
 } from '@/components/motion-ui/segmented-toggle';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -108,13 +109,20 @@ function ConfigForm({
 	const [quality, setQuality] = useState<QualityValues>(QUALITY_PRESETS.maxima);
 	const [view, setView] = useState<ViewOption>('low top-down');
 	const [templateId, setTemplateId] = useState<TemplateOption>('mannequin');
+	// Vazio = campo omitido do request, que é o default da API (F0-09).
+	const [cobertura, setCobertura] = useState('');
+	const [preencher, setPreencher] = useState(true);
 	const [silhouette, setSilhouette] = useState<Silhouette>(
 		progress.character.silhouette,
 	);
 	const action = useAction(refresh);
 
 	const fpsNum = Number(fps);
-	const canSubmit = Number.isFinite(fpsNum) && fpsNum > 0;
+	const coberturaNum = cobertura.trim() === '' ? undefined : Number(cobertura);
+	const coberturaOk =
+		coberturaNum === undefined ||
+		(Number.isFinite(coberturaNum) && coberturaNum >= 0 && coberturaNum <= 100);
+	const canSubmit = Number.isFinite(fpsNum) && fpsNum > 0 && coberturaOk;
 	const preset = matchPreset(quality);
 
 	return (
@@ -221,7 +229,42 @@ function ConfigForm({
 							))}
 						</SelectContent>
 					</Select>
+					<span className="max-w-xs text-xs text-muted-foreground">
+						{wizard.config.templateNota}
+					</span>
 				</div>
+				<div className="flex flex-col gap-2">
+					<Label htmlFor="wizard-config-cobertura">
+						{wizard.config.cobertura}
+					</Label>
+					<Input
+						id="wizard-config-cobertura"
+						type="number"
+						min={0}
+						max={100}
+						value={cobertura}
+						onChange={(e) => setCobertura(e.target.value)}
+						className="w-28"
+					/>
+					<span className="max-w-xs text-xs text-muted-foreground">
+						{wizard.config.coberturaNota}
+					</span>
+				</div>
+			</div>
+			<div className="flex flex-col gap-2">
+				<div className="flex items-center gap-2">
+					<Checkbox
+						id="wizard-config-preencher"
+						checked={preencher}
+						onCheckedChange={(v: boolean) => setPreencher(v)}
+					/>
+					<Label htmlFor="wizard-config-preencher">
+						{wizard.config.preencher}
+					</Label>
+				</div>
+				<p className="max-w-prose text-xs text-muted-foreground">
+					{wizard.config.preencherNota}
+				</p>
 			</div>
 			<Accordion className="rounded-xl border border-border bg-card">
 				<AccordionItem value="avancado">
@@ -273,6 +316,10 @@ function ConfigForm({
 								outline: quality.outline,
 								view,
 								templateId,
+								...(coberturaNum !== undefined
+									? { coverage: coberturaNum }
+									: {}),
+								fitFrames: preencher,
 							}),
 						}),
 					)

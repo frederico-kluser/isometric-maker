@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-01**: **38 arquivos em `docs/` — 24 ADRs e 14 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-01**: **40 arquivos em `docs/` — 25 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -36,6 +36,7 @@ A API que gera a arte. Ela **muda sem versionar**, então a prosa aqui é mínim
 | Arquivo | Descrição |
 |---|---|
 | [`guarda-roupa-e-silhueta.md`](02-personagem/guarda-roupa-e-silhueta.md) | Por que a API não faz paper-doll, as três soluções que jogos reais usam, e por que silhueta é restrição de autoria |
+| [`manequim-e-enquadramento.md`](02-personagem/manequim-e-enquadramento.md) | Por que `template_id: mannequin` não gera manequim, como o modo manequim força o corpo-base, e como o quadro passa a ser preenchido |
 
 ## 03 — Mapa
 
@@ -106,6 +107,7 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0025`](./adr/0025-molde-como-referencia-de-geracao.md) | O molde do cubo acompanha toda geração de bloco | vigente |
 | [`0026`](./adr/0026-giro-de-camera-animado.md) | O giro da câmera é animado: posição interpolada, sprite nunca rotacionado | vigente |
 | [`0027`](./adr/0027-exportacao-v2-instancias-e-materiais.md) | Exportação v2: cada bloco colocado sai com id, posição, tipo e material | vigente |
+| [`0028`](./adr/0028-modo-manequim-e-preenchimento-do-quadro.md) | O manequim é prompt, não `template_id`; e o quadro cheio é pós-processamento | vigente |
 
 ## Skills
 
@@ -128,6 +130,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-07-30 | **Pivô para o isometric-maker** ([ADR 0010](./adr/0010-pivo-para-editor-isometrico.md)): docs e ADRs de MMORPG apagados, sete ADRs novas, índice reescrito sem entrada inexistente |
 | 2026-08-01 | Rotação de câmera em quatro vistas ([ADR 0021](./adr/0021-rotacao-de-camera-em-quatro-vistas.md)), blocos do mundo pelo `/create-isometric-tile` ([ADR 0022](./adr/0022-blocos-do-mundo-isometricos.md)) e a regra do caminho de volta ao artefato pago ([ADR 0023](./adr/0023-caminho-de-volta-ao-artefato-pago.md)), que corrigiu 14 submissões pagas sem um único PNG em disco |
 | 2026-08-01 | **O cubo vira cubo** ([ADR 0024](./adr/0024-cubo-isometrico-canonico.md)): a aresta vertical era 40,8 % do valor geométrico, e o erro aparecia como "a arte não encaixa no mapa". Com ela vieram o molde mandado em toda geração ([ADR 0025](./adr/0025-molde-como-referencia-de-geracao.md)), o giro animado da câmera ([ADR 0026](./adr/0026-giro-de-camera-animado.md)) e a exportação com instâncias e materiais ([ADR 0027](./adr/0027-exportacao-v2-instancias-e-materiais.md)) |
+| 2026-08-01 | Modo manequim e preenchimento do quadro ([ADR 0028](./adr/0028-modo-manequim-e-preenchimento-do-quadro.md)): `template_id` era esqueleto e não aparência, `negative_description` e `coverage_percentage` nunca tinham sido enviados, e a moldura estufada da v3 passou a ser recortada com uma bbox só para as 8 direções |
 | 2026-08-01 | Spec revendorizado; [ADR 0019](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) alinha a decisão de personagem ao código em v3; [ADR 0020](./adr/0020-identidade-da-diagonal-de-picking.md) corrige a diagonal do picking e estreia o campo `**Corrige:**`; quatro skills novas para o modelo isométrico, incluindo a de rotação de câmera |
 
 ## Referências

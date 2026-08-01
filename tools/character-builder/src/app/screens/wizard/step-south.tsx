@@ -16,6 +16,7 @@
  */
 import { useState } from 'react';
 import { Skeleton } from '@/components/motion-ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -64,9 +65,23 @@ function SouthGenerate({
 	readonly refresh: () => Promise<void>;
 	readonly busy: boolean;
 }) {
-	const [description, setDescription] = useState(progress.character.description);
+	// Prefill: o que o usuário escreveu, não a descrição efetiva. Em modo
+	// manequim `character.description` já vem com o andaime dentro, e reexibi-lo
+	// faria o usuário editar o andaime em vez do estilo.
+	const [description, setDescription] = useState(
+		progress.wizard.southVersions[progress.wizard.activeSouth]?.prompt ??
+			progress.character.description,
+	);
 	const [refImage, setRefImage] = useState<ReferenceImage | null>(null);
 	const [refProbe, setRefProbe] = useState(0);
+	// O corpo-base começa em modo manequim; personagens derivados, não. É a
+	// única combinação em que o default acerta sem o usuário mexer.
+	const [mannequin, setMannequin] = useState(
+		progress.character.mannequin ?? progress.character.id === 'manequim',
+	);
+	const [negativo, setNegativo] = useState(
+		progress.character.negativePrompt ?? '',
+	);
 	const action = useAction(refresh);
 	const generating = progress.southGenerating;
 	const failure = generating ? undefined : progress.southError;
@@ -78,6 +93,8 @@ function SouthGenerate({
 				body: JSON.stringify({
 					characterId: progress.character.id,
 					description: description.trim(),
+					mannequin,
+					negativePrompt: negativo.trim(),
 					// b64 puro, sem prefixo data: — o servidor grava o upload em
 					// assets/wizard/<charId>/reference.png e usa como init_image.
 					...(refImage ? { referenceBase64: refImage.base64 } : {}),
@@ -108,17 +125,53 @@ function SouthGenerate({
 				/>
 			</div>
 			<div className="flex flex-col gap-2">
+				<div className="flex items-center gap-2">
+					<Checkbox
+						id="wizard-sul-manequim"
+						checked={mannequin}
+						onCheckedChange={(v: boolean) => setMannequin(v)}
+						disabled={generating || busy}
+					/>
+					<Label htmlFor="wizard-sul-manequim">
+						{wizard.sul.manequimRotulo}
+					</Label>
+				</div>
+				<p className="max-w-prose text-xs text-muted-foreground">
+					{wizard.sul.manequimNota}
+				</p>
+			</div>
+			<div className="flex flex-col gap-2">
 				<Label htmlFor="wizard-sul-descricao">
-					{wizard.sul.descricaoRotulo}
+					{mannequin
+						? wizard.sul.estiloRotulo
+						: wizard.sul.descricaoRotulo}
 				</Label>
 				<Textarea
 					id="wizard-sul-descricao"
 					value={description}
 					onChange={(e) => setDescription(e.target.value)}
-					placeholder={wizard.sul.placeholderDescricao}
+					placeholder={
+						mannequin
+							? wizard.sul.placeholderEstilo
+							: wizard.sul.placeholderDescricao
+					}
 					disabled={generating || busy}
 				/>
 			</div>
+			{mannequin ? (
+				<div className="flex flex-col gap-2">
+					<Label htmlFor="wizard-sul-negativo">
+						{wizard.sul.negativoRotulo}
+					</Label>
+					<Input
+						id="wizard-sul-negativo"
+						value={negativo}
+						onChange={(e) => setNegativo(e.target.value)}
+						placeholder={wizard.sul.placeholderNegativo}
+						disabled={generating || busy}
+					/>
+				</div>
+			) : null}
 			{failure !== undefined ? (
 				<FailureNotice message={failure}>
 					<ActionButton
