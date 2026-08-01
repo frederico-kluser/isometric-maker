@@ -20,6 +20,7 @@ import {
   COST_TABLE, estimateByArea, sumEstimates, checkBudget,
   type BudgetReport, type CostEstimate,
 } from '../../pixellab-pipeline/src/cost.ts';
+import { asBase64Image, extractBase64 } from './base64-image.ts';
 import { trackSpend } from './estimate.ts';
 
 // ---- tipos
@@ -148,10 +149,12 @@ export async function rotateCardinals(
   await mkdir(input.outputDir, { recursive: true });
 
   // Corpo base — /rotate NÃO aceita `view` nem `no_background`.
-  // Do spec: required = image_size, from_image.
+  // Do spec: required = image_size, from_image. from_image é Base64Image —
+  // um OBJETO `{base64}`, não a string crua. String devolve 422
+  // "Input should be a valid dictionary or object to extract fields from".
   // Params: from_direction, to_direction, seed, isometric, from_view, to_view.
   const paramsBase: Record<string, unknown> = {
-    from_image: input.fromImage,
+    from_image: asBase64Image(input.fromImage),
     from_direction: 'south',
     image_size: input.imageSize,
     seed: input.seed,
@@ -172,7 +175,7 @@ export async function rotateCardinals(
     // Gravar PNG ANTES de qualquer pós-processamento.
     // /rotate é síncrono: o artefato vem nesta resposta. Se o processo
     // morrer aqui, o dinheiro já foi gasto e a imagem se perde.
-    const imageB64 = res.data?.image;
+    const imageB64 = extractBase64(res.data?.image);
     if (!imageB64) {
       throw new Error(
         `/rotate south→${dir} não devolveu campo "image". Resposta: ` +

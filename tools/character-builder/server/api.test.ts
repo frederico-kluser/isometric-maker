@@ -480,13 +480,53 @@ test('sprite-lab: config válida → 202 {key, hash}; o job morre local sem toke
   );
 });
 
-test('sprite-lab GET: hash desconhecido → 404 em pt-BR; hash malformado → 404', async () => {
+test('sprite-lab GET: andamento é status 200 nomeado, nunca 404; hash malformado é 404', async () => {
+  // Regressão do Sprite Studio: enquanto o job rodava, esta rota devolvia 404
+  // e a UI sondava em cima disso. O console do navegador enchia de linha
+  // vermelha, o usuário lia como falha, e uma falha REAL do job ficava
+  // indistinguível do caminho feliz. Andamento é resposta, não erro.
   const r = await get('/api/sprite-lab/0000000000000000');
-  assert.equal(r.status, 404, `hash desconhecido deveria dar 404, veio ${r.status}`);
-  assert.match(String(r.json['error']), /ainda não está pronto/);
+  assert.equal(r.status, 200, `estado do lote é 200, veio ${r.status}`);
+  assert.equal(r.json['status'], 'desconhecido', 'sem manifesto e sem job = desconhecido');
+  assert.match(String(r.json['error']), /reiniciado|não há resultado/);
 
+  // Hash malformado é o ÚNICO 404 que sobra aqui, e significa mesmo
+  // "recurso inexistente" (barreira de path traversal no manifesto).
   const malformed = await get('/api/sprite-lab/zzz');
   assert.equal(malformed.status, 404, 'hash fora do formato hex-16 é 404, não path traversal');
+});
+
+test('sprite-lab GET: job em andamento → 200 {status:"gerando"}; job falho → 200 {status:"falhou"}', async () => {
+  const r = await post('/api/sprite-lab', {
+    description: 'andamento nomeado de teste',
+    size: 64,
+    outputs: 1,
+  });
+  assert.equal(r.status, 202);
+  const hash = String(r.json['hash']);
+  const key = String(r.json['key']);
+
+  // Sem PIXELLAB_SECRET o job falha rápido; antes disso ele está 'gerando'.
+  // Aceitar os dois é o correto: a corrida é real e nenhum dos dois é 404.
+  const first = await get(`/api/sprite-lab/${hash}`);
+  assert.equal(first.status, 200);
+  assert.ok(
+    first.json['status'] === 'gerando' || first.json['status'] === 'falhou',
+    `estado inesperado: ${JSON.stringify(first.json)}`,
+  );
+
+  for (let i = 0; i < 100; i += 1) {
+    const res = mockRes();
+    await handle(mockReq('GET', '/api/studio'), res as unknown as ServerResponse);
+    const jobs = (JSON.parse(res.body) as { jobs: Record<string, { status: string }> }).jobs;
+    if (jobs[key]?.status === 'falhou') break;
+    await sleep(20);
+  }
+
+  const failed = await get(`/api/sprite-lab/${hash}`);
+  assert.equal(failed.status, 200, 'falha do job também é 200 com status nomeado');
+  assert.equal(failed.json['status'], 'falhou');
+  assert.match(String(failed.json['error']), /PIXELLAB_SECRET/);
 });
 
 // ------------------------------------------------------------------ wizard: import/export de bundle

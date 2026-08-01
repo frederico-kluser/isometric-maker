@@ -46,6 +46,7 @@ import {
   type BudgetReport, type CostEstimate,
 } from '../../pixellab-pipeline/src/cost.ts';
 import { trackSpend } from './estimate.ts';
+import { waitForCharacterRotations } from './character-detail.ts';
 import { parseAndWriteFrames } from './frames.ts';
 import {
   DETAIL_OPTIONS, OUTLINE_OPTIONS, TEMPLATE_OPTIONS, VIEW_OPTIONS,
@@ -82,6 +83,13 @@ export interface SpriteLabCandidate {
   readonly index: number;
   /** Seed efetiva deste candidato (base + index). */
   readonly seed: number;
+  /**
+   * character_id da PixelLab. É o ÚNICO caminho de volta ao artefato pago —
+   * sem ele, uma geração cobrada cujo download falhou vira dinheiro perdido
+   * (foi o que aconteceu em 2026-08-01). Ausente num hit de cache antigo,
+   * gravado no manifesto a partir daqui.
+   */
+  readonly characterId?: string;
   /** Frame `south` extraído da resposta, b64 puro (sem prefixo data URI). */
   readonly southB64: string;
   /** Usage cru da submissão. Ausente num hit de cache (não houve chamada). */
@@ -337,6 +345,8 @@ interface SpriteLabManifest {
   readonly candidates: ReadonlyArray<{
     readonly index: number;
     readonly seed: number;
+    /** Ver SpriteLabCandidate.characterId — o caminho de volta ao artefato pago. */
+    readonly characterId?: string;
     readonly usage?: SpriteLabCandidate['usage'];
   }>;
 }
@@ -369,6 +379,7 @@ export async function readSpriteLabResult(
       index: c.index,
       seed: c.seed,
       southB64: (await readFile(png)).toString('base64'),
+      ...(c.characterId ? { characterId: c.characterId } : {}),
       ...(c.usage ? { usage: c.usage } : {}),
     });
   }
@@ -481,6 +492,11 @@ export async function runSpriteLab(
       lab: true,
       hash,
       index,
+      // character_id e job_id no ledger: o artefato pago sobrevive a qualquer
+      // falha posterior de download. Sem eles, as 14 submissões de
+      // 2026-08-01 ficaram irrecuperáveis a partir do ledger.
+      characterId: res.data?.character_id ?? null,
+      jobId: res.data?.background_job_id ?? null,
       usd: usage?.usd ?? null,
       generations: usage?.generations ?? null,
       unit: usage?.type ?? 'unknown',
@@ -490,6 +506,8 @@ export async function runSpriteLab(
 
     const jobId = res.data?.background_job_id;
     if (!jobId) throw new Error('a API não devolveu background_job_id');
+    const characterId = res.data?.character_id;
+    if (!characterId) throw new Error('a API não devolveu character_id');
 
     const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
     if (!polled.ok) {
@@ -498,12 +516,17 @@ export async function runSpriteLab(
       );
     }
 
-    const response = polled.job.last_response ?? polled.job;
+    // O job concluído da v3 traz SÓ metadado — os pixels moram em
+    // GET /characters/{id}.rotation_urls (ver server/character-detail.ts).
+    // Ler o last_response direto aqui era o bug: 14 submissões pagas, zero PNG.
+    const detail = await waitForCharacterRotations(client, characterId, {
+      onLog: opts.onLog,
+    });
 
     // Extrair frames POR CHAVE, nunca por índice. parseAndWriteFrames grava os
     // PNGs em disco ANTES de qualquer pós-processamento — a cobrança já aconteceu.
     const { frames } = await parseAndWriteFrames(
-      response,
+      detail,
       'sprite-lab',
       `${hash}-cand${index}`,
       opts.assetsDir,
@@ -516,6 +539,7 @@ export async function runSpriteLab(
     return {
       index,
       seed,
+      characterId,
       southB64: (await readFile(pngPath)).toString('base64'),
       ...(usage
         ? {
@@ -546,6 +570,7 @@ export async function runSpriteLab(
       candidates: candidates.map((c) => ({
         index: c.index,
         seed: c.seed,
+        ...(c.characterId ? { characterId: c.characterId } : {}),
         ...(c.usage ? { usage: c.usage } : {}),
       })),
     };

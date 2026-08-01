@@ -33,6 +33,11 @@ import { randomBytes } from 'node:crypto';
 import { PixelLabClient, type ApiResult } from '../../pixellab-pipeline/src/api.ts';
 import { DIRECTIONS, type Direction } from './model.ts';
 import {
+  waitForCharacterRotations,
+  CharacterFailedError,
+  CharacterTimeoutError,
+} from './character-detail.ts';
+import {
   runSpriteLab,
   readSpriteLabResult,
   SpriteLabValidationError,
@@ -91,6 +96,43 @@ const PNG_BY_DIRECTION: Record<Direction, string> = Object.fromEntries(
 /** Referência de upload (não é nenhuma das direções). */
 const REF_B64 = makePNG(8, 8, 99).toString('base64');
 
+// ------------------------------------------------------------------ storage falso
+
+/**
+ * Host fictício das rotation_urls. O fake precisa servir HTTP de verdade
+ * porque é assim que a API real entrega os pixels do create-character-v3:
+ * `GET /characters/{id}` devolve URLs, não base64. Um fake que devolvesse
+ * base64 aqui é justamente o que deixou o bug de 2026-08-01 passar por 76
+ * testes verdes — a suíte modelava uma resposta que a API nunca produziu.
+ */
+const FAKE_HOST = 'https://storage.fake-pixellab.test';
+
+function rotationUrl(characterId: string, dir: Direction): string {
+  return `${FAKE_HOST}/${characterId}/${dir}.png`;
+}
+
+const realFetch = globalThis.fetch;
+
+/** Serve os PNGs das rotation_urls; qualquer outra URL cai no fetch real. */
+function installFakeStorage(): void {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.startsWith(FAKE_HOST)) {
+      const dir = url.slice(url.lastIndexOf('/') + 1).replace(/\.png$/, '') as Direction;
+      const b64 = PNG_BY_DIRECTION[dir];
+      if (b64 === undefined) return new Response('não encontrado', { status: 404 });
+      return new Response(Buffer.from(b64, 'base64'), { status: 200 });
+    }
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+}
+
+function restoreFetch(): void {
+  globalThis.fetch = realFetch;
+}
+
+installFakeStorage();
+
 // ------------------------------------------------------------------ client falso
 
 class FakeClient extends PixelLabClient {
@@ -104,6 +146,17 @@ class FakeClient extends PixelLabClient {
   includeEnhance = false;
   /** Simula resposta quebrada: rotation_urls sem a chave south. */
   omitSouth = false;
+  /**
+   * Quantas sondagens de GET /characters/{id} respondem 'pending' antes de
+   * virar 'completed'. Reproduz a janela real entre o job concluir e as
+   * rotation_urls existirem (o spec avisa que elas são null fora de
+   * 'completed').
+   */
+  pendingReads = 0;
+  /** Força o status do CharacterDetail (ex.: 'failed'). */
+  characterStatus: string | undefined;
+  /** Sondagens de GET /characters/{id} recebidas, por character_id. */
+  readonly characterReads: string[] = [];
 
   constructor() {
     super('fake-token-for-test-only');
@@ -136,17 +189,44 @@ class FakeClient extends PixelLabClient {
 
     if (method === 'GET' && path.startsWith('/background-jobs/')) {
       const id = path.slice('/background-jobs/'.length);
-      // v3: rotation_urls keyeado por nome de direção — 8 PNGs gerados.
-      const rotation: Record<string, string[]> = {};
-      for (const d of DIRECTIONS) {
-        if (this.omitSouth && d === 'south') continue;
-        rotation[d] = [PNG_BY_DIRECTION[d]];
-      }
+      // Formato REAL do job concluído do create-character-v3: metadado puro.
+      // Nenhum pixel passa por aqui — quem tem os pixels é o CharacterDetail.
       return this.ok<T>({
         id,
         status: 'completed',
         created_at: '2026-08-01T00:00:00Z',
-        last_response: { rotation_urls: rotation },
+        last_response: {
+          character_id: id.replace(/^job-/, 'char-'),
+          directions_count: 8,
+          directions_type: '8-directions',
+          saved_to_storage: true,
+          uploaded_directions: [...DIRECTIONS],
+        },
+      });
+    }
+
+    if (method === 'GET' && path.startsWith('/characters/')) {
+      const id = decodeURIComponent(path.slice('/characters/'.length));
+      this.characterReads.push(id);
+      if (this.characterStatus !== undefined) {
+        return this.ok<T>({ id, status: this.characterStatus, rotation_urls: null });
+      }
+      // Janela real: 'pending' com rotation_urls null enquanto o upload dos
+      // frames e o esqueleto 3D não terminam.
+      if (this.characterReads.filter((c) => c === id).length <= this.pendingReads) {
+        return this.ok<T>({ id, status: 'pending', directions: 8, rotation_urls: null });
+      }
+      const rotation: Record<string, string> = {};
+      for (const d of DIRECTIONS) {
+        if (this.omitSouth && d === 'south') continue;
+        rotation[d] = rotationUrl(id, d);
+      }
+      return this.ok<T>({
+        id,
+        status: 'completed',
+        directions: 8,
+        size: { width: 64, height: 64 },
+        rotation_urls: rotation,
       });
     }
 
@@ -693,5 +773,140 @@ test('readSpriteLabResult — null quando um PNG do manifesto sumiu', async () =
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------- regressão: o caminho dos pixels da v3
+
+/**
+ * Os quatro testes abaixo cobrem o bug de 2026-08-01: 14 submissões pagas de
+ * create-character-v3 e ZERO PNG em disco, com a suíte inteira verde.
+ *
+ * A causa foi ler os frames do `last_response` do background job. O job da v3
+ * carrega só metadado; os pixels moram em `GET /characters/{id}.rotation_urls`,
+ * como URLs. O fake antigo devolvia base64 dentro do job — uma resposta que a
+ * API real nunca produziu —, então o teste confirmava a fantasia e não o
+ * contrato.
+ */
+
+test('regressão v3: os frames vêm de GET /characters/{id}, não do background job', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    await runSpriteLab(client, { ...baseConfig(), seed: 7 }, opts(dir));
+
+    assert.deepEqual(
+      client.characterReads,
+      ['char-7'],
+      'o CharacterDetail é o único lugar onde a v3 entrega pixels — ele TEM que ser lido',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('regressão v3: espera as rotation_urls aparecerem quando o personagem ainda está pending', async () => {
+  const client = new FakeClient();
+  // Duas leituras 'pending' antes de completar: é a janela real entre o job
+  // concluir e o upload dos frames + esqueleto 3D terminarem. O spec avisa
+  // que rotation_urls é null fora de status 'completed'.
+  client.pendingReads = 2;
+
+  const detail = await waitForCharacterRotations(client, 'char-7', { intervalMs: 5 });
+
+  assert.equal(client.characterReads.length, 3, 'duas sondagens pending + a que completou');
+  assert.equal(detail.status, 'completed');
+  assert.equal(Object.keys(detail.rotation_urls ?? {}).length, 8);
+});
+
+test('regressão v3: personagem com status failed → erro nomeado, sem espera inútil', async () => {
+  const client = new FakeClient();
+  client.characterStatus = 'failed';
+  await assert.rejects(
+    waitForCharacterRotations(client, 'char-7', { intervalMs: 5, timeoutMs: 200 }),
+    (err: unknown) => {
+      assert.ok(err instanceof CharacterFailedError, `esperava CharacterFailedError, veio ${String(err)}`);
+      assert.equal(err.characterId, 'char-7');
+      return true;
+    },
+  );
+  assert.equal(client.characterReads.length, 1, 'falha é terminal — não se sonda de novo');
+});
+
+test('regressão v3: rotation_urls que nunca aparecem → timeout que diz onde está o artefato pago', async () => {
+  const client = new FakeClient();
+  client.pendingReads = Number.POSITIVE_INFINITY;
+  await assert.rejects(
+    waitForCharacterRotations(client, 'char-7', { intervalMs: 5, timeoutMs: 30 }),
+    (err: unknown) => {
+      assert.ok(err instanceof CharacterTimeoutError, `esperava CharacterTimeoutError, veio ${String(err)}`);
+      // A mensagem tem que dizer que o dinheiro não sumiu — é o ponto do erro.
+      assert.match(err.message, /paga|pago/);
+      return true;
+    },
+  );
+});
+
+test('regressão v3: character_id vai ao ledger E ao manifesto (caminho de volta ao artefato pago)', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const result = await runSpriteLab(client, { ...baseConfig(), seed: 7, outputs: 2 }, opts(dir));
+
+    // Ledger: sem character_id, uma geração cobrada cujo download falhou é
+    // irrecuperável a partir do histórico — foi exatamente o que aconteceu.
+    const lab = readLedger(dir).filter((l) => l['lab'] === true);
+    assert.equal(lab.length, 2);
+    assert.deepEqual(
+      lab.map((l) => l['characterId']).sort(),
+      ['char-7', 'char-8'],
+      'toda linha de ledger paga tem que carregar o character_id',
+    );
+    for (const l of lab) {
+      assert.ok(typeof l['jobId'] === 'string' && l['jobId'].length > 0, 'jobId no ledger');
+    }
+
+    // Manifesto: o mesmo caminho de volta sobrevive ao reinício do servidor.
+    assert.deepEqual(
+      result.candidates.map((c) => c.characterId),
+      ['char-7', 'char-8'],
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(dir, 'assets', 'sprite-lab', `${result.hash}.json`), 'utf-8'),
+    ) as { candidates: Array<Record<string, unknown>> };
+    assert.deepEqual(
+      manifest.candidates.map((c) => c['characterId']),
+      ['char-7', 'char-8'],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('regressão v3: as 8 direções são gravadas, não só a sul', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const result = await runSpriteLab(client, { ...baseConfig(), seed: 7 }, opts(dir));
+
+    const candDir = join(dir, 'assets', 'sprite-lab', `${result.hash}-cand0`);
+    for (const d of DIRECTIONS) {
+      assert.ok(
+        existsSync(join(candDir, `${d}-00.png`)),
+        `direção ${d} tem que estar em disco — o endpoint SEMPRE produz as 8 e a bancada as guarda`,
+      );
+    }
+    // E o conteúdo é o da direção certa: prova de que a leitura foi por CHAVE.
+    assert.equal(
+      readFileSync(join(candDir, 'south-00.png')).toString('base64'),
+      PNG_BY_DIRECTION['south'],
+    );
+    assert.equal(
+      readFileSync(join(candDir, 'north-00.png')).toString('base64'),
+      PNG_BY_DIRECTION['north'],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    restoreFetch();
   }
 });

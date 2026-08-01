@@ -200,3 +200,70 @@ test('payload sem rotation_urls → erro', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ------------------------------------------------- rotation_urls como URLs (CharacterDetail)
+
+/**
+ * Regressão de 2026-08-01. A MESMA chave `rotation_urls` carrega duas formas:
+ * os endpoints de rotação devolvem listas base64, e o CharacterDetail
+ * (GET /characters/{id}, o único lugar onde o create-character-v3 entrega
+ * pixels) devolve URLs. Ler pela forma dos VALORES é o que impede o caminho da
+ * v3 de cair no ramo do base64 e sair com zero frames.
+ */
+
+const URL_HOST = 'https://storage.fake-frames.test';
+const PNG_1X1 = Buffer.from(fakePng('x'), 'base64');
+const realFetch = globalThis.fetch;
+
+test('rotation_urls com valores STRING http → baixa cada direção e grava o PNG', async () => {
+  const dir = tmpDir();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.startsWith(URL_HOST)) return new Response(PNG_1X1, { status: 200 });
+    return new Response('não encontrado', { status: 404 });
+  }) as typeof globalThis.fetch;
+  try {
+    const rotation_urls: Record<string, string> = {};
+    for (const d of DIRECTIONS) rotation_urls[d] = `${URL_HOST}/${d}.png`;
+
+    const result = await parseAndWriteFrames(
+      { id: 'char-1', status: 'completed', directions: 8, rotation_urls },
+      'test',
+      'urls',
+      dir,
+    );
+
+    assert.equal(Object.keys(result.frames).length, 8, 'as 8 direções gravadas');
+    for (const d of DIRECTIONS) {
+      const path = join(dir, 'test', 'urls', `${d}-00.png`);
+      assert.ok(existsSync(path), `${d} tem que existir em disco`);
+      assert.deepEqual(readFileSync(path), PNG_1X1, `${d} tem que ser o PNG baixado`);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rotation_urls como URLs faltando uma direção → MissingDirectionError', async () => {
+  const dir = tmpDir();
+  globalThis.fetch = (async () => new Response(PNG_1X1, { status: 200 })) as typeof globalThis.fetch;
+  try {
+    const rotation_urls: Record<string, string> = {};
+    for (const d of DIRECTIONS) {
+      if (d === 'south') continue;
+      rotation_urls[d] = `${URL_HOST}/${d}.png`;
+    }
+    await assert.rejects(
+      parseAndWriteFrames({ rotation_urls }, 'test', 'urls-missing', dir),
+      (err: unknown) => {
+        assert.ok(err instanceof MissingDirectionError);
+        assert.equal(err.direction, 'south');
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -74,11 +74,22 @@ export function useStudio(pollMs = 3000): StudioState {
 		void refresh();
 	}, [refresh]);
 
+	// Sondagem INCONDICIONAL — e isso é uma correção, não desleixo.
+	//
+	// A versão anterior só ligava o intervalo quando `busy` já era true, e
+	// `busy` sai do próprio snapshot. Um job que nasce DEPOIS da montagem
+	// nunca aparecia: sem sondagem não chega snapshot novo, sem snapshot novo
+	// `busy` fica false, e sem `busy` não liga a sondagem. O Sprite Studio
+	// ficava sondando o resultado para sempre porque a falha do job existia no
+	// servidor e jamais chegava à tela.
+	//
+	// O custo de sondar sempre é um GET local a cada 3 s numa ferramenta de
+	// usuário único. O custo de não sondar foi uma tela travada em cima de
+	// geração já paga.
 	useEffect(() => {
-		if (!busy) return;
 		timer.current = window.setInterval(() => void refresh(), pollMs);
 		return () => window.clearInterval(timer.current);
-	}, [busy, pollMs, refresh]);
+	}, [pollMs, refresh]);
 
 	return { studio, refresh, busy, error };
 }

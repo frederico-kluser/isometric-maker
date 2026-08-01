@@ -50,6 +50,8 @@ import {
   type BudgetReport, type CostEstimate,
 } from '../../pixellab-pipeline/src/cost.ts';
 import { trackSpend } from './estimate.ts';
+import { asBase64Image, extractBase64, stripDataUri } from './base64-image.ts';
+import { waitForCharacterRotations } from './character-detail.ts';
 import { parseAndWriteFrames } from './frames.ts';
 // verifyFreezing removido com migração para v3 — o endpoint não tem mapa directions.
 
@@ -141,24 +143,6 @@ async function readB64(path: string, label: string): Promise<string> {
 }
 
 /** Extrai b64 puro de uma imagem que pode vir como string ou objeto {type, base64}. */
-function extractBase64(image: unknown): string {
-  if (typeof image === 'string') return image.replace(/^data:image\/\w+;base64,/, '');
-  if (image && typeof image === 'object' && 'base64' in image) {
-    const b = (image as Record<string, unknown>)['base64'];
-    if (typeof b === 'string') return b;
-  }
-  return '';
-}
-
-/** Envolve b64 puro no formato de objeto que a API espera (>= 2026-08). */
-function asBase64Image(raw: string): { type: 'base64'; base64: string } {
-  return { type: 'base64', base64: raw };
-}
-
-/** @deprecated use extractBase64 */
-function stripDataUri(b64: string): string {
-  return b64.replace(/^data:image\/\w+;base64,/, '');
-}
 
 function appendLedger(path: string, line: Record<string, unknown>): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -769,22 +753,26 @@ export async function generateDirections8(
   // O dinheiro sai na submissão: tracking, ledger e remoteId ANTES do poll.
   if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
   const usage = res.usage;
+  // Persistir character_id IMEDIATAMENTE — é o único caminho de volta ao artefato.
+  const remoteId = res.data?.character_id;
+  const jobId = res.data?.background_job_id;
   appendLedger(opts.ledgerPath, {
     at: new Date().toISOString(),
     characterId,
     endpoint: 'create-character-v3',
+    // Identificadores remotos no ledger: sem eles, uma geração cobrada cujo
+    // download falhou é irrecuperável a partir do histórico.
+    remoteId: remoteId ?? null,
+    jobId: jobId ?? null,
     usd: usage?.usd ?? null,
     generations: usage?.generations ?? null,
     unit: usage?.type ?? 'unknown',
   });
 
-  // Persistir character_id IMEDIATAMENTE — é o único caminho de volta ao artefato.
-  const remoteId = res.data?.character_id;
   if (remoteId) {
     ch.remoteId = remoteId;
     await store.save(s);
   }
-  const jobId = res.data?.background_job_id;
   if (!jobId) throw new Error('a API não devolveu background_job_id');
 
   const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
@@ -794,13 +782,19 @@ export async function generateDirections8(
     );
   }
 
-  const response = polled.job.last_response ?? polled.job;
+  if (!remoteId) throw new Error('a API não devolveu character_id');
 
   // v3 não tem mapa directions — sem prova de congelamento.
 
+  // O job concluído da v3 traz só metadado; os pixels moram em
+  // GET /characters/{id}.rotation_urls (ver server/character-detail.ts).
+  const detail = await waitForCharacterRotations(client, remoteId, {
+    onLog: opts.onLog,
+  });
+
   // Extrair frames POR CHAVE, nunca por índice.
   const { frames, hasSkeletons } = await parseAndWriteFrames(
-    response,
+    detail,
     'wizard',
     dKey,
     opts.assetsDir,

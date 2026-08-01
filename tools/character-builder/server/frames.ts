@@ -48,6 +48,24 @@ export interface FramesResult {
   readonly hasSkeletons: boolean;
 }
 
+// ------------------------------------------------------------------ formas do payload
+
+/**
+ * true quando o dicionário mapeia direção → URL (string http), e não
+ * direção → lista de frames base64.
+ *
+ * A distinção existe porque a MESMA chave `rotation_urls` carrega as duas
+ * formas em endpoints diferentes: os de rotação devolvem listas base64, e o
+ * CharacterDetail (GET /characters/{id}) devolve URLs. Ler pela forma dos
+ * valores é o que impede o caminho do v3 de cair no ramo do base64 e sair
+ * com zero frames — que foi exatamente o bug do Sprite Studio.
+ */
+function isUrlMap(dict: Record<string, unknown>): boolean {
+  const values = Object.values(dict).filter((v) => v !== null && v !== undefined);
+  if (values.length === 0) return false;
+  return values.every((v) => typeof v === 'string' && /^https?:\/\//i.test(v));
+}
+
 // ------------------------------------------------------------------ parsing
 
 /**
@@ -118,11 +136,17 @@ export async function parseAndWriteFrames(
 
   const frames: Record<string, string[]> = {};
 
-  // Prefer storage_urls: downloadable PNG URLs.
+  // Prefer downloadable PNG URLs. Duas formas na mesma API:
+  //   - `storage_urls`: dicionário direção → URL (endpoints de rotação);
+  //   - `rotation_urls` com VALORES STRING: é o formato do CharacterDetail
+  //     (GET /characters/{id}), o único lugar onde o create-character-v3
+  //     devolve pixels. O background job da v3 traz só metadados.
   const storageUrls = obj['storage_urls'] as Record<string, string> | undefined;
-  if (storageUrls) {
+  const urlMap =
+    storageUrls ?? (isUrlMap(rotationUrls) ? (rotationUrls as Record<string, string>) : undefined);
+  if (urlMap) {
     for (const dir of DIRECTIONS) {
-      const url = storageUrls[dir];
+      const url = urlMap[dir];
       if (!url) throw new MissingDirectionError(dir);
       const response = await fetch(url);
       if (!response.ok) throw new Error(`download ${dir} falhou: HTTP ${response.status}`);
