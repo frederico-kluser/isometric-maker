@@ -31,41 +31,21 @@
       "id": "manequim",
       "label": "Manequim base",
       "silhouette": "humano-medio",
-      "description": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
+      "description": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
       "size": 128,
       "seed": 1,
       "wizard": {
         "etapa": "pronto",
         "southVersions": [
           {
-            "prompt": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
-            "at": "2026-07-31T23:21:51.909Z"
+            "prompt": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
+            "at": "2026-07-31T23:56:15.212Z"
           }
         ],
         "activeSouth": 0
       },
       "createdAt": "2026-07-31T14:21:41.226Z",
-      "remoteId": "0855b5fa-b42e-4a68-90dd-a1ce3fccaaca"
-    },
-    {
-      "id": "modelo",
-      "label": "modelo",
-      "description": "ragnarok 2002 style",
-      "silhouette": "humano-medio",
-      "size": 64,
-      "seed": 70774,
-      "wizard": {
-        "etapa": "direcoes8",
-        "southVersions": [
-          {
-            "prompt": "ragnarok 2002 style",
-            "at": "2026-07-31T21:50:41.337Z"
-          }
-        ],
-        "activeSouth": 0
-      },
-      "createdAt": "2026-07-31T21:50:05.959Z",
-      "remoteId": "3ec44875-dfc7-4e02-adff-c345b0481fb1"
+      "remoteId": "f3150b7f-3d1c-4e74-a608-ab046dbfd7fd"
     }
   ],
   "poses": [
@@ -122,46 +102,6 @@
   ],
   "wardrobe": [],
   "cells": {
-    "modelo::__south__": {
-      "key": "modelo::__south__",
-      "status": "pronto",
-      "frames": {
-        "south": [
-          "/assets/wizard/modelo/south-v0.png"
-        ]
-      },
-      "updatedAt": "2026-07-31T21:50:41.337Z"
-    },
-    "modelo::__cardinal-east__": {
-      "key": "modelo::__cardinal-east__",
-      "status": "pronto",
-      "frames": {
-        "east": [
-          "/assets/wizard/modelo/cardinal-east.png"
-        ]
-      },
-      "updatedAt": "2026-07-31T21:51:11.477Z"
-    },
-    "modelo::__cardinal-north__": {
-      "key": "modelo::__cardinal-north__",
-      "status": "pronto",
-      "frames": {
-        "north": [
-          "/assets/wizard/modelo/cardinal-north.png"
-        ]
-      },
-      "updatedAt": "2026-07-31T21:51:19.404Z"
-    },
-    "modelo::__cardinal-west__": {
-      "key": "modelo::__cardinal-west__",
-      "status": "pronto",
-      "frames": {
-        "west": [
-          "/assets/wizard/modelo/cardinal-west.png"
-        ]
-      },
-      "updatedAt": "2026-07-31T21:51:32.960Z"
-    },
     "manequim::__south__": {
       "key": "manequim::__south__",
       "status": "pronto",
@@ -170,7 +110,7 @@
           "/assets/wizard/manequim/south-v0.png"
         ]
       },
-      "updatedAt": "2026-07-31T23:21:51.909Z"
+      "updatedAt": "2026-07-31T23:56:15.213Z"
     },
     "manequim::__cardinal-north__": {
       "key": "manequim::__cardinal-north__",
@@ -180,7 +120,7 @@
           "/assets/wizard/manequim/cardinal-north.png"
         ]
       },
-      "updatedAt": "2026-07-31T23:22:34.146Z"
+      "updatedAt": "2026-07-31T23:56:24.333Z"
     },
     "manequim::__cardinal-east__": {
       "key": "manequim::__cardinal-east__",
@@ -190,7 +130,7 @@
           "/assets/wizard/manequim/cardinal-east.png"
         ]
       },
-      "updatedAt": "2026-07-31T23:22:41.151Z"
+      "updatedAt": "2026-07-31T23:56:42.440Z"
     },
     "manequim::__cardinal-west__": {
       "key": "manequim::__cardinal-west__",
@@ -200,7 +140,7 @@
           "/assets/wizard/manequim/cardinal-west.png"
         ]
       },
-      "updatedAt": "2026-07-31T23:22:53.518Z"
+      "updatedAt": "2026-07-31T23:56:53.296Z"
     },
     "manequim::__directions8__": {
       "key": "manequim::__directions8__",
@@ -231,9 +171,9 @@
           "/assets/wizard/manequim_directions8_/south-east-00.png"
         ]
       },
-      "updatedAt": "2026-07-31T23:41:48.235Z",
-      "jobId": "4b8f6b1c-d06b-4768-a18e-bea5b8d744a3",
-      "remoteId": "0855b5fa-b42e-4a68-90dd-a1ce3fccaaca"
+      "updatedAt": "2026-08-01T00:04:34.693Z",
+      "jobId": "45332e0f-e515-4f0b-aec6-a7a6103bddc5",
+      "remoteId": "f3150b7f-3d1c-4e74-a608-ab046dbfd7fd"
     }
   },
   "lock": {
@@ -241,8 +181,8 @@
     "fps": 8,
     "size": 128,
     "detail": "highly detailed",
-    "shading": "detailed shading",
+    "shading": "highly detailed shading",
     "outline": "selective outline",
-    "guidanceScale": 8
+    "guidanceScale": 15
   }
 }

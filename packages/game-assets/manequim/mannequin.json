@@ -1,13 +1,17 @@
 {
   "version": 2,
-  "description": "a bald, unclothed human mannequin base body, facing the viewer, neutral standing pose, arms slightly away from body, pixel art",
-  "size": 64,
+  "description": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
+  "size": 128,
   "seed": 1,
   "silhouette": "humano-medio",
   "lock": {
     "frameCount": 8,
     "fps": 8,
-    "size": 64
+    "size": 128,
+    "detail": "highly detailed",
+    "shading": "highly detailed shading",
+    "outline": "selective outline",
+    "guidanceScale": 15
   },
   "palette": [
     "#0d0b0e",
@@ -35,6 +39,6 @@
     "#9c7345",
     "#c79d63"
   ],
-  "remoteId": "dd098754-987b-49de-b465-929432adb85b",
-  "exportedAt": "2026-07-31T20:29:25.650Z"
+  "remoteId": "f3150b7f-3d1c-4e74-a608-ab046dbfd7fd",
+  "exportedAt": "2026-08-01T00:04:42.250Z"
 }
