@@ -26,7 +26,8 @@
 import * as THREE from 'three';
 import {
   CANONICAL_CUBE,
-  faceAtPixel,
+  columnBounds,
+  diamondRow,
   type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
 import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from '../cube.ts';
@@ -178,21 +179,40 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
 }
 
 /**
- * Extrai as 3 faces visíveis de um sprite isométrico.
+ * DEWARPA as 3 faces visíveis de um sprite isométrico para texturas quadradas
+ * (W×W), próprias para as faces de um BoxGeometry.
  *
- * Usa `faceAtPixel` do iso-core para classificar cada pixel como topo,
- * esquerda ou direita. Cada face vai para um canvas separado — pixels
- * que não pertencem à face ficam transparentes.
+ * O sprite (ex.: `faceUrls.north`, 48×53 para o CANONICAL_CUBE) já mostra o
+ * cubo em perspectiva: o topo é um losango W×H e as laterais são
+ * paralelogramos de `cubeHeight` linhas. Usar o sprite inteiro como textura de
+ * uma face do cubo 3D distorce a arte — a UV cobre o quadrado da face, não o
+ * losango. O de-warp inverte a projeção de cada face para um quadrado W×W:
  *
- * O fundo transparente do sprite original é preservado.
+ *   - **Topo**: a inversa exata da projeção 2:1 restrita ao topo é
+ *     `sx = (c − r + W) / 2`, `sy = (c + r) · H / (2W)`. A linha `r` da
+ *     textura é a reta do mundo `z = cte`; esticar cada linha do losango
+ *     isoladamente ("row stretch") cisalha a arte, porque a linha do losango
+ *     `y` é a reta `x + z = cte` — as duas só coincidem na diagonal. Com a
+ *     inversa exata, o render do cubo na vista 0 reproduz o sprite pixel a
+ *     pixel.
+ *   - **Laterais**: cada coluna de origem (0..W/2−1 para a esquerda,
+ *     W/2..W−1 para a direita) tem exatamente `cubeHeight` linhas de face,
+ *     de `sideStart(x)` a `sideEnd(x)` (`columnBounds`). As `d` linhas são
+ *     esticadas para encher as `W` linhas do quadrado, e as `W/2` colunas
+ *     preenchem as `W` colunas do destino na mesma ordem — sem espelhamento.
+ *
+ * A amostragem é nearest-neighbor (pixel art, `imageSmoothingEnabled = false`
+ * em tudo) e pixels fora da silhueta saem transparentes, como no sprite.
  */
-function extractFaceRegions(
+function dewarpFaces(
   sourceImage: HTMLImageElement,
   geom: IsoCubeGeometry,
 ): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } | null {
-  const { spriteWidth: w, spriteHeight: h } = geom;
+  const { spriteWidth: w, spriteHeight: h, tileWidth, tileHeight, cubeHeight: d } = geom;
+  const half = tileWidth / 2;
+  const out = tileWidth; // saída quadrada: W×W
 
-  // Desenha a fonte num canvas para ler pixels
+  // Fonte: desenha o sprite num canvas para ler os pixels sem reamostragem.
   const srcCanvas = document.createElement('canvas');
   srcCanvas.width = w;
   srcCanvas.height = h;
@@ -202,48 +222,72 @@ function extractFaceRegions(
   srcCtx.drawImage(sourceImage, 0, 0);
   const srcData = srcCtx.getImageData(0, 0, w, h);
 
-  // Canvas de saída — mesmo tamanho do sprite, pixels posicionados igual
-  function makeFaceCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; data: ImageData } {
+  /** Canvas de saída quadrado, via createImageData + putImageData. */
+  function makeFaceCanvas(): {
+    canvas: HTMLCanvasElement;
+    ctx: CanvasRenderingContext2D;
+    data: ImageData;
+  } {
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d')!;
+    canvas.width = out;
+    canvas.height = out;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d indisponível para de-warp de face');
     ctx.imageSmoothingEnabled = false;
-    const data = ctx.createImageData(w, h);
-    return { canvas, ctx, data };
+    return { canvas, ctx, data: ctx.createImageData(out, out) };
   }
 
+  /** Copia o pixel (sx, sy) da fonte para o destino; fora do sprite → transparente. */
+  function copyPixel(sx: number, sy: number, dst: ImageData, di: number): void {
+    const xi = Math.floor(sx);
+    const yi = Math.floor(sy);
+    if (xi < 0 || xi >= w || yi < 0 || yi >= h) return;
+    const si = (yi * w + xi) * 4;
+    dst.data[di] = srcData.data[si]!;
+    dst.data[di + 1] = srcData.data[si + 1]!;
+    dst.data[di + 2] = srcData.data[si + 2]!;
+    dst.data[di + 3] = srcData.data[si + 3]!;
+  }
+
+  // --- topo: losango (W×H) → quadrado W×W ---
   const top = makeFaceCanvas();
-  const left = makeFaceCanvas();
-  const right = makeFaceCanvas();
-
-  // Classifica cada pixel e copia para a face correspondente
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const face = faceAtPixel(x, y, geom);
-      if (face === null) continue; // pixel fora da silhueta
-
-      const si = (y * w + x) * 4;
-      const r = srcData.data[si]!;
-      const g = srcData.data[si + 1]!;
-      const b = srcData.data[si + 2]!;
-      const a = srcData.data[si + 3]!;
-
-      let dst: ImageData;
-      if (face === 'top') dst = top.data;
-      else if (face === 'left') dst = left.data;
-      else dst = right.data; // 'right'
-
-      dst.data[si] = r;
-      dst.data[si + 1] = g;
-      dst.data[si + 2] = b;
-      dst.data[si + 3] = a;
+  for (let r = 0; r < out; r++) {
+    for (let c = 0; c < out; c++) {
+      const sx = (c - r + tileWidth) / 2;
+      const sy = ((c + r) * tileHeight) / (2 * tileWidth); // = (c+r)/4 com 2:1
+      // A inversa exata cai sempre dentro do losango; o clamp defende a arte
+      // gerada que fugir um pouco do contrato de pixel (diamondRow).
+      const span = diamondRow(Math.floor(sy), geom);
+      const spanMin = span.start;
+      const spanMax = span.start + span.width - 1;
+      copyPixel(Math.min(Math.max(sx, spanMin), spanMax), sy, top.data, (r * out + c) * 4);
     }
   }
-
   top.ctx.putImageData(top.data, 0, 0);
-  left.ctx.putImageData(left.data, 0, 0);
-  right.ctx.putImageData(right.data, 0, 0);
+
+  // --- laterais: paralelogramo (W/2 × d) → quadrado W×W ---
+  // Esquerda usa as colunas 0..W/2−1; a direita é o espelho (W/2..W−1).
+  function dewarpSide(
+    side: 'left' | 'right',
+  ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; data: ImageData } {
+    const face = makeFaceCanvas();
+    const columnOf = (c: number): number => (side === 'left' ? c / 2 : half + c / 2);
+    for (let c = 0; c < out; c++) {
+      const sx = columnOf(c);
+      const b = columnBounds(Math.floor(sx), geom);
+      if (b === null) continue;
+      for (let r = 0; r < out; r++) {
+        // As `d` linhas da face na coluna viram as `W` linhas do quadrado.
+        const sy = b.sideStart + (r * d) / out;
+        copyPixel(sx, sy, face.data, (r * out + c) * 4);
+      }
+    }
+    face.ctx.putImageData(face.data, 0, 0);
+    return face;
+  }
+
+  const left = dewarpSide('left');
+  const right = dewarpSide('right');
 
   return { top: top.canvas, left: left.canvas, right: right.canvas };
 }
@@ -258,8 +302,9 @@ async function extractFacesFromUrl(
 ): Promise<{ top: THREE.Texture; left: THREE.Texture; right: THREE.Texture } | null> {
   const img = await loadImage(url);
   if (!img) return null;
-  const faces = extractFaceRegions(img, geom);
+  const faces = dewarpFaces(img, geom);
   if (!faces) return null;
+  // canvasTexture para todas as texturas extraídas: nearest, sem mipmaps, sRGB.
   return {
     top: canvasTexture(faces.top),
     left: canvasTexture(faces.left),
@@ -272,24 +317,34 @@ async function extractFacesFromUrl(
 /**
  * Cria os 6 materiais a partir das 3 faces extraídas de UM sprite.
  *
- * O sprite mostra o cubo de um ângulo (ex: norte). As faces "right" e "left"
- * do sprite correspondem a faces físicas diferentes do cubo conforme a
- * câmera gira. Esta função recebe a rotação e remapeia as texturas.
+ * O sprite "north" é a vista sul do cubo (ADR 0029: "north → south é fixo"),
+ * desenhada na projeção 2:1: a metade direita do sprite é a face SE do cubo
+ * e a metade esquerda é a face SW. No Three.js, o eixo x do mapa vira +X e o
+ * eixo y do mapa vira +Z (`scene3d.ts`), e a câmera na rotação 0 está ao sul
+ * (posição +X, +Z) — vê exatamente as faces +X (à direita) e +Z (à esquerda).
+ * Logo:
  *
- * Mapeamento por rotação:
+ *   sprite 'right' (face SE) → BoxGeometry +X (índice 0)
+ *   sprite 'left'  (face SW) → BoxGeometry +Z (índice 4)
+ *   sprite 'top'   (topo)    → BoxGeometry +Y (índice 2)
  *
- *   Rot 0 (sul):  top→+Y,  right→+X (leste),  left→-Z (norte)
- *   Rot 1 (leste): top→+Y,  right→+Z (sul),   left→+X (leste)
- *   Rot 2 (norte): top→+Y,  right→-X (oeste), left→+Z (sul)
- *   Rot 3 (oeste): top→+Y,  right→-Z (norte), left→-X (oeste)
+ * O cubo do mapa NÃO gira — só a câmera orbita (`setCameraRotation`), e o
+ * `createCubeMaterials` usa sempre o sprite "north". Por isso as texturas
+ * ficam PRESAS a essas três faces para qualquer rotação, e as faces −X, −Z e
+ * −Y (sem arte neste sprite) recebem cor sólida. A remapeação por rotação que
+ * existia aqui trocava as texturas como se o MESH girasse com a câmera — como
+ * o mesh é estático, ela punha a arte na face errada (ex.: a arte SW na face
+ * +X visível na rotação 0, e a face +Z visível sem arte).
  *
- * As 3 faces restantes (-Y, e as duas não visíveis no sprite) recebem cor sólida.
+ * O parâmetro `rotation` permanece por compatibilidade de assinatura.
  */
 function materialsFromExtractedFaces(
   faces: { top: THREE.Texture; left: THREE.Texture; right: THREE.Texture },
   rotation: Rotation,
   hue: number,
 ): CubeMaterials {
+  void rotation; // o cubo não gira — as texturas são fixas às faces
+
   const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
   const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
 
@@ -299,45 +354,15 @@ function materialsFromExtractedFaces(
   const leftMat = new THREE.MeshLambertMaterial({ map: faces.left });
   const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
 
-  // Para cada rotação, as faces "right" e "left" do sprite mapeiam para
-  // faces físicas diferentes do cubo.
   // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
-  const mats: THREE.Material[] = Array.from({ length: 6 });
-
-  mats[BOX_GROUP.top] = topMat;
-  mats[BOX_GROUP.bottom] = bottomMat;
-
-  switch (rotation) {
-    case 0: // sul: right→+X, left→-Z
-      mats[BOX_GROUP.right] = rightMat;
-      mats[BOX_GROUP.left] = hidden;
-      mats[BOX_GROUP.front] = hidden;
-      mats[BOX_GROUP.back] = leftMat;
-      break;
-    case 1: // leste: right→+Z, left→+X
-      mats[BOX_GROUP.right] = leftMat;
-      mats[BOX_GROUP.left] = hidden;
-      mats[BOX_GROUP.front] = rightMat;
-      mats[BOX_GROUP.back] = hidden;
-      break;
-    case 2: // norte: right→-X, left→+Z
-      mats[BOX_GROUP.right] = hidden;
-      mats[BOX_GROUP.left] = rightMat;
-      mats[BOX_GROUP.front] = leftMat;
-      mats[BOX_GROUP.back] = hidden;
-      break;
-    case 3: // oeste: right→-Z, left→-X
-      mats[BOX_GROUP.right] = hidden;
-      mats[BOX_GROUP.left] = leftMat;
-      mats[BOX_GROUP.front] = hidden;
-      mats[BOX_GROUP.back] = rightMat;
-      break;
-  }
-
-  // Preenche os slots que ficaram undefined
-  for (let i = 0; i < 6; i++) {
-    if (!mats[i]) mats[i] = hidden;
-  }
+  const mats: THREE.Material[] = [
+    rightMat,  // +X  (right) — face SE do sprite, à direita na vista sul
+    hidden,    // −X  (left)  — sem arte no sprite "north"
+    topMat,    // +Y  (top)   — losango do topo
+    bottomMat, // −Y  (bottom)
+    leftMat,   // +Z  (front) — face SW do sprite, à esquerda na vista sul
+    hidden,    // −Z  (back)  — sem arte no sprite "north"
+  ];
 
   return { materials: mats, hasTexture: true };
 }
@@ -356,10 +381,9 @@ export async function createCubeMaterials(
 ): Promise<CubeMaterials> {
   // Face URLs (v2: 4 faces por direção) — extrai topo/esquerda/direita do sprite
   if (block.faceUrls) {
-    // Usa o sprite "north" como base. Conforme a câmera gira, usamos
-    // sprites diferentes (north→0, east→1, south→2, west→3).
-    // Para já, extraímos do north. O remapeamento por rotação é feito
-    // no scene3d.ts trocando os materiais.
+    // Usa o sprite "north" (vista sul, ADR 0029). As 3 faces dele ficam
+    // presas às faces +X/+Z/+Y do cubo; girar a câmera mostra outras faces
+    // do mesmo cubo, sem trocar os materiais (ver materialsFromExtractedFaces).
     const faces = await extractFacesFromUrl(block.faceUrls.north, CANONICAL_CUBE);
     if (faces) {
       return materialsFromExtractedFaces(faces, 0, block.hue ?? 210);
