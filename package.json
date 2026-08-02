@@ -4,6 +4,6 @@
   "private": true,
   "description": "Atalho de conveniência — o repo não tem workspace.",
   "scripts": {
-    "dev": "bash scripts/dev-all.sh"
+    "dev": "cd tools/character-builder && npm run dev"
   }
 }

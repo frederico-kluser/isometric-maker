@@ -18,7 +18,7 @@ this codebase — the boundary is marked throughout.
 
 **The decision was taken and rotation is implemented.** `packages/iso-core/src/rotation.ts` holds the
 four discrete views, `rotation-tween.ts` the tween timing, `rotation-rigid.ts` the screen-space
-affine of the turn, and `tools/map-builder` has the control. Three ADRs record it: `0021` (rotation
+affine of the turn, and `tools/character-builder/src/map` has the control. Three ADRs record it: `0021` (rotation
 as a view parameter), `0026` (the animated turn, superseded) and `0030` (the rigid composed-frame
 turn that replaced 0026's mid-turn mechanism).
 
@@ -36,7 +36,7 @@ squashes mid-turn while each unrotated sprite keeps its size: neighbours gap and
 swaps pop block by block, and the map reads as pieces sliding individually. Geometrically correct,
 visually broken — the user's words were "cada bloco roda individualmente".
 
-The current mechanism (`tools/map-builder/src/scene.ts`, ADR 0030): snapshot the source view and the
+The current mechanism (`tools/character-builder/src/map/scene.ts`, ADR 0030): snapshot the source view and the
 target view into two viewport-sized `RenderTexture`s, then move BOTH under the same screen affine
 `L(τ) = P ∘ R(τ) ∘ P⁻¹` — squash the ground plane, rotate, unsquash
 (`packages/iso-core/src/rotation-rigid.ts`) — with a cross-fade, source opaque underneath. At integer
@@ -252,7 +252,7 @@ index. The tick only fires when at least one animated block is in the palette.
 - `packages/iso-core/src/rotation-tween.ts` — tween timing, easing and the short path
 - `packages/iso-core/src/depth.ts` — the key whose `x+y` term rotation invalidates
 - `packages/iso-core/src/geometry.ts` — the projection this pre-transforms into
-- `tools/map-builder/src/scene.ts` — the cross-fade and the ticker loop, plus animated texture support
+- `tools/character-builder/src/map/scene.ts` — the cross-fade and the ticker loop, plus animated texture support
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the unrotated coordinate rules
 - `.agents/skills/composing-pixi-scene/SKILL.md` — where draw order is applied in this renderer
 - OpenRCT2, `src/openrct2/world/Location.hpp` and `src/openrct2/interface/Viewport.cpp` — rotation

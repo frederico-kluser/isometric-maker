@@ -140,11 +140,11 @@ The consequences are specific, and they matter more than the missing method name
   a rename.
 - **The edge type is invisible to the engine.** `EdgeEntry` carries a `tipo`, and the editor writes
   four values into it — `parede`, `porta`, `pilar`, `escada`
-  (`tools/map-builder/src/tools/wall.ts:23@027ac4e4`). `hasEdge` takes **no** `tipo` parameter, so
+  (`tools/character-builder/src/map/tools/wall.ts:23@027ac4e4`). `hasEdge` takes **no** `tipo` parameter, so
   the moment a naive adapter is written, **every edge blocks equally**. A door becomes a wall.
 - **Two documented behaviours therefore do not exist.** The editor states that a `porta` "permite
   passagem (não bloqueia colisão)" and that an `escada` "permite step-up independentemente da
-  altura" (`tools/map-builder/src/tools/wall.ts:10@027ac4e4`). The second one directly contradicts
+  altura" (`tools/character-builder/src/map/tools/wall.ts:10@027ac4e4`). The second one directly contradicts
   the one-level rule above. **Neither is implemented in the model** — they are intentions recorded
   at the tool layer, and the engine cannot honour them without a `tipo`-aware interface.
 

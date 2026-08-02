@@ -56,7 +56,7 @@ applied identically at every level, so stacking ten blocks is off by the same 1.
 **The square-sprite trap.** With `d = H`, moving up one level shifts the sprite by exactly as much as
 stepping back one diagonal `(x−1, y−1)` — both land on the same pixel, and "above" becomes
 indistinguishable from "behind". The canonical edge breaks the tie
-(`tools/map-builder/src/placement.test.ts`).
+(`tools/character-builder/src/map/placement.test.ts`).
 
 ## The two rules a naive implementation gets wrong
 
@@ -144,7 +144,7 @@ Setting `sprite.width` and `sprite.height` separately is two different scale fac
 texture drawn into a `tileWidth × (tileHeight + zStep)` box that was 1.333× horizontally and 1.0×
 vertically — the art's top diamond stopped being 2:1 and stopped seaming with its neighbour. Use one
 factor on both axes; when the texture is not the tile width, `tileWidth / texture.width` corrects the
-horizontal seam without deforming anything (`tools/map-builder/src/placement.ts`).
+horizontal seam without deforming anything (`tools/character-builder/src/map/placement.ts`).
 
 ## Rules
 
@@ -169,7 +169,7 @@ horizontal seam without deforming anything (`tools/map-builder/src/placement.ts`
 - `docs/03-mapa/cubo-e-molde.md` — the arithmetic and the three classic perspective bugs
 - `packages/iso-core/src/iso-cube.ts` — the cube geometry, the anchor and the impossibility proof
 - `packages/iso-core/src/geometry.ts` — projection, floor rule, the identity in general form
-- `tools/map-builder/src/placement.ts` — uniform scale and declared anchor, with tests
+- `tools/character-builder/src/map/placement.ts` — uniform scale and declared anchor, with tests
 - `packages/iso-core/src/depth.ts` — the key, the half-cell offset, the tie-break
 - `.agents/skills/editing-isometric-maps/SKILL.md` — picking, placement and the diagonal walk
 - `.agents/skills/composing-pixi-scene/SKILL.md` — how this ordering reaches the renderer
