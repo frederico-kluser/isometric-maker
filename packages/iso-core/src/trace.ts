@@ -24,10 +24,17 @@
  * torna "pular contra uma parede de dois níveis devolve o personagem ao z de
  * origem" uma asserção estável em vez de uma corrida contra o cronómetro.
  *
+ * ## O passo de lógica não vive aqui
+ *
+ * `runTrace` é um **invólucro**: o passo de lógica é `fixedStepWithMap`, em
+ * `simulate.ts`, e é a mesma função que `stepWithMap` corre num laço de quadro
+ * ao vivo. O que continua a ser deste ficheiro é a leitura de uma lista de
+ * quadros gravados e a resolução final do pulo até ao solo.
+ *
  * ## Nota de reconciliação (por fazer)
  *
  * Continuam a existir dois modelos de pulo: `movement.ts` sobe o z no
- * instante 0 e `jump.ts` troca o z a meio do progresso. Este ficheiro usa o
+ * instante 0 e `jump.ts` troca o z a meio do progresso. O passo com mapa usa o
  * de `jump.ts`, e testa a colisão em `jump.zDest` durante **todo** o pulo —
  * não em `zOrigin` durante a subida, como o comentário de `jump.ts` declara.
  * Não foi unificado de propósito: testar a subida em `zOrigin` faria o
@@ -39,24 +46,14 @@
 import {
 	createMovementState,
 	DEFAULT_CONFIG,
-	resolveGait,
-	speedFor,
-	jumpRise,
 	type MovementState,
 	type MovementInput,
 	type MovementConfig,
 } from "./movement.ts";
-import { canEnter, canCross, type CollisionMap } from "./collision.ts";
-import { stepZOnCross } from "./step-up.ts";
-import { fallStep, groundZAt, DEFAULT_FALL_SPEED } from "./gravity.ts";
-import {
-	createJump,
-	advanceJump,
-	effectiveZ,
-	isJumpComplete,
-	type JumpState,
-	NO_JUMP,
-} from "./jump.ts";
+import type { CollisionMap } from "./collision.ts";
+import { groundZAt } from "./gravity.ts";
+import { isJumpComplete, NO_JUMP } from "./jump.ts";
+import { fixedStepWithMap } from "./simulate.ts";
 
 // ------------------------------------------------------------------ tipos
 
@@ -86,93 +83,6 @@ export interface TraceResult {
 	};
 }
 
-// ------------------------------------------------------------------ movimento horizontal puro
-
-function applyHorizontal(
-	state: MovementState,
-	input: MovementInput,
-	config: MovementConfig,
-): MovementState {
-	const hasInput = input.dir.x !== 0 || input.dir.y !== 0;
-	const gait = resolveGait(input);
-	const speed = speedFor(gait, config);
-	let vel: { x: number; y: number };
-	let facing: number;
-
-	if (hasInput) {
-		const len = Math.sqrt(
-			input.dir.x * input.dir.x + input.dir.y * input.dir.y,
-		);
-		const nx = input.dir.x / len;
-		const ny = input.dir.y / len;
-		vel = { x: nx * speed, y: ny * speed };
-		facing = Math.atan2(ny, nx);
-	} else {
-		vel = { x: 0, y: 0 };
-		facing = state.facing;
-	}
-
-	return {
-		...state,
-		pos: {
-			x: state.pos.x + vel.x * config.fixedDt,
-			y: state.pos.y + vel.y * config.fixedDt,
-		},
-		vel,
-		facing,
-		gait,
-		crouching: gait === "crouch",
-	};
-}
-
-// ------------------------------------------------------------------ resolução de colisão
-
-function resolveCollision(
-	map: CollisionMap,
-	prevPos: { x: number; y: number },
-	nextState: MovementState,
-	z: number,
-	airborne: boolean,
-): { blocked: boolean; state: MovementState } {
-	const prevCellX = Math.floor(prevPos.x);
-	const prevCellY = Math.floor(prevPos.y);
-	const nextCellX = Math.floor(nextState.pos.x);
-	const nextCellY = Math.floor(nextState.pos.y);
-
-	if (prevCellX === nextCellX && prevCellY === nextCellY) {
-		return { blocked: false, state: nextState };
-	}
-
-	// Célula de destino ocupada por bloco → sempre bloqueado
-	if (map.hasBlock(nextCellX, nextCellY, z)) {
-		return {
-			blocked: true,
-			state: { ...nextState, pos: prevPos, vel: { x: 0, y: 0 } },
-		};
-	}
-
-	// Se não estiver no ar, verifica suporte (walkability completa)
-	if (!airborne && !canEnter(map, nextCellX, nextCellY, z)) {
-		return {
-			blocked: true,
-			state: { ...nextState, pos: prevPos, vel: { x: 0, y: 0 } },
-		};
-	}
-
-	// Verifica aresta
-	const fromCell = { x: prevCellX, y: prevCellY, z };
-	const toCell = { x: nextCellX, y: nextCellY, z };
-
-	if (!canCross(map, fromCell, toCell)) {
-		return {
-			blocked: true,
-			state: { ...nextState, pos: prevPos, vel: { x: 0, y: 0 } },
-		};
-	}
-
-	return { blocked: false, state: nextState };
-}
-
 // ------------------------------------------------------------------ execução
 
 export function runTrace(
@@ -184,14 +94,10 @@ export function runTrace(
 	config: MovementConfig = DEFAULT_CONFIG,
 ): TraceResult {
 	let state = createMovementState(startX, startY, startZ);
-	let jump: JumpState = NO_JUMP;
 	let totalSteps = 0;
 	let totalTime = 0;
 	let blocked = false;
 	let blockedAt: { x: number; y: number; z: number } | undefined;
-	let fallProgress = 0;
-	let falling = false;
-	const fallSpeed = config.fallSpeed ?? DEFAULT_FALL_SPEED;
 
 	for (const frame of frames) {
 		if (blocked) break;
@@ -202,105 +108,18 @@ export function runTrace(
 		while (remaining >= config.fixedDt && !blocked) {
 			remaining -= config.fixedDt;
 
-			const z = isJumpComplete(jump) ? state.z : effectiveZ(jump);
-			const cellX = Math.floor(state.pos.x);
-			const cellY = Math.floor(state.pos.y);
+			// O passo de lógica é `fixedStepWithMap` — a MESMA função que
+			// `stepWithMap` corre no laço de quadro ao vivo. O traço não tem
+			// resolução de colisão própria; se tivesse, as duas divergiriam.
+			const outcome = fixedStepWithMap(state, frame.input, config, map);
+			state = outcome.state;
 
-			let newZ = z;
-
-			// Inicia pulo — agachado não pula, e um tecto sólido também não deixa.
-			if (
-				frame.input.jump &&
-				frame.input.crouch !== true &&
-				isJumpComplete(jump)
-			) {
-				const target = newZ + jumpRise(config);
-				if (!map.hasBlock(cellX, cellY, target)) {
-					jump = createJump(newZ, target);
-				}
-			}
-
-			// Gravidade — só no chão, e sobre a célula onde o personagem está.
-			// Como o degrau já não sobe o z antecipadamente, esta avaliação e a
-			// do degrau nunca olham para células diferentes.
-			if (isJumpComplete(jump)) {
-				const fall = fallStep(
-					map,
-					cellX,
-					cellY,
-					newZ,
-					fallProgress,
-					config.fixedDt,
-					fallSpeed,
-				);
-				newZ = fall.z;
-				fallProgress = fall.fallProgress;
-				falling = fall.falling;
-			} else {
-				fallProgress = 0;
-				falling = false;
-			}
-
-			// Avança pulo
-			if (!isJumpComplete(jump)) {
-				jump = advanceJump(jump, config.fixedDt, config.jumpDuration);
-			}
-
-			// Movimento horizontal
-			const prevPos = state.pos;
-			state = applyHorizontal({ ...state, z: newZ }, frame.input, config);
-
-			// Degrau — acontece NA travessia da aresta, que é o instante em que
-			// a célula de destino passa a ser a célula do personagem.
-			const nextCellX = Math.floor(state.pos.x);
-			const nextCellY = Math.floor(state.pos.y);
-			const crossing = nextCellX !== cellX || nextCellY !== cellY;
-
-			let steppedZ = newZ;
-			if (crossing && isJumpComplete(jump) && !frame.input.jump) {
-				steppedZ = stepZOnCross(
-					map,
-					{ x: cellX, y: cellY, z: newZ },
-					nextCellX,
-					nextCellY,
-					frame.input.stepUp,
-					frame.input.stepDown,
-				);
-			}
-
-			if (steppedZ !== newZ) {
-				// `canStepUp`/`canStepDown` já validaram o destino e as arestas nos
-				// dois níveis — é por isso que o degrau não passa por `canCross`,
-				// que exigiria o destino entrável ao mesmo z. Ver `step-up.ts`.
-				state = { ...state, z: steppedZ };
-				totalSteps++;
-				continue;
-			}
-
-			// Colisão
-			// Durante o pulo, usa o z de destino para permitir pular sobre obstáculos.
-			const zForCollision = isJumpComplete(jump) ? newZ : jump.zDest;
-			const airborne = !isJumpComplete(jump);
-			const resolved = resolveCollision(
-				map,
-				prevPos,
-				state,
-				zForCollision,
-				airborne,
-			);
-
-			if (resolved.blocked) {
+			if (state.blocked) {
 				blocked = true;
-				blockedAt = {
-					x: Math.floor(prevPos.x),
-					y: Math.floor(prevPos.y),
-					z: zForCollision,
-				};
-				state = resolved.state;
+				blockedAt = outcome.blockedAt;
 				break;
 			}
 
-			state = resolved.state;
 			totalSteps++;
 		}
 	}
@@ -311,25 +130,35 @@ export function runTrace(
 	// isto, "pular contra uma parede de dois níveis devolve o personagem ao z
 	// de origem" seria uma corrida contra o cronómetro do traço.
 	//
+	// Isto é pós-processamento **do traço**, não do passo de lógica: um laço de
+	// quadro ao vivo não pode fazê-lo, porque um pulo a meio do ar no fim do
+	// quadro é precisamente um pulo que tem de continuar no quadro seguinte.
+	//
 	// Uma queda em curso NÃO é resolvida: essa o passo de lógica já trata, e
 	// esconder o meio da queda tiraria a única forma de a observar.
-	const semPuloActivo = isJumpComplete(jump);
+	const semPuloActivo = isJumpComplete(state.jump);
 	const finalZ = semPuloActivo
 		? state.z
 		: groundZAt(
 				map,
 				Math.floor(state.pos.x),
 				Math.floor(state.pos.y),
-				jump.zDest,
+				state.jump.zDest,
 			);
 
 	return {
-		finalState: {
-			...state,
-			z: finalZ,
-			falling: semPuloActivo ? falling : false,
-			fallProgress: semPuloActivo ? fallProgress : 0,
-		},
+		finalState: semPuloActivo
+			? state
+			: {
+					...state,
+					z: finalZ,
+					falling: false,
+					fallProgress: 0,
+					jump: NO_JUMP,
+					airborne: false,
+					jumpTime: 0,
+					vz: null,
+				},
 		totalSteps,
 		totalTime,
 		blocked,

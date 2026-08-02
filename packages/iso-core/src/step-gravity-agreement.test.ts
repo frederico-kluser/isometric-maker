@@ -68,6 +68,25 @@ function flatWithStep(stepX: number, stepY: number): FakeStepGravityMap {
   return map;
 }
 
+/**
+ * Chão liso com topo em z=1, e um **planalto** de topo z=2 de `fromX` para
+ * leste na linha `y = 0`.
+ *
+ * Existe porque um degrau de 1×1 deixou de ser suficiente para observar que o
+ * degrau persiste: sair da beirada agora é cair, e quem sobe a um pilar de uma
+ * célula cai dele na travessia seguinte — legitimamente. Um planalto separa as
+ * duas perguntas: "a gravidade desfaz o degrau?" (não) de "andar para fora de
+ * uma plataforma faz cair?" (sim, e é intencional).
+ */
+function flatWithPlateauEast(fromX: number): FakeStepGravityMap {
+  const map = new FakeStepGravityMap();
+  for (let x = -12; x <= 12; x++) {
+    for (let y = -12; y <= 12; y++) map.addColumn(x, y, 1);
+  }
+  for (let x = fromX; x <= 12; x++) map.addColumn(x, 0, 2);
+  return map;
+}
+
 const FALL_SPEEDS = [0, 6, 12, 60] as const;
 
 const CARDINALS: readonly (readonly [string, number, number])[] = [
@@ -85,8 +104,28 @@ const DIAGONALS: readonly (readonly [string, number, number])[] = [
 ];
 
 /**
- * Corre 3 s com `stepUp` segurado na direcção dada, contra um degrau colocado
- * a `distance` células nessa direcção. Devolve o z final e se ficou bloqueado.
+ * Corre com `stepUp` segurado na direcção dada, contra um degrau colocado a
+ * `distance` células nessa direcção, e pára **assim que o personagem chega à
+ * célula do degrau**. Devolve o z final e se ficou bloqueado.
+ *
+ * ## Por que a duração é calculada e não é uma constante
+ *
+ * Este helper corria 3 s fixos, o que levava o personagem muito para lá do
+ * degrau. Isso só dava `z = 2` no fim porque o motor **recusava sair de uma
+ * célula sem suporte**: o personagem subia para o degrau de 1×1 e ficava preso
+ * em cima dele. Medir o z depois de 3 s media, na verdade, o encalhe.
+ *
+ * Sair da beirada passou a ser uma queda, e com isso o mesmo traço de 3 s
+ * mede a **descida** do outro lado do degrau — cuja duração depende, essa sim,
+ * de `fallSpeed`. A propriedade que este ficheiro fixa (a geometria decide se
+ * um degrau é escalável, não a fase do acumulador de queda) exige portanto
+ * medir o instante da **subida**, não um instante arbitrário depois dela.
+ *
+ * A duração é o tempo exacto para o eixo em movimento percorrer `distance`
+ * células: `distance * |(dx, dy)| / speed`. Para uma cardinal isso é
+ * `distance / speed`; para uma diagonal, `distance * √2 / speed`, porque a
+ * velocidade é repartida pelos dois eixos. O personagem acaba dentro da célula
+ * do degrau e ainda não teve como sair dela.
  */
 function climb(
   dx: number,
@@ -96,7 +135,8 @@ function climb(
 ): { z: number; blocked: boolean } {
   const map = flatWithStep(dx * distance, dy * distance);
   const config: MovementConfig = { ...DEFAULT_CONFIG, fallSpeed };
-  const frames: TraceFrame[] = [{ duration: 3, input: stepUpInput(dx, dy) }];
+  const duration = (distance * Math.hypot(dx, dy)) / config.speed;
+  const frames: TraceFrame[] = [{ duration, input: stepUpInput(dx, dy) }];
   const result = runTrace(map, 0.5, 0.5, 1, frames, config);
   return { z: result.finalState.z, blocked: result.blocked };
 }
@@ -177,7 +217,11 @@ describe('o degrau persiste — não é desfeito no passo seguinte', () => {
   }
 
   it('runTrace: o z fica em 2 do momento da subida até ao fim do traço', () => {
-    const map = flatWithStep(3, 0);
+    // Planalto a partir de x=3, e não um degrau de 1×1: a partir do momento em
+    // que sair da beirada passou a ser uma queda, um pilar de uma célula não
+    // distingue "a gravidade desfez o degrau" (o defeito) de "o personagem
+    // andou para fora da plataforma" (o comportamento pedido).
+    const map = flatWithPlateauEast(3);
     const config: MovementConfig = { ...DEFAULT_CONFIG, fallSpeed: 12 };
 
     // Amostra o z ao longo do tempo em traços de duração crescente. Depois de
