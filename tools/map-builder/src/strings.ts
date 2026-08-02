@@ -53,6 +53,11 @@ export const editor = {
     atalhos: 'Clique para editar · Shift+arrastar move a câmera · Roda dá zoom · R gira · 1–4 escolhem a vista',
   },
 
+  bussola: {
+    ariaLabel: (vista: string): string => `Bússola — câmera apontando para ${vista}`,
+    titulo: (vista: string): string => `Câmera apontando para ${vista}`,
+  },
+
   toast: {
     paletaCarregada: (n: number): string =>
       n === 1
