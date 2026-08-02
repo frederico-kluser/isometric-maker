@@ -57,20 +57,12 @@ import {
   Application,
   Assets,
   Container,
-  Matrix,
-  RenderTexture,
   Sprite,
   Texture,
   TextureSource,
 } from 'pixi.js';
 import type { MapData } from '@isometric-maker/iso-core/map';
 import { rotateDirectionIndex, type Rotation } from '@isometric-maker/iso-core/rotation';
-import {
-  ROTATION_DURATION_MS,
-  sampleTween,
-  startTween,
-} from '@isometric-maker/iso-core/rotation-tween';
-import { rigidTurnMatrix } from '@isometric-maker/iso-core/rotation-rigid';
 import { CANONICAL_CUBE } from '@isometric-maker/iso-core/iso-cube';
 import {
   DEFAULT_GEOMETRY,
@@ -150,15 +142,8 @@ export interface IsoScene {
   /** Registra as peças da paleta e pré-carrega a arte das que têm PNG. */
   setPalette(blocks: readonly BlockDef[]): Promise<void>;
   render(state: SceneState): void;
-  /**
-   * Gira a câmera com animação e resolve com a câmera final.
-   *
-   * Quem chama só toca no estado UMA vez, no fim: React não reconcilia 60 vezes
-   * por segundo por causa de uma animação que vive no ticker do Pixi.
-   */
-  rotateTo(rotation: Rotation, options: RotateOptions): Promise<Camera>;
-  /** true enquanto um giro está em andamento — o cursor fica desligado. */
-  isRotating(): boolean;
+  /** Gira a câmera — imediato, sem animação. Devolve a câmera final. */
+  rotateTo(rotation: Rotation, options: RotateOptions): Camera;
   resize(width: number, height: number): void;
   destroy(): void;
 }
@@ -290,7 +275,7 @@ export async function createIsoScene(
       anyAnimating = true;
     }
     // Se há blocos animados, redesenha para mostrar o novo frame.
-    if (anyAnimating && lastState && !rotating) {
+    if (anyAnimating && lastState) {
       render(lastState);
     }
   };
@@ -539,243 +524,22 @@ export async function createIsoScene(
 
   // ------------------------------------------------------------------ giro
 
-  let rotating = false;
-
-  /**
-   * Filtro dos snapshots DURANTE o giro, e só deles. `linear` de propósito:
-   * a varredura reamostra o quadro composto de qualquer jeito, e `nearest`
-   * sobre uma afim fracionária vira serrilhado fervilhando — `linear` lê como
-   * o borrão de movimento de uma câmera real. Nos extremos os snapshots nem
-   * existem: o desenho volta ao caminho normal, `nearest`, pixel-perfeito.
-   */
-  const SNAPSHOT_SCALE_MODE = 'linear' as const;
-
-  /** Recursos vivos de um giro em andamento — para o destroy não vazar nada. */
-  let activeTurn: {
-    /** Container com todas as camadas z. */
-    readonly layer: Container;
-    /** Um par (A=origem, B=destino) por nível z. */
-    readonly pairs: Array<{
-      readonly spriteA: Sprite;
-      readonly spriteB: Sprite;
-      readonly rtA: RenderTexture;
-      readonly rtB: RenderTexture;
-    }>;
-    readonly tick: () => void;
-  } | null = null;
-
-  const disposeTurn = (): void => {
-    if (!activeTurn) return;
-    app.ticker.remove(activeTurn.tick);
-    activeTurn.layer.destroy({ children: true });
-    for (const p of activeTurn.pairs) {
-      p.rtA.destroy(true);
-      p.rtB.destroy(true);
-    }
-    activeTurn = null;
-    world.visible = true;
-    rotating = false;
-  };
-
-  /** Maior z com blocos no mapa (0 se vazio). */
-  const maxZ = (map: MapData): number => {
-    let top = 0;
-    for (const runs of Object.values(map.blocks)) {
-      let z = 0;
-      for (const run of runs) {
-        z += run.count;
-      }
-      top = Math.max(top, z - 1);
-    }
-    return top;
-  };
-
-  /**
-   * Fotografa só os blocos do nível z (e a malha só no z = 0).
-   *
-   * A separação por z é o que permite a correção de altura durante o giro:
-   * a matriz afim `L(τ)` é exata para o chão mas achata o offset vertical
-   * `-z·zStep` como se fosse parte do plano — blocos altos "tombam" no meio
-   * da varredura. Com um snapshot por nível, cada um recebe a mesma afim E
-   * uma translação vertical que desfaz o achate: `(d(τ) − 1)·z·zStep·zoom`.
-   */
-  const snapshotZ = (rt: RenderTexture, map: MapData, camera: Camera, z: number): void => {
-    gridPool.reset();
-    blockPool.reset();
-
-    const vista = camera.rotation;
-
-    // --- malha (só no chão) ---
-    if (z === 0) {
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      for (const key of Object.keys(map.blocks)) {
-        const [xs, ys] = key.split(':');
-        const x = Number(xs);
-        const y = Number(ys);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y);
-      }
-      if (!Number.isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
-      for (let x = minX - gridMargin; x <= maxX + gridMargin; x += 1) {
-        for (let y = minY - gridMargin; y <= maxY + gridMargin; y += 1) {
-          const p = cellToScreen({ x, y, z: 0 }, camera, geom);
-          place(gridPool.take(), gridTexture, p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
-        }
-      }
-    }
-
-    // --- blocos deste nível z ---
-    const items: Array<{ cell: Cell3D; block: string; key: number }> = [];
-    for (const [key, runs] of Object.entries(map.blocks)) {
-      const [xs, ys] = key.split(':');
-      const x = Number(xs);
-      const y = Number(ys);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      let cz = 0;
-      for (const run of runs) {
-        if (run.block !== '') {
-          for (let i = 0; i < run.count; i += 1) {
-            if (cz + i === z) {
-              const cell = { x, y, z: cz + i };
-              items.push({ cell, block: run.block, key: depthAt(cell, camera) });
-            }
-          }
-        }
-        cz += run.count;
-      }
-    }
-    items.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.cell.z - b.cell.z));
-    for (const d of items) {
-      const p = cellToScreen(d.cell, camera, geom);
-      const base = blockPool.take();
-      place(base, textureFor(d.block, vista), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
-    }
-
-    app.renderer.render({ container: world, target: rt, clearColor: [0, 0, 0, 0] });
-  };
-
-  const rotateTo = (rotation: Rotation, opts: RotateOptions): Promise<Camera> => {
+  const rotateTo = (rotation: Rotation, opts: RotateOptions): Camera => {
     const state = lastState;
     if (!state) {
-      return Promise.resolve({ ...DEFAULT_CAMERA_FALLBACK, rotation, turn: rotation });
+      return { ...DEFAULT_CAMERA_FALLBACK, rotation, turn: rotation };
     }
-    const de = state.camera.rotation;
-    const duracao = opts.durationMs ?? ROTATION_DURATION_MS;
-
-    const settle = (): Camera => {
-      const pan = centerOn(
-        opts.cells,
-        rotation,
-        opts.viewportWidth,
-        opts.viewportHeight,
-        state.camera.zoom,
-        geom,
-      );
-      return { rotation, turn: rotation, zoom: state.camera.zoom, ...pan };
-    };
-
-    if (de === rotation || duracao <= 0) {
-      const final = settle();
-      render({ ...state, camera: final, preview: null, highlight: null });
-      return Promise.resolve(final);
-    }
-
-    rotating = true;
-    const tween = startTween(de, rotation, performance.now(), duracao);
-    const w = opts.viewportWidth;
-    const h = opts.viewportHeight;
-    const zoom = state.camera.zoom;
-
-    // Snapshots POR NÍVEL Z. A matriz `L(τ)` é exata só para o plano do chão
-    // (z = 0): para z > 0 o offset vertical `-z·zStep·zoom` participa da afim
-    // como se fosse parte do plano, e o bloco achata/entorta durante o giro —
-    // é o "sprites altas tombam". A correção: um snapshot por nível z, cada um
-    // recebendo a mesma afim MAIS uma translação vertical `(d(τ) − 1)·z·zStep·zoom`
-    // que desfaz o achate e mantém a altura invariante.
-    const camA: Camera = { ...state.camera, turn: de };
-    const camB = settle();
-    const map = state.map;
-    const zTop = maxZ(map);
-    const zStepScreen = geom.zStep * zoom;
-
-    const size = { width: Math.max(1, w), height: Math.max(1, h) };
-    const pairs: Array<{
-      spriteA: Sprite;
-      spriteB: Sprite;
-      rtA: RenderTexture;
-      rtB: RenderTexture;
-    }> = [];
-
-    const layer = new Container();
-    for (let z = 0; z <= zTop; z += 1) {
-      const rtA = RenderTexture.create(size);
-      const rtB = RenderTexture.create(size);
-      rtA.source.scaleMode = SNAPSHOT_SCALE_MODE;
-      rtB.source.scaleMode = SNAPSHOT_SCALE_MODE;
-      snapshotZ(rtA, map, camA, z);
-      snapshotZ(rtB, map, camB, z);
-      const spriteA = new Sprite(rtA);
-      const spriteB = new Sprite(rtB);
-      spriteB.alpha = 0;
-      // Camadas mais altas na frente (ordem de pintor: z↑ → por cima).
-      layer.addChild(spriteA, spriteB);
-      pairs.push({ spriteA, spriteB, rtA, rtB });
-    }
-    app.stage.addChild(layer);
-    world.visible = false;
-
-    // Pivô do chão (z = 0): mesmo cálculo de antes, com visualCenterOffsetY.
-    const centeredA = centerOn(opts.cells, de, w, h, zoom, geom);
-    const visualCenterOffsetY = (cubeGeom.cubeHeight / 2) * zoom;
-    const pivotA = {
-      x: w / 2 + (camA.panX - centeredA.panX),
-      y: h / 2 + (camA.panY - centeredA.panY) + visualCenterOffsetY,
-    };
-    const pivotB = { x: w / 2, y: h / 2 + visualCenterOffsetY };
-
-    return new Promise<Camera>((resolve) => {
-      const tick = (): void => {
-        const sample = sampleTween(tween, performance.now());
-        const turnA = sample.turn - de;
-        const turnB = sample.turn - (de + tween.turns);
-        const px = pivotA.x + (pivotB.x - pivotA.x) * sample.t;
-        const py = pivotA.y + (pivotB.y - pivotA.y) * sample.t;
-
-        const mA = rigidTurnMatrix(turnA, geom, pivotA.x, pivotA.y);
-        const mB = rigidTurnMatrix(turnB, geom, pivotB.x, pivotB.y);
-
-        for (let z = 0; z <= zTop; z += 1) {
-          const pair = pairs[z]!;
-          // Correção de altura: desfaz o `d(τ)·z·zStep` que a afim aplicou
-          // ao offset vertical fotografado, recompondo o `z·zStep` original.
-          const corrA = (mA.d - 1) * z * zStepScreen;
-          const corrB = (mB.d - 1) * z * zStepScreen;
-
-          pair.spriteA.setFromMatrix(
-            new Matrix(mA.a, mA.b, mA.c, mA.d, mA.tx + (px - pivotA.x), mA.ty + (py - pivotA.y) + corrA),
-          );
-          pair.spriteB.setFromMatrix(
-            new Matrix(mB.a, mB.b, mB.c, mB.d, mB.tx + (px - pivotB.x), mB.ty + (py - pivotB.y) + corrB),
-          );
-          pair.spriteB.alpha = sample.t;
-        }
-
-        if (sample.done) {
-          disposeTurn();
-          const final = settle();
-          render({ ...state, camera: final, preview: null, highlight: null });
-          resolve(final);
-        }
-      };
-      activeTurn = { layer, pairs, tick };
-      app.ticker.add(tick);
-    });
+    const pan = centerOn(
+      opts.cells,
+      rotation,
+      opts.viewportWidth,
+      opts.viewportHeight,
+      state.camera.zoom,
+      geom,
+    );
+    const final: Camera = { rotation, turn: rotation, zoom: state.camera.zoom, ...pan };
+    render({ ...state, camera: final, preview: null, highlight: null });
+    return final;
   };
 
   const resize = (width: number, height: number): void => {
@@ -783,7 +547,6 @@ export async function createIsoScene(
   };
 
   const destroy = (): void => {
-    disposeTurn();
     if (animTickerActive) {
       app.ticker.remove(tickAnim);
       animTickerActive = false;
@@ -799,7 +562,7 @@ export async function createIsoScene(
     app.destroy(true, { children: true, texture: true, textureSource: true });
   };
 
-  return { app, setPalette, render, rotateTo, isRotating: () => rotating, resize, destroy };
+  return { app, setPalette, render, rotateTo, resize, destroy };
 }
 
 /** Só para o caso impossível de girar antes do primeiro desenho. */
