@@ -29,6 +29,15 @@
  * sempre foi. Com mapa, a queda é resolvida contra o mapa a cada passo e o
  * pulo deixa de ficar preso em `z + jumpHeight`.
  *
+ * ## `step` não faz colisão horizontal — quem faz é `stepWithMap`
+ *
+ * Mesmo com mapa, `step` atravessa paredes: ele consulta o mapa para a
+ * gravidade e para o degrau, nunca para recusar uma travessia. Para um
+ * personagem jogável use `stepWithMap` (`simulate.ts`), que tem a mesma
+ * assinatura mais o mapa **obrigatório** e resolve a colisão. `step`
+ * permanece para quem quer movimento sem mapa nenhum, e porque mudar-lhe o
+ * contrato partiria os chamadores existentes.
+ *
  * ## Contrato determinístico
  *
  * `step` é uma função pura do estado anterior, da entrada e do dt acumulado.
@@ -40,6 +49,7 @@
 import type { CollisionMap } from './collision.ts';
 import { fallStep, DEFAULT_FALL_SPEED } from './gravity.ts';
 import { stepZOnCross } from './step-up.ts';
+import { NO_JUMP, type JumpState } from './jump.ts';
 
 // ------------------------------------------------------------------ tipos
 
@@ -89,6 +99,31 @@ export interface MovementState {
    * queda contínua em descidas de nível inteiro; `z` continua discreto.
    */
   readonly fallProgress: number;
+  /**
+   * Estado do pulo balístico, o modelo de `jump.ts`.
+   *
+   * Vive no estado — e não numa variável local de quem simula — porque um
+   * pulo tem de sobreviver ao fim do quadro. Enquanto `runTrace` era o único
+   * consumidor isso não se notava: ele corria o traço inteiro numa chamada e
+   * o pulo nascia e morria lá dentro. Um laço de quadro ao vivo chama uma vez
+   * por quadro, e um pulo cujo progresso é esquecido nunca sai do chão.
+   *
+   * `NO_JUMP` (progresso 1.0) é "nenhum pulo activo". Quem desenha lê
+   * `jump.progress` para a parábola de `visualOffsetY`.
+   */
+  readonly jump: JumpState;
+  /**
+   * true se o **último passo de lógica** foi recusado pela colisão horizontal.
+   *
+   * É um facto sobre o passo, não sobre o personagem: descreve a chamada que
+   * o produziu e volta a `false` na seguinte. Existe para que quem desenha
+   * possa tocar um som de embate ou trocar a animação sem precisar de um
+   * segundo valor de retorno.
+   *
+   * Só {@link stepWithMap} e `runTrace` o escrevem — `step` não faz colisão
+   * horizontal e deixa-o sempre `false`.
+   */
+  readonly blocked: boolean;
 }
 
 /** Entrada do jogador num dado instante. */
@@ -232,6 +267,8 @@ export function createMovementState(
     crouching: false,
     falling: false,
     fallProgress: 0,
+    jump: NO_JUMP,
+    blocked: false,
   };
 }
 
@@ -381,6 +418,11 @@ function fixedStep(
     crouching,
     falling,
     fallProgress,
+    // `step` usa o trio airborne/jumpTime/vz e não o modelo de `jump.ts`;
+    // deixa o campo intacto em vez de inventar um pulo que não simula.
+    jump: state.jump,
+    // Sem colisão horizontal não há passo recusado.
+    blocked: false,
   };
 }
 

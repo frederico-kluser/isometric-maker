@@ -159,6 +159,43 @@ export function canCross(
   // O destino tem de ser entrável
   if (!canEnter(map, to.x, to.y, to.z)) return false;
 
+  return edgesAllowCross(map, from, to);
+}
+
+// ------------------------------------------------------------------ edgesAllowCross
+
+/**
+ * A **metade da parede** de {@link canCross}: existe geometria de aresta que
+ * impeça ir de `from` para `to`?
+ *
+ * Responde **apenas** à pergunta das paredes. Não pergunta se o destino é
+ * ocupável — quem está a cair para uma célula sem suporte, ou a sobrevoá-la a
+ * meio de um pulo, precisa exactamente desta metade e não da outra.
+ *
+ * `canCross(from, to)` é, por definição, `canEnter(to) && edgesAllowCross(from, to)`.
+ * Manter as duas perguntas separadas é o que permite permitir a queda no ponto
+ * de resolução sem mexer na semântica de `canEnter`, da qual `canStepUp` e
+ * `canStepDown` dependem.
+ *
+ * As regras geométricas são as mesmas de `canCross`: z diferente recusa,
+ * distância maior que uma célula recusa, a mesma célula aceita, e a diagonal
+ * testa **as duas** arestas cardinais que a compõem.
+ */
+export function edgesAllowCross(
+  map: CollisionMap,
+  from: CollisionCell,
+  to: CollisionCell,
+): boolean {
+  if (from.z !== to.z) return false;
+
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+
+  // Movimento não-adjacente
+  if (Math.abs(dx) > 1 || Math.abs(dy) > 1) return false;
+  // Sem movimento
+  if (dx === 0 && dy === 0) return true;
+
   // --- cardinal ---
   if (dx === 0 || dy === 0) {
     return !hasWallBetween(map, from, to);
