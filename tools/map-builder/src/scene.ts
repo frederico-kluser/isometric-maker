@@ -60,6 +60,7 @@ import {
   Matrix,
   RenderTexture,
   Sprite,
+  Spritesheet,
   Texture,
   TextureSource,
 } from 'pixi.js';
@@ -82,7 +83,6 @@ import {
   type ProjectGeometry,
 } from './camera.ts';
 import {
-  hueFromId,
   makeCubeCanvasFromHue,
   makeCubeViewsFromHue,
   makeDiamondCanvas,
@@ -105,8 +105,9 @@ export interface BlockDef {
   /** URLs das quatro faces (v2: chained/rotated). Ausente = cubo procedural ou textura. */
   readonly faceUrls?: Readonly<Record<Facing, string>> | undefined;
   /**
-   * Matiz HSL do cubo procedural. Ausente, deriva do id — estável, mas sem
-   * relação com o nome da peça (foi como "Grama" saiu vermelha).
+   * Matiz HSL do cubo procedural. Ausente, um cinza neutro — derivar do id dá
+   * cor estável, mas sem relação com o material (foi como "Grama" saiu
+   * vermelha).
    */
   readonly hue?: number | undefined;
   /** URL da spritesheet da animação (v3: texture, ADR 0032). */
@@ -304,11 +305,17 @@ export async function createIsoScene(
    * QUATRO texturas, uma por vista — mesmo tom de face, desenho de material
    * diferente. Uma textura só nas quatro vistas faria o giro parecer a mesma
    * figura deslizando, que é o oposto do efeito de volume.
+   *
+   * Sem `hue` declarado (blocos gerados só têm hash/spritesheetUrl), cinza
+   * neutro: cor derivada do hash é estável, mas o usuário confia nela — e
+   * "Grama" saiu vermelha exatamente assim.
    */
   function proceduralFor(id: string, hue?: number): Texture[] {
     const cached = artwork.get(id);
     if (cached) return cached;
-    const four = makeCubeViewsFromHue(hue ?? hueFromId(id), cubeGeom).map(fromCanvas);
+    // Saturação 0 anula o matiz: hsl(h, 0, l) é cinza para qualquer h.
+    const saturation = hue === undefined ? 0 : 0.45;
+    const four = makeCubeViewsFromHue(hue ?? 0, cubeGeom, saturation).map(fromCanvas);
     artwork.set(id, four);
     return four;
   }
@@ -333,21 +340,21 @@ export async function createIsoScene(
           // com extensão .json. O Assets.load do PixiJS 8 reconhece o JSON
           // como Spritesheet e carrega a imagem referenciada em meta.image.
           const atlasUrl = b.spritesheetUrl.replace(/\.png$/, '.json');
-          const sheet = await Assets.load(atlasUrl);
-          // A spritesheet tem animations.anim com os nomes dos frames.
-          const animFrames: string[] =
-            (sheet as { animations?: { anim?: string[] } }).animations?.anim ?? [];
-          const textures: Texture[] = [];
-          for (const name of animFrames) {
-            const tex = (sheet as { textures?: Record<string, Texture> }).textures?.[name];
-            if (tex) {
+          const sheet = await Assets.load<Spritesheet>(atlasUrl);
+          // O packer grava a animação sob a chave `anim`
+          // (tools/character-builder/server/world-block.ts, packSpritesheet).
+          // Depois do parse, animations.anim é Texture[] — texturas já
+          // resolvidas, NÃO nomes de frame. O código antigo tratava como
+          // string[] e procurava cada elemento em sheet.textures: o lookup
+          // com uma Texture como chave nunca achava nada, o array ficava
+          // vazio e todo bloco 'texture' caía no cubo procedural.
+          const animTextures: Texture[] = sheet.animations['anim'] ?? [];
+          if (animTextures.length > 0) {
+            for (const tex of animTextures) {
               tex.source.scaleMode = 'nearest';
               tex.source.autoGenerateMipmaps = false;
-              textures.push(tex);
             }
-          }
-          if (textures.length > 0) {
-            artwork.set(b.id, textures);
+            artwork.set(b.id, animTextures);
             animState.set(b.id, { frame: 0, lastMs: performance.now() });
             animFps.set(b.id, b.fps ?? 8);
             // Liga o ticker de animação se ainda não estiver ativo.
@@ -355,7 +362,13 @@ export async function createIsoScene(
               animTickerActive = true;
               app.ticker.add(tickAnim);
             }
+            console.log(
+              `[scene] spritesheet ok: ${b.id} — ${animTextures.length} frames at ${b.fps ?? 8} fps (${atlasUrl})`,
+            );
           } else {
+            // Atlas sem a chave `anim` é estado de conteúdo, não erro: a peça
+            // continua colocável como cubo procedural.
+            console.warn(`[scene] spritesheet has no animations['anim']: ${b.id} (${atlasUrl})`);
             proceduralFor(b.id, b.hue);
           }
         } catch (err) {

@@ -12,7 +12,7 @@
  * A montagem e a validação do body ficam no módulo puro ./blocks-body.ts
  * (testado com node --test); aqui é só DOM e coleta de inputs.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckIcon, LoaderCircleIcon, RefreshCwIcon, XIcon } from 'lucide-react';
 import { api } from '../../studio-store.tsx';
 // Do módulo PURO server/model.ts, nunca de server/world-block.ts: aquele
@@ -321,8 +321,10 @@ export function BlocksPanel() {
                 <p className="text-sm text-muted-foreground">{SB.resultado.vazio}</p>
               ) : (
                 <>
-                  <img
-                    src={`/world-blocks/${result.hash}/frames/frame_000.png`}
+                  <AnimPreview
+                    hash={result.hash}
+                    frameCount={frameCount}
+                    fps={fps}
                     alt={description}
                     className="max-h-24 w-full object-contain [image-rendering:pixelated]"
                   />
@@ -359,13 +361,21 @@ export function BlocksPanel() {
                         key={b.hash}
                         className="flex flex-col items-center gap-1 rounded-lg border border-border bg-muted/30 p-2"
                       >
-                        <img
-                          src={b.technique === 'texture'
-                            ? `/world-blocks/${b.hash}/frames/frame_000.png`
-                            : (b.faceUrls?.north ?? '')}
-                          alt={b.description}
-                          className="h-16 w-16 object-contain [image-rendering:pixelated]"
-                        />
+                        {b.technique === 'texture' ? (
+                          <AnimPreview
+                            hash={b.hash}
+                            frameCount={b.frameCount}
+                            fps={b.fps}
+                            alt={b.description}
+                            className="h-16 w-16 object-contain [image-rendering:pixelated]"
+                          />
+                        ) : (
+                          <img
+                            src={b.faceUrls?.north ?? ''}
+                            alt={b.description}
+                            className="h-16 w-16 object-contain [image-rendering:pixelated]"
+                          />
+                        )}
                         <span className="line-clamp-2 text-center text-xs leading-tight">
                           {b.description}
                         </span>
@@ -391,4 +401,126 @@ export function BlocksPanel() {
       </div>
     </div>
   );
+}
+
+/**
+ * Prévia animada de um bloco 'texture' (ADR 0032): faz loop pelos frames de
+ * /world-blocks/<hash>/frames/ em vez de mostrar só o primeiro frame.
+ *
+ * O fps e a contagem REAIS de frames vêm do sidecar animation.json — a API
+ * pode devolver menos frames que os pedidos, e o sidecar grava o que chegou
+ * (packSpritesheet usa frames.length). Os props são só o fallback imediato
+ * enquanto o sidecar não chega; sem sidecar nem props, nada é renderizado.
+ */
+interface AnimPreviewProps {
+  readonly hash: string;
+  /** Fallback imediato; o sidecar animation.json é a fonte da verdade. */
+  readonly frameCount?: number | undefined;
+  /** Fallback imediato; o sidecar animation.json é a fonte da verdade. */
+  readonly fps?: number | undefined;
+  readonly alt?: string;
+  readonly className?: string;
+}
+
+/** FPS padrão da bancada — o mesmo default do servidor (server/model.ts). */
+const DEFAULT_ANIM_FPS = 8;
+
+interface AnimSidecar {
+  readonly fps?: number;
+  readonly frameCount?: number;
+}
+
+function frameUrl(hash: string, index: number): string {
+  return `/world-blocks/${hash}/frames/frame_${String(index).padStart(3, '0')}.png`;
+}
+
+function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps) {
+  const [meta, setMeta] = useState<{ fps: number; frameCount: number } | null>(null);
+  const [loaded, setLoaded] = useState(0);
+  const [frameIndex, setFrameIndex] = useState(0);
+
+  // Sidecar primeiro; os props seguram o preview enquanto ele não chega.
+  useEffect(() => {
+    let cancelled = false;
+    setMeta(null);
+    void fetch(`/world-blocks/${hash}/animation.json`)
+      .then((res) => (res.ok ? (res.json() as Promise<AnimSidecar>) : Promise.resolve(null)))
+      .then((sidecar) => {
+        if (cancelled) return;
+        const sideCount = sidecar?.frameCount;
+        const sideFps = sidecar?.fps;
+        const count =
+          typeof sideCount === 'number' && sideCount >= 1
+            ? sideCount
+            : typeof frameCount === 'number' && frameCount >= 1
+              ? frameCount
+              : 0;
+        if (count === 0) return;
+        setMeta({
+          fps: typeof sideFps === 'number' && sideFps >= 1 ? sideFps : (fps ?? DEFAULT_ANIM_FPS),
+          frameCount: count,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (typeof frameCount === 'number' && frameCount >= 1) {
+          setMeta({ fps: fps ?? DEFAULT_ANIM_FPS, frameCount });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hash, frameCount, fps]);
+
+  const count =
+    meta?.frameCount ?? (typeof frameCount === 'number' && frameCount >= 1 ? frameCount : 0);
+
+  const urls = useMemo(
+    () => Array.from({ length: count }, (_, i) => frameUrl(hash, i)),
+    [hash, count],
+  );
+
+  // Pré-carrega todos os frames — sem isso o loop piscaria imagens vazias no
+  // primeiro ciclo. Frame ausente conta como "carregado": um 404 não trava o
+  // loop inteiro.
+  useEffect(() => {
+    let cancelled = false;
+    let done = 0;
+    setLoaded(0);
+    setFrameIndex(0);
+    for (const url of urls) {
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        if (cancelled) return;
+        done += 1;
+        setLoaded(done);
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        done += 1;
+        setLoaded(done);
+      };
+      img.src = url;
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [urls]);
+
+  // Loop com o FPS do sidecar; só começa depois de todos os frames na mão.
+  // frameCount <= 1 é frame único — o <img> estático abaixo cobre o caso.
+  useEffect(() => {
+    if (count <= 1 || loaded < count) return;
+    const intervalMs = Math.max(1, Math.round(1000 / (meta?.fps ?? DEFAULT_ANIM_FPS)));
+    const timer = window.setInterval(() => {
+      setFrameIndex((i) => (i + 1) % count);
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [count, loaded, meta?.fps]);
+
+  if (count === 0) return null;
+
+  const src = urls[frameIndex] ?? urls[0] ?? '';
+  return <img src={src} alt={alt ?? ''} className={className} />;
 }
