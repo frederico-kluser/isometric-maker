@@ -28,11 +28,14 @@ Nothing else should be planned or edited before the router runs.
 | [`querying-pixellab-api`](querying-pixellab-api/SKILL.md) | **hub.** The vendored spec as the only source of API truth: how to query it, the three structural traps, the direction orderings, why the vendor's public pages fail checking | `node .agents/skills/scripts/check-spec-claims.mjs` |
 | [`writing-repo-typescript`](writing-repo-typescript/SKILL.md) | Node 24 running `.ts` with no build step; why `.ts` extensions and `node:` prefixes are load-bearing; what the tsconfigs already enforce | `npm run typecheck` in both tools |
 
-### PixelLab domain skills — one per spec group
+### PixelLab domain skills — one per covered spec group
 
-All ten cover the 79 endpoints of the vendored snapshot with no orphan and no overlap. Each declares
-`check-spec-claims.mjs` as its signal, so every endpoint and enum they name is checked against the
-spec on every run. Load the hub first, then the family.
+Eight domain skills cover the v3 endpoints and the essential non-v3 families (objects, tilesets).
+Three skills were retired with the v3 transition: standalone image generation, portraits/lip-sync,
+and UI design — their endpoints exist in the API but are not covered by skills, as they are not
+needed for an isometric editor. Each declares `check-spec-claims.mjs` as its signal, so every
+endpoint and enum they name is checked against the spec on every run. Load the hub first, then the
+family.
 
 | Skill | Spec groups | Endpoints | The trap it exists for |
 |---|---|---|---|
@@ -41,10 +44,7 @@ spec on every run. Load the hub first, then the family.
 | [`animating-pixellab-sprites`](animating-pixellab-sprites/SKILL.md) | Animate · Animation Management | 12 | `mode='pro'` costs 160–320 for eight directions **and is worse** |
 | [`composing-pixellab-objects`](composing-pixellab-objects/SKILL.md) | Objects · Object Management · Map Objects | 12 | the `review` status parks paid candidates until frames are selected |
 | [`generating-pixellab-tilesets`](generating-pixellab-tilesets/SKILL.md) | Create map | 18 | Wang matching is on the vertex grid, via `pattern_4x4`, not `connections` |
-| [`creating-pixellab-images`](creating-pixellab-images/SKILL.md) | Create Image · Enhance Prompt | 10 | the image **count** is decided by the size, not by a parameter |
 | [`editing-pixellab-images`](editing-pixellab-images/SKILL.md) | Edit · Inpaint · Image Operations | 8 | mask polarity: white generates, black preserves |
-| [`generating-pixellab-portraits`](generating-pixellab-portraits/SKILL.md) | Generate | 7 | pay once per expression, then every line of dialogue is free |
-| [`designing-pixellab-interfaces`](designing-pixellab-interfaces/SKILL.md) | UI Creator · font-pro | 6 | a size **floor** of 192px, and `image_size` is a pricing tier, not a size |
 | [`orchestrating-pixellab-jobs`](orchestrating-pixellab-jobs/SKILL.md) | Background Jobs · Account · Documentation | 3 + cross-cutting | 36 endpoints are async; only 23 say `202` |
 
 ## Knowledge — the isometric model, which is this repository's own

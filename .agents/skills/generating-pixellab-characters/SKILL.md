@@ -171,8 +171,8 @@ Passing `bear` to make the art bear-like does nothing to the art and mis-fits th
 **And "I picked mannequin but the character comes out dressed" is not a bug.** There is no parameter
 anywhere on this family that removes clothes, hair or a face. A featureless base body is produced
 upstream, in the sprite the character is built from: the `description` of `/create-image-bitforge`
-plus its `negative_description` — the one endpoint whose negative is documented as functional
-(`creating-pixellab-images`). Chasing this inside the character request is time spent looking for a
+plus its `negative_description` — the one endpoint whose negative is documented as functional.
+Chasing this inside the character request is time spent looking for a
 field that does not exist. This repository solved it in
 `docs/adr/0028-modo-manequim-e-preenchimento-do-quadro.md:1@98d2b8e2`.
 
