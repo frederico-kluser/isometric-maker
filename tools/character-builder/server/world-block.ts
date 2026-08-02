@@ -1523,6 +1523,7 @@ export async function runWorldBlock(
   let textureBaseUsage: Usage | null | undefined;
   let textureAnimJobId: string | undefined;
   let textureAnimUsage: Usage | null | undefined;
+  let textureActualFrameCount = 0;
 
   if (technique === 'chained') {
     // ---- molde encadeado: norte nasce do molde; o resultado é o molde das outras.
@@ -1775,6 +1776,8 @@ export async function runWorldBlock(
       }
 
       opts.onLog?.(`[world-block] ${frames.length} frames baixados da animação.`);
+
+      textureActualFrameCount = frames.length;
 
       await packSpritesheet(opts.assetsDir, hash, frames, {
         fps,
@@ -2069,7 +2072,7 @@ export async function runWorldBlock(
   if (!fromCache || manifestDirty || prev === null) {
     if (technique === 'texture') {
       // Manifesto v3 — textura animada (ADR 0032).
-      const frameCount = config.frameCount ?? 8;
+      const frameCount = textureActualFrameCount || (config.frameCount ?? 8);
       const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
 
       // Recupera action/llmGenerated do sidecar se a spritesheet já existia.
