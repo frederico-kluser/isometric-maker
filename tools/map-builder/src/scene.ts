@@ -36,16 +36,33 @@
  * uma vista pode ser cíclica de outra. A chave escalar aqui cobre o caso de
  * célula única — que é exatamente o que o formato de mapa permite.
  *
- * ## O giro
+ * ## O giro (ADR 0030 — o quadro inteiro como corpo rígido)
  *
- * A posição é interpolada; o sprite NUNCA é rotacionado. Girar pixel art por um
- * ângulo que não seja múltiplo de 90° reamostra a imagem e transforma a arte
- * paga em borrão durante a transição inteira. O que troca de vista é a FACE
- * desenhada, por cross-fade — a de origem por baixo, opaca, a de destino por
- * cima, com o alfa do progresso. Somar duas semitransparentes deixaria o fundo
- * aparecer no meio do giro.
+ * A versão anterior (ADR 0026) interpolava a POSIÇÃO de cada bloco e fazia
+ * cross-fade por peça. A matemática estava certa e a tela errada: no meio do
+ * giro o reticulado projetado comprime, cada sprite mantém o tamanho, e o mapa
+ * lê como peças deslizando soltas — não como uma câmera girando.
+ *
+ * Agora a transição fotografa a vista de ORIGEM e a de DESTINO em duas
+ * `RenderTexture` e aplica a cada uma A MESMA transformação afim
+ * (`rigidTurnMatrix`, o squash–rotate–unsquash do plano do chão), com
+ * cross-fade entre as duas. O precedente é o Mode 7 do SNES (Contra III gira o
+ * cenário composto como camada única) somado ao insight do Doom: a arte de
+ * cada peça nunca é reamostrada isoladamente — seleciona-se a vista
+ * pré-desenhada e o movimento fica na projeção. Nos extremos o quadro é o
+ * desenho discreto normal, pixel-perfeito; o meio do giro é uma varredura de
+ * 280 ms do quadro composto.
  */
-import { Application, Assets, Container, Sprite, Texture, TextureSource } from 'pixi.js';
+import {
+  Application,
+  Assets,
+  Container,
+  Matrix,
+  RenderTexture,
+  Sprite,
+  Texture,
+  TextureSource,
+} from 'pixi.js';
 import type { MapData } from '@isometric-maker/iso-core/map';
 import { rotateDirectionIndex, type Rotation } from '@isometric-maker/iso-core/rotation';
 import {
@@ -53,6 +70,7 @@ import {
   sampleTween,
   startTween,
 } from '@isometric-maker/iso-core/rotation-tween';
+import { rigidTurnMatrix } from '@isometric-maker/iso-core/rotation-rigid';
 import { CANONICAL_CUBE } from '@isometric-maker/iso-core/iso-cube';
 import {
   DEFAULT_GEOMETRY,
@@ -364,13 +382,10 @@ export async function createIsoScene(
 
     const { map, camera } = state;
 
-    // Durante o giro há DUAS vistas certas ao mesmo tempo. Fora dele, uma.
-    const turn = camera.turn;
-    const baixo = Math.floor(turn);
-    const alpha = turn - baixo;
-    const vistaA = (((baixo % 4) + 4) % 4) as Rotation;
-    const vistaB = ((((baixo + 1) % 4) + 4) % 4) as Rotation;
-    const girando = alpha > 0.0001;
+    // render() só desenha vistas DISCRETAS. A transição não passa por aqui:
+    // ela transforma dois snapshots prontos (ADR 0030), e por isso a vista da
+    // textura é sempre a rotação da câmera, nunca uma fração de giro.
+    const vista = camera.rotation;
 
     // --- extensão da malha ---
     let minX = Infinity;
@@ -407,15 +422,7 @@ export async function createIsoScene(
     for (const d of collect(map, camera)) {
       const p = cellToScreen(d.cell, camera, geom);
       const base = blockPool.take();
-      place(base, textureFor(d.block, vistaA), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
-      if (girando) {
-        // A vista de destino vai POR CIMA, com o alfa do progresso. A de
-        // origem fica opaca embaixo: duas semitransparentes deixariam o fundo
-        // aparecer através do bloco no meio do giro.
-        const topo = blockPool.take();
-        place(topo, textureFor(d.block, vistaB), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
-        topo.alpha = alpha;
-      }
+      place(base, textureFor(d.block, vista), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
     }
 
     // --- realce da célula atingida ---
@@ -441,6 +448,43 @@ export async function createIsoScene(
   // ------------------------------------------------------------------ giro
 
   let rotating = false;
+
+  /**
+   * Filtro dos snapshots DURANTE o giro, e só deles. `linear` de propósito:
+   * a varredura reamostra o quadro composto de qualquer jeito, e `nearest`
+   * sobre uma afim fracionária vira serrilhado fervilhando — `linear` lê como
+   * o borrão de movimento de uma câmera real. Nos extremos os snapshots nem
+   * existem: o desenho volta ao caminho normal, `nearest`, pixel-perfeito.
+   */
+  const SNAPSHOT_SCALE_MODE = 'linear' as const;
+
+  /** Recursos vivos de um giro em andamento — para o destroy não vazar nada. */
+  let activeTurn: {
+    readonly layer: Container;
+    readonly rtA: RenderTexture;
+    readonly rtB: RenderTexture;
+    readonly tick: () => void;
+  } | null = null;
+
+  const disposeTurn = (): void => {
+    if (!activeTurn) return;
+    app.ticker.remove(activeTurn.tick);
+    activeTurn.layer.destroy({ children: true });
+    activeTurn.rtA.destroy(true);
+    activeTurn.rtB.destroy(true);
+    activeTurn = null;
+    world.visible = true;
+    rotating = false;
+  };
+
+  /** Fotografa o mundo (malha + blocos, sem overlay) numa RenderTexture. */
+  const snapshotTo = (rt: RenderTexture, map: MapData, camera: Camera): void => {
+    render({ map, camera, preview: null, highlight: null });
+    // Fundo TRANSPARENTE: só a arte gira. Um snapshot opaco giraria também o
+    // retângulo do fundo, e as bordas dele varrendo a tela leriam como um
+    // cartão rodando, não como a câmera.
+    app.renderer.render({ container: world, target: rt, clearColor: [0, 0, 0, 0] });
+  };
 
   const rotateTo = (rotation: Rotation, opts: RotateOptions): Promise<Camera> => {
     const state = lastState;
@@ -470,36 +514,75 @@ export async function createIsoScene(
 
     rotating = true;
     const tween = startTween(de, rotation, performance.now(), duracao);
+    const w = opts.viewportWidth;
+    const h = opts.viewportHeight;
+    const zoom = state.camera.zoom;
+
+    // Os DOIS extremos do giro, fotografados uma vez: a vista atual como está
+    // (pan do usuário incluído) e a de destino já assentada — o quadro final
+    // da transição é, por construção, idêntico ao primeiro desenho parado.
+    const camA: Camera = { ...state.camera, turn: de };
+    const camB = settle();
+    const rtA = RenderTexture.create({ width: Math.max(1, w), height: Math.max(1, h) });
+    const rtB = RenderTexture.create({ width: Math.max(1, w), height: Math.max(1, h) });
+    rtA.source.scaleMode = SNAPSHOT_SCALE_MODE;
+    rtB.source.scaleMode = SNAPSHOT_SCALE_MODE;
+    snapshotTo(rtA, state.map, camA);
+    snapshotTo(rtB, state.map, camB);
+
+    // Pivô de cada quadro: o centro do conteúdo NA TELA. B nasce enquadrado
+    // por settle(), então o dele é o centro do viewport; o de A desloca pelo
+    // pan que o usuário tiver aplicado.
+    const centeredA = centerOn(opts.cells, de, w, h, zoom, geom);
+    const pivotA = {
+      x: w / 2 + (camA.panX - centeredA.panX),
+      y: h / 2 + (camA.panY - centeredA.panY),
+    };
+    const pivotB = { x: w / 2, y: h / 2 };
+
+    const layer = new Container();
+    const spriteA = new Sprite(rtA);
+    const spriteB = new Sprite(rtB);
+    spriteB.alpha = 0;
+    layer.addChild(spriteA, spriteB);
+    app.stage.addChild(layer);
+    world.visible = false;
 
     return new Promise<Camera>((resolve) => {
       const tick = (): void => {
         const sample = sampleTween(tween, performance.now());
-        // Reenquadrar a cada quadro é o que faz o mapa girar em torno do
-        // próprio centro. Sem isso ele descreve um arco e sai da tela no meio.
-        const pan = centerOn(
-          opts.cells,
-          sample.turn,
-          opts.viewportWidth,
-          opts.viewportHeight,
-          state.camera.zoom,
-          geom,
+        // Quanto cada snapshot já girou, em quartos de volta, relativo à
+        // PRÓPRIA vista: A parte de 0 e vai a ±1; B parte de ∓1 e chega a 0 —
+        // onde o desenho discreto assume sem costura.
+        const turnA = sample.turn - de;
+        const turnB = sample.turn - (de + tween.turns);
+        // O pivô caminha do centro de A ao de B com o progresso suavizado —
+        // é o reenquadramento contínuo da ADR 0026, reduzido a uma translação.
+        const px = pivotA.x + (pivotB.x - pivotA.x) * sample.t;
+        const py = pivotA.y + (pivotB.y - pivotA.y) * sample.t;
+
+        const mA = rigidTurnMatrix(turnA, geom, pivotA.x, pivotA.y);
+        const mB = rigidTurnMatrix(turnB, geom, pivotB.x, pivotB.y);
+        spriteA.setFromMatrix(
+          new Matrix(mA.a, mA.b, mA.c, mA.d, mA.tx + (px - pivotA.x), mA.ty + (py - pivotA.y)),
         );
-        const camera: Camera = {
-          rotation: sample.done ? rotation : de,
-          turn: sample.turn,
-          zoom: state.camera.zoom,
-          ...pan,
-        };
-        // Durante o giro não existe célula sob o cursor: mostrar preview seria
-        // prometer uma colocação que o clique não faria.
-        render({ ...state, camera, preview: null, highlight: null });
+        spriteB.setFromMatrix(
+          new Matrix(mB.a, mB.b, mB.c, mB.d, mB.tx + (px - pivotB.x), mB.ty + (py - pivotB.y)),
+        );
+        // Cross-fade: origem opaca embaixo, destino por cima com o progresso.
+        // É o fade que carrega a troca de profundidade e o desvio de altura
+        // que a afim do chão não cobre (ADR 0030) — como no corte suavizado
+        // do Mode 7.
+        spriteB.alpha = sample.t;
 
         if (sample.done) {
-          app.ticker.remove(tick);
-          rotating = false;
-          resolve(settle());
+          disposeTurn();
+          const final = settle();
+          render({ ...state, camera: final, preview: null, highlight: null });
+          resolve(final);
         }
       };
+      activeTurn = { layer, rtA, rtB, tick };
       app.ticker.add(tick);
     });
   };
@@ -509,6 +592,7 @@ export async function createIsoScene(
   };
 
   const destroy = (): void => {
+    disposeTurn();
     gridPool.destroy();
     blockPool.destroy();
     overlayPool.destroy();
