@@ -29,7 +29,10 @@
  *   com o prompt pedindo para respeitar a forma e o tamanho exatos da
  *   referência; a ação da animação vem de LLM (ou fallback determinístico); o
  *   cubo vira o `first_frame` do `/animate-with-text-v3`, que anima todos os
- *   frames num job só (não por direção). A spritesheet empacota os frames e o
+ *   frames num job só (não por direção). Frames com fundo transparente
+ *   (`no_background`) e ação expandida pela própria API (`enhance_prompt`, com
+ *   custo à parte — `enhanced_prompt` na resposta). `frameCount: 0` pula a
+ *   animação e gera só o cubo base. A spritesheet empacota os frames e o
  *   manifesto é v3. 1 tile + 1 animate-with-text-v3.
  *
  * As três existem para o mesmo bloco poder ser comprado nas três técnicas e
@@ -52,8 +55,10 @@
  *     metadado — os pixels moram em GET /characters/{character_id}
  *     .rotation_urls, que é null até status 'completed' (character-detail.ts).
  *   - POST /animate-with-text-v3. required = first_frame + action; frame_count
- *     4–16 par, budget de pixels width×height×frame_count ≤ 524288; todos os
- *     frames num job só (não por direção). ASSÍNCRONO mas responde 200 com
+ *     4–16 par, budget de pixels width×height×frame_count ≤ 524288; aceita
+ *     `no_background` (fundo transparente) e `enhance_prompt` (boolean; a API
+ *     expande a ação — a resposta traz `enhanced_prompt` e cobra
+ *     `enhance_usage` à parte). ASSÍNCRONO mas responde 200 com
  *     {background_job_id}; os frames moram em `last_response.images[]`.
  *
  * ## O que a API NÃO oferece, e como isto contorna
@@ -170,7 +175,8 @@ export interface WorldBlockConfig {
   readonly initImageStrength?: number;
   /**
    * Número de frames da animação (técnica 'texture' apenas).
-   * 4, 8 ou 16. Default 8. Tem que ser par — é o que o /animate-with-text-v3 aceita.
+   * 0 = sem animação (só o cubo base, sem animate-with-text-v3). 4, 8 ou 16
+   * são os valores que o /animate-with-text-v3 aceita. Default 8.
    */
   readonly frameCount?: AnimationFrameCount;
   /**
@@ -184,6 +190,20 @@ export interface WorldBlockConfig {
    * Ausente: gerado via LLM a partir de `description`.
    */
   readonly action?: string;
+  /**
+   * Ping-pong (vai-e-volta) na reprodução (técnica 'texture' apenas):
+   * 0→1→2→3→2→1→0… em vez de resetar (0→1→2→3→0→…). Post-processing do
+   * editor — nunca custa nada. Default true.
+   */
+  readonly pingPong?: boolean;
+  /**
+   * `enhance_prompt` do /animate-with-text-v3 (técnica 'texture' apenas):
+   * a própria API expande `action` numa descrição de movimento mais rica e
+   * devolve o texto em `enhanced_prompt` (cobrando `enhance_usage` à parte).
+   * É camada ADICIONAL — o gerador de ação por LLM continua existindo.
+   * Default true.
+   */
+  readonly enhancePrompt?: boolean;
 }
 
 /**
@@ -275,7 +295,9 @@ export type WorldBlockErrorCode =
   | 'technique-enum'
   | 'init-strength-range'
   | 'frame-count-enum'
-  | 'fps-range';
+  | 'fps-range'
+  | 'ping-pong-type'
+  | 'enhance-prompt-type';
 
 export class WorldBlockValidationError extends Error {
   readonly code: WorldBlockErrorCode;
@@ -386,7 +408,20 @@ function validate(config: WorldBlockConfig): void {
   ) {
     throw new WorldBlockValidationError(
       'frame-count-enum',
-      `frameCount inválido: ${String(config.frameCount)}. O spec aceita ${ANIMATION_FRAME_COUNTS.join(', ')}.`,
+      `frameCount inválido: ${String(config.frameCount)}. Use 0 (sem animação) ou um dos ` +
+        `valores do spec: ${ANIMATION_FRAME_COUNTS.filter((n) => n > 0).join(', ')}.`,
+    );
+  }
+  if (config.pingPong !== undefined && typeof config.pingPong !== 'boolean') {
+    throw new WorldBlockValidationError(
+      'ping-pong-type',
+      `pingPong precisa ser booleano (recebido ${String(config.pingPong)}).`,
+    );
+  }
+  if (config.enhancePrompt !== undefined && typeof config.enhancePrompt !== 'boolean') {
+    throw new WorldBlockValidationError(
+      'enhance-prompt-type',
+      `enhancePrompt precisa ser booleano (recebido ${String(config.enhancePrompt)}).`,
     );
   }
   if (
@@ -462,13 +497,19 @@ function inputHash(config: WorldBlockConfig): string {
   h.update(`|geom=${geom.tileWidth}x${geom.tileHeight}x${geom.cubeHeight}`);
 
   if (technique === 'texture') {
-    // A técnica 'texture' inclui frameCount, fps e action — o que define a
-    // animação. O cubo base também vem do /create-isometric-tile, mas com
-    // shape 'block' FIXO e nenhum campo de estilo: mandar outline/shading/
-    // detail/guidance variaria o artefato sem mudar o hash — proibido.
+    // A técnica 'texture' inclui frameCount, fps, action, pingPong e
+    // enhancePrompt — o que define a animação e o request. O cubo base
+    // também vem do /create-isometric-tile, mas com shape 'block' FIXO e
+    // nenhum campo de estilo: mandar outline/shading/detail/guidance
+    // variaria o artefato sem mudar o hash — proibido. Os marcadores novos
+    // (pingPong/enhancePrompt/views) dão hash novo para o request novo
+    // (no_background sempre vai junto) — os blocos antigos ficam arquivados.
     h.update(`|frameCount=${config.frameCount ?? 8}`);
     h.update(`|fps=${config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS}`);
     h.update(`|action=${config.action ?? ''}`);
+    h.update(`|pingPong=${config.pingPong ?? true}`);
+    h.update(`|enhancePrompt=${config.enhancePrompt ?? true}`);
+    if ((config.frameCount ?? 8) === 0) h.update('|animated=false');
     h.update('|views=1');
   } else {
     h.update(`|shape=${config.shape ?? 'block'}`);
@@ -673,7 +714,13 @@ interface WorldBlockManifestV3 {
   readonly action: string;
   /** Texto gerado pelo LLM (quando `action` não foi fornecido). */
   readonly llmGenerated?: boolean;
-  /** Número de frames. */
+  /** true = textura animada; false = só o cubo base (frameCount 0). */
+  readonly animated: boolean;
+  /** Ping-pong (vai-e-volta) na reprodução. Default true. */
+  readonly pingPong?: boolean;
+  /** Texto expandido pela API via `enhance_prompt` (quando habilitado). */
+  readonly enhancedPrompt?: string;
+  /** Número de frames. 0 = sem animação. */
   readonly frameCount: number;
   /** Frames por segundo. */
   readonly fps: number;
@@ -722,9 +769,13 @@ export async function readWorldBlockResult(
   const manifest = await readManifestFile(assetsDir, hash);
   if (!manifest) return null;
 
-  // v3: textura animada — faces ficam vazias, a spritesheet é o artefato.
+  // v3: textura — faces ficam vazias. Animada: a spritesheet é o artefato;
+  // estática (animated false, frameCount 0): o cubo base.
   if (manifest.version === 3 && manifest.technique === 'texture') {
-    if (!existsSync(spritesheetPath(assetsDir, hash))) return null;
+    // Manifestos antigos (sem `animated`) são animados por definição.
+    const animated = manifest.animated ?? true;
+    const artifact = animated ? spritesheetPath(assetsDir, hash) : baseImagePath(assetsDir, hash);
+    if (!existsSync(artifact)) return null;
     return {
       hash,
       technique: 'texture',
@@ -767,13 +818,19 @@ export interface WorldBlockSummary {
   readonly geometry: ManifestGeometry;
   /** Face → caminho público (v2: 4 faces). Ausente em v3 (texture). */
   readonly faceUrls?: Readonly<Record<BlockFacing, string>>;
-  /** Caminho da spritesheet (v3: texture). Ausente em v2. */
+  /** Caminho da spritesheet (v3: texture animada). Ausente nos demais. */
   readonly spritesheetUrl?: string;
-  /** Caminho do sidecar de animação (v3: texture). */
+  /** Caminho do sidecar de animação (v3: texture animada). */
   readonly animationUrl?: string;
-  /** Número de frames (v3: texture). */
+  /** Caminho do cubo base (v3: texture SEM animação, frameCount 0). */
+  readonly baseUrl?: string;
+  /** true = textura animada; false = só o cubo base (v3: texture). */
+  readonly animated?: boolean;
+  /** Ping-pong (vai-e-volta) na reprodução (v3: texture animada). Default true. */
+  readonly pingPong?: boolean;
+  /** Número de frames (v3: texture). 0 = sem animação. */
   readonly frameCount?: number;
-  /** FPS da animação (v3: texture). */
+  /** FPS da animação (v3: texture animada). */
   readonly fps?: number;
 }
 
@@ -797,18 +854,37 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
     if (!manifest) continue;
 
     if (manifest.version === 3 && manifest.technique === 'texture') {
-      if (!existsSync(spritesheetPath(assetsDir, hash))) continue;
-      out.push({
-        hash,
-        description: manifest.description,
-        shape: 'block', // o cubo base da textura animada é sempre 'block'
-        technique: 'texture',
-        geometry: MANIFEST_GEOMETRY,
-        spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
-        animationUrl: `/world-blocks/${hash}/animation.json`,
-        frameCount: manifest.frameCount,
-        fps: manifest.fps,
-      });
+      // Manifestos antigos (sem `animated`) são animados por definição.
+      const animated = manifest.animated ?? true;
+      if (animated) {
+        if (!existsSync(spritesheetPath(assetsDir, hash))) continue;
+        out.push({
+          hash,
+          description: manifest.description,
+          shape: 'block', // o cubo base da textura animada é sempre 'block'
+          technique: 'texture',
+          geometry: MANIFEST_GEOMETRY,
+          animated: true,
+          spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
+          animationUrl: `/world-blocks/${hash}/animation.json`,
+          frameCount: manifest.frameCount,
+          fps: manifest.fps,
+          pingPong: manifest.pingPong ?? true,
+        });
+      } else {
+        // frameCount 0 — sem animação: o cubo base é o artefato.
+        if (!existsSync(baseImagePath(assetsDir, hash))) continue;
+        out.push({
+          hash,
+          description: manifest.description,
+          shape: 'block',
+          technique: 'texture',
+          geometry: MANIFEST_GEOMETRY,
+          animated: false,
+          baseUrl: `/world-blocks/${hash}/base.png`,
+          frameCount: 0,
+        });
+      }
       continue;
     }
 
@@ -1298,6 +1374,12 @@ interface AnimSidecar {
   readonly frameCount: number;
   readonly action: string;
   readonly llmGenerated?: boolean;
+  /** Ping-pong (vai-e-volta) na reprodução. Default true. */
+  readonly pingPong?: boolean;
+  /** `enhance_prompt` enviado ao /animate-with-text-v3. Default true. */
+  readonly enhancePrompt?: boolean;
+  /** Texto expandido devolvido pela API no `enhanced_prompt` (quando habilitado). */
+  readonly enhancedPrompt?: string;
 }
 
 /**
@@ -1646,6 +1728,8 @@ export async function runWorldBlock(
   let textureAnimJobId: string | undefined;
   let textureAnimUsage: Usage | null | undefined;
   let textureActualFrameCount = 0;
+  /** `enhanced_prompt` devolvido pelo fornecedor (POST ou `last_response` do job). */
+  let textureEnhancedPrompt: string | undefined;
 
   if (technique === 'chained') {
     // ---- molde encadeado: norte nasce do molde; o resultado é o molde das outras.
@@ -1733,8 +1817,10 @@ export async function runWorldBlock(
     );
     faces = [north, ...rest];
   } else if (technique === 'texture') {
-    // ---- textura animada: 1 cubo (tile) + LLM + 1 animate-with-text-v3 (ADR 0032).
+    // ---- textura: 1 cubo (tile) + LLM + 1 animate-with-text-v3 (ADR 0032).
+    // frameCount 0 = sem animação: o cubo base é o artefato final.
     const frameCount = config.frameCount ?? 8;
+    const animated = frameCount > 0;
     const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
     const basePath = baseImagePath(opts.assetsDir, hash);
     const sheetPath = spritesheetPath(opts.assetsDir, hash);
@@ -1751,6 +1837,7 @@ export async function runWorldBlock(
     let llmGenerated = false;
 
     // 1. Cubo base (create-isometric-tile, molde como init_image) — ou cache.
+    //    Existe nas DUAS variantes: animada e estática (frameCount 0).
     if (!existsSync(basePath)) {
       logGuard(
         'create-isometric-tile (1× cubo base pixel-art, molde como referência; preço estimado)',
@@ -1793,128 +1880,153 @@ export async function runWorldBlock(
       opts.onLog?.('[world-block] imagem base já existe. Sem chamada.');
     }
 
-    // 2. Ação da animação — LLM ou config explícita.
-    if (config.action !== undefined && config.action.trim().length > 0) {
-      actionText = config.action.trim();
-      llmGenerated = false;
-    } else {
-      const result = await generateActionViaLlm(config.description, opts.onLog);
-      actionText = result.action;
-      llmGenerated = result.llmGenerated;
-    }
-
-    // 3. Animação (animate-with-text-v3) — ou retomada.
-    if (!existsSync(sheetPath)) {
-      let animStub: AnimStub | null = null;
-      if (existsSync(stubPath)) {
-        try {
-          animStub = JSON.parse(await readFile(stubPath, 'utf8')) as AnimStub;
-        } catch { animStub = null; }
-      }
-
-      if (animStub?.jobId) {
-        opts.onLog?.(
-          `[world-block] retomando animação já paga job=${animStub.jobId} — nenhuma submissão nova.`,
-        );
-        textureAnimJobId = animStub.jobId;
-        baseSeedNum = animStub.seed;
+    // 2+3 só existem na variante animada — frameCount 0 pula LLM e
+    // animate-with-text-v3: o cubo base é o artefato final.
+    if (animated) {
+      // 2. Ação da animação — LLM ou config explícita.
+      if (config.action !== undefined && config.action.trim().length > 0) {
+        actionText = config.action.trim();
+        llmGenerated = false;
       } else {
-        const animEstimate = estimateByArea(
-          COST_TABLE['animate-with-text-v3'],
-          48 * 48,
-        );
-        logGuard(
-          `animate-with-text-v3 (${frameCount} frames; preço estimado)`,
-          guardFor(animEstimate, animEstimate.point),
-          opts.onLog,
-        );
+        const result = await generateActionViaLlm(config.description, opts.onLog);
+        actionText = result.action;
+        llmGenerated = result.llmGenerated;
+      }
 
-        const baseB64 = (await readFile(basePath)).toString('base64');
-        const animSeed = baseSeedNum + 1;
-        const animParams: Record<string, unknown> = {
-          first_frame: asBase64Image(baseB64),
+      // 3. Animação (animate-with-text-v3) — ou retomada.
+      if (!existsSync(sheetPath)) {
+        let animStub: AnimStub | null = null;
+        if (existsSync(stubPath)) {
+          try {
+            animStub = JSON.parse(await readFile(stubPath, 'utf8')) as AnimStub;
+          } catch { animStub = null; }
+        }
+
+        if (animStub?.jobId) {
+          opts.onLog?.(
+            `[world-block] retomando animação já paga job=${animStub.jobId} — nenhuma submissão nova.`,
+          );
+          textureAnimJobId = animStub.jobId;
+          baseSeedNum = animStub.seed;
+        } else {
+          const animEstimate = estimateByArea(
+            COST_TABLE['animate-with-text-v3'],
+            48 * 48,
+          );
+          logGuard(
+            `animate-with-text-v3 (${frameCount} frames; preço estimado)`,
+            guardFor(animEstimate, animEstimate.point),
+            opts.onLog,
+          );
+
+          const baseB64 = (await readFile(basePath)).toString('base64');
+          const animSeed = baseSeedNum + 1;
+          const animParams: Record<string, unknown> = {
+            first_frame: asBase64Image(baseB64),
+            action: actionText,
+            frame_count: frameCount,
+            seed: animSeed,
+            // Fundo transparente nos frames — mesmo contrato do tile
+            // (o /create-isometric-tile não tem o parâmetro; tiles já
+            // nascem transparentes). Confirmado no spec vendorizado.
+            no_background: true,
+            // A API expande a ação numa descrição de movimento mais rica e
+            // devolve o texto em `enhanced_prompt` (cobrando `enhance_usage`
+            // à parte). Camada ADICIONAL ao LLM gerador da ação-base.
+            enhance_prompt: config.enhancePrompt ?? true,
+          };
+
+          const res = await client.submit<{
+            background_job_id?: string;
+            usage?: Usage | null;
+            enhanced_prompt?: string;
+          }>('animate-with-text-v3', animParams);
+          generated += 1;
+
+          if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+          textureAnimUsage = res.usage;
+          textureEnhancedPrompt = res.data?.enhanced_prompt;
+          const jobId = res.data?.background_job_id;
+          if (!jobId) throw new Error('animate-with-text-v3 não devolveu background_job_id');
+          textureAnimJobId = jobId;
+          baseSeedNum = animSeed;
+          manifestDirty = true;
+
+          appendLedger(opts.ledgerPath, {
+            at: new Date().toISOString(),
+            endpoint: 'animate-with-text-v3',
+            lab: true,
+            kind: 'world-block',
+            hash,
+            technique,
+            seed: animSeed,
+            jobId,
+            usd: res.usage?.usd ?? null,
+            generations: res.usage?.generations ?? null,
+            unit: res.usage?.type ?? 'unknown',
+          });
+
+          const stub: AnimStub = { jobId, seed: animSeed, frameCount };
+          await writeFile(stubPath, `${JSON.stringify(stub)}\n`);
+        }
+
+        // Poll + download frames
+        const jobIdForPoll = textureAnimJobId;
+        if (!jobIdForPoll) throw new Error('animate-with-text-v3: jobId ausente');
+        const polled = await pollJob(client, jobIdForPoll, { timeoutMs: 600_000 });
+        if (!polled.ok) {
+          throw new Error(
+            polled.reason === 'timeout'
+              ? 'tempo esgotado aguardando animate-with-text-v3'
+              : (polled.detail ?? 'animate-with-text-v3 falhou'),
+          );
+        }
+
+        const lastResp = polled.job.last_response as
+          | { images?: Array<{ base64?: string }>; enhanced_prompt?: string }
+          | undefined;
+        // O `enhanced_prompt` vem no POST (garantido pelo spec); o job é um
+        // objeto aberto que pode repeti-lo — a preferência é do job.
+        textureEnhancedPrompt = lastResp?.enhanced_prompt ?? textureEnhancedPrompt;
+        const images = lastResp?.images;
+        if (!images || images.length === 0) {
+          throw new Error('animate-with-text-v3 concluiu mas não devolveu frames');
+        }
+
+        const frames: Buffer[] = [];
+        for (const img of images) {
+          const fb64 = img.base64;
+          if (!fb64) continue;
+          frames.push(Buffer.from(fb64, 'base64'));
+        }
+
+        if (frames.length === 0) {
+          throw new Error('animate-with-text-v3: nenhum frame com base64');
+        }
+
+        opts.onLog?.(`[world-block] ${frames.length} frames baixados da animação.`);
+
+        textureActualFrameCount = frames.length;
+
+        await packSpritesheet(opts.assetsDir, hash, frames, {
+          fps,
+          frameCount: frames.length,
           action: actionText,
-          frame_count: frameCount,
-          seed: animSeed,
-        };
+          llmGenerated,
+          pingPong: config.pingPong ?? true,
+          enhancePrompt: config.enhancePrompt ?? true,
+          ...(textureEnhancedPrompt ? { enhancedPrompt: textureEnhancedPrompt } : {}),
+        }, opts.onLog);
 
-        const res = await client.submit<{ background_job_id?: string; usage?: Usage | null }>(
-          'animate-with-text-v3',
-          animParams,
-        );
-        generated += 1;
-
-        if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
-        textureAnimUsage = res.usage;
-        const jobId = res.data?.background_job_id;
-        if (!jobId) throw new Error('animate-with-text-v3 não devolveu background_job_id');
-        textureAnimJobId = jobId;
-        baseSeedNum = animSeed;
-        manifestDirty = true;
-
-        appendLedger(opts.ledgerPath, {
-          at: new Date().toISOString(),
-          endpoint: 'animate-with-text-v3',
-          lab: true,
-          kind: 'world-block',
-          hash,
-          technique,
-          seed: animSeed,
-          jobId,
-          usd: res.usage?.usd ?? null,
-          generations: res.usage?.generations ?? null,
-          unit: res.usage?.type ?? 'unknown',
-        });
-
-        const stub: AnimStub = { jobId, seed: animSeed, frameCount };
-        await writeFile(stubPath, `${JSON.stringify(stub)}\n`);
+        await unlink(stubPath).catch(() => {});
+      } else {
+        opts.onLog?.('[world-block] spritesheet já existe. Sem chamada.');
       }
-
-      // Poll + download frames
-      const jobIdForPoll = textureAnimJobId;
-      if (!jobIdForPoll) throw new Error('animate-with-text-v3: jobId ausente');
-      const polled = await pollJob(client, jobIdForPoll, { timeoutMs: 600_000 });
-      if (!polled.ok) {
-        throw new Error(
-          polled.reason === 'timeout'
-            ? 'tempo esgotado aguardando animate-with-text-v3'
-            : (polled.detail ?? 'animate-with-text-v3 falhou'),
-        );
-      }
-
-      const lastResp = polled.job.last_response as
-        | { images?: Array<{ base64?: string }> }
-        | undefined;
-      const images = lastResp?.images;
-      if (!images || images.length === 0) {
-        throw new Error('animate-with-text-v3 concluiu mas não devolveu frames');
-      }
-
-      const frames: Buffer[] = [];
-      for (const img of images) {
-        const fb64 = img.base64;
-        if (!fb64) continue;
-        frames.push(Buffer.from(fb64, 'base64'));
-      }
-
-      if (frames.length === 0) {
-        throw new Error('animate-with-text-v3: nenhum frame com base64');
-      }
-
-      opts.onLog?.(`[world-block] ${frames.length} frames baixados da animação.`);
-
-      textureActualFrameCount = frames.length;
-
-      await packSpritesheet(opts.assetsDir, hash, frames, {
-        fps,
-        frameCount: frames.length,
-        action: actionText,
-        llmGenerated,
-      }, opts.onLog);
-
-      await unlink(stubPath).catch(() => {});
     } else {
-      opts.onLog?.('[world-block] spritesheet já existe. Sem chamada.');
+      opts.onLog?.(
+        '[world-block] frameCount=0 — bloco SEM animação: só o cubo base, nenhum ' +
+          'animate-with-text-v3.',
+      );
     }
 
     faces = [];
@@ -2201,19 +2313,24 @@ export async function runWorldBlock(
       const frameCount = textureActualFrameCount || (config.frameCount ?? 8);
       const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
 
-      // Recupera action/llmGenerated do sidecar se a spritesheet já existia.
+      // Recupera action/llmGenerated/enhancedPrompt do sidecar se a
+      // spritesheet já existia (execuções anteriores ou retomadas).
       let actionText = config.action ?? '';
       let llmGenerated = false;
+      let enhancedPromptFromSidecar: string | undefined;
       if (existsSync(animSidecarPath(opts.assetsDir, hash))) {
         try {
           const sc = JSON.parse(await readFile(animSidecarPath(opts.assetsDir, hash), 'utf8')) as AnimSidecar;
           actionText = sc.action;
           llmGenerated = sc.llmGenerated ?? false;
+          enhancedPromptFromSidecar = sc.enhancedPrompt;
         } catch { /* mantém defaults */ }
       }
 
       // Recupera usage da base image do ledger — o manifesto anterior.
       const prevV3 = prev?.version === 3 && prev.technique === 'texture' ? prev : null;
+      // O enhanced_prompt desta execução tem precedência sobre o do sidecar.
+      const manifestEnhancedPrompt = textureEnhancedPrompt ?? enhancedPromptFromSidecar;
 
       const manifestV3: WorldBlockManifestV3 = {
         version: 3,
@@ -2223,8 +2340,11 @@ export async function runWorldBlock(
         geometry: MANIFEST_GEOMETRY,
         action: actionText,
         ...(llmGenerated ? { llmGenerated } : {}),
+        animated: frameCount > 0,
+        ...(frameCount > 0 ? { pingPong: config.pingPong ?? true } : {}),
         frameCount,
         fps,
+        ...(manifestEnhancedPrompt ? { enhancedPrompt: manifestEnhancedPrompt } : {}),
         ...(textureBaseUsage || prevV3?.base?.usage
           ? { base: { seed: base + 1, ...(textureBaseUsage ? { usage: textureBaseUsage } : {}), ...(prevV3?.base?.usage && !textureBaseUsage ? { usage: prevV3.base.usage } : {}) } }
           : {}),

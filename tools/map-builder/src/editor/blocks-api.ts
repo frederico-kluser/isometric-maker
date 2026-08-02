@@ -39,10 +39,16 @@ interface WorldBlockSummary {
   readonly spritesheetUrl?: string;
   /** v3 (texture): sidecar com fps e frameCount. */
   readonly animationUrl?: string;
-  /** v3 (texture): número de frames. */
+  /** v3 (texture): número de frames. 0 = estático. */
   readonly frameCount?: number;
   /** v3 (texture): FPS da animação. */
   readonly fps?: number;
+  /** v3 (texture): ping-pong (vai-e-volta). */
+  readonly pingPong?: boolean;
+  /** v3 (texture): false = estático, sem animação. */
+  readonly animated?: boolean;
+  /** v3 (texture): URL da imagem base quando estático. */
+  readonly baseUrl?: string;
   readonly geometry?: {
     readonly tileWidth: number;
     readonly tileHeight: number;
@@ -136,6 +142,9 @@ export async function loadPalette(): Promise<PaletteLoad> {
       animationUrl: b.animationUrl,
       frameCount: b.frameCount,
       fps: b.fps,
+      pingPong: b.pingPong,
+      animated: b.animated,
+      baseUrl: b.baseUrl,
     }));
 
     const definitions: BlockDefinition[] = [

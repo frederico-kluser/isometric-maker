@@ -145,6 +145,8 @@ class FakeClient extends PixelLabClient {
    * worker exige RGBA cru — incompatíveis; ver o comentário em generateTile).
    */
   rejectImageInputs = false;
+  /** Quando definido, o POST de animação devolve `enhanced_prompt`. */
+  animEnhancedPrompt: string | undefined;
 
   override async request<T>(
     method: string,
@@ -210,6 +212,9 @@ class FakeClient extends PixelLabClient {
       return this.ok<T>({
         background_job_id: `animjob-${seed}`,
         usage: { type: 'usd', usd: 0.03 },
+        ...(this.animEnhancedPrompt !== undefined
+          ? { enhanced_prompt: this.animEnhancedPrompt }
+          : {}),
       });
     }
 
@@ -1085,6 +1090,142 @@ test('texture: falha DEPOIS da cobrança do cubo deixa stub, e a retomada não r
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('texture: no_background e enhance_prompt vão ao animate-with-text-v3; enhanced_prompt cai no sidecar e no manifesto', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    client.animEnhancedPrompt = 'richer motion description';
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir)),
+    );
+
+    const anim = client.animBodies[0]!;
+    assert.equal(anim['no_background'], true, 'frames com fundo transparente');
+    assert.equal(anim['enhance_prompt'], true, 'enhance_prompt default true');
+
+    const sidecar = JSON.parse(
+      readFileSync(blockFile(dir, result.hash, 'animation.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    assert.equal(sidecar['enhancePrompt'], true);
+    assert.equal(sidecar['pingPong'], true);
+    assert.equal(sidecar['enhancedPrompt'], 'richer motion description');
+
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['animated'], true);
+    assert.equal(manifest['pingPong'], true);
+    assert.equal(manifest['enhancedPrompt'], 'richer motion description');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: enhance_prompt:false e pingPong:false são respeitados e mudam o hash', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const result = await withFallbackAction(() =>
+      runWorldBlock(
+        client,
+        { ...textureConfig(), enhancePrompt: false, pingPong: false },
+        opts(dir),
+      ),
+    );
+    const anim = client.animBodies[0]!;
+    assert.equal(anim['enhance_prompt'], false);
+
+    const sidecar = JSON.parse(
+      readFileSync(blockFile(dir, result.hash, 'animation.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    assert.equal(sidecar['pingPong'], false);
+    assert.equal(sidecar['enhancePrompt'], false);
+    assert.equal(sidecar['enhancedPrompt'], undefined, 'sem enhanced_prompt quando desligado');
+
+    assert.notEqual(
+      worldBlockHash(textureConfig()),
+      worldBlockHash({ ...textureConfig(), pingPong: false }),
+    );
+    assert.notEqual(
+      worldBlockHash(textureConfig()),
+      worldBlockHash({ ...textureConfig(), enhancePrompt: false }),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: frameCount 0 — só o cubo base, sem animate-with-text-v3; manifesto animated:false e baseUrl no catálogo', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, { ...textureConfig(), frameCount: 0 }, opts(dir)),
+    );
+
+    assert.equal(client.tileBodies.length, 1, 'o cubo base é gerado');
+    assert.equal(client.animBodies.length, 0, 'nenhum animate-with-text-v3');
+    assert.equal(result.generated, 1);
+    assert.equal(result.faces.length, 0);
+
+    assert.ok(existsSync(blockFile(dir, result.hash, 'base.png')), 'o cubo base existe');
+    assert.ok(!existsSync(blockFile(dir, result.hash, 'spritesheet.png')), 'sem spritesheet');
+
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['version'], 3);
+    assert.equal(manifest['animated'], false);
+    assert.equal(manifest['frameCount'], 0);
+    assert.equal(manifest['animation'], undefined, 'sem registro de animação');
+
+    // Leitura: bloco estático é lido pelo base.png.
+    assert.ok(await readWorldBlockResult(result.hash, join(dir, 'assets')));
+
+    // Catálogo: baseUrl em vez de spritesheet/animation.
+    const list = await listWorldBlocks(join(dir, 'assets'));
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.animated, false);
+    assert.equal(list[0]?.baseUrl, `/world-blocks/${result.hash}/base.png`);
+    assert.equal(list[0]?.spritesheetUrl, undefined);
+    assert.equal(list[0]?.animationUrl, undefined);
+
+    // Idempotência: segunda execução não gasta nada.
+    const client2 = new FakeClient();
+    const second = await withFallbackAction(() =>
+      runWorldBlock(client2, { ...textureConfig(), frameCount: 0 }, opts(dir)),
+    );
+    assert.equal(client2.calls, 0);
+    assert.equal(second.fromCache, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('frameCount 0 é válido; pingPong e enhancePrompt precisam ser booleanos', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    await withFallbackAction(() =>
+      runWorldBlock(client, { ...textureConfig(), frameCount: 0 }, opts(dir)),
+    );
+    assert.equal(client.animBodies.length, 0, 'frameCount 0 não chega a animar');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  await assertValidation({ ...textureConfig(), pingPong: 'sim' as never }, 'ping-pong-type');
+  await assertValidation({ ...textureConfig(), enhancePrompt: 'sim' as never }, 'enhance-prompt-type');
+});
+
+test('texture: pingPong e enhancePrompt entram no hash; defaults explícitos não', () => {
+  const t = textureConfig();
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, pingPong: true }));
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, enhancePrompt: true }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, pingPong: false }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, enhancePrompt: false }));
+  assert.notEqual(
+    worldBlockHash(t),
+    worldBlockHash({ ...t, frameCount: 0 }),
+    '0 = sem animação, outro artefato',
+  );
 });
 
 // ------------------------------------------------------------------ guard e ledger
