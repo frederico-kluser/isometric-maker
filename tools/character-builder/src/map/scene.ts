@@ -125,9 +125,28 @@ export interface SceneOptions {
   readonly gridMargin?: number;
 }
 
+/**
+ * O personagem desenhado sobre o mapa, no modo de teste.
+ *
+ * `x`/`y` são contínuos (o motor de movimento é contínuo no plano) e `z` é
+ * inteiro (o eixo vertical é discreto por decisão de projeto). `offsetY` é a
+ * parábola do pulo em pixels de MUNDO, negativa para cima — decoração de tela,
+ * nunca somada ao `z`.
+ */
+export interface ActorDraw {
+  /** URL do quadro atual. Tem que ter passado por `preloadActor`. */
+  readonly url: string;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly offsetY: number;
+}
+
 export interface SceneState {
   readonly map: MapData;
   readonly camera: Camera;
+  /** Personagem no mapa, ou null fora do modo de teste. */
+  readonly actor?: ActorDraw | null;
   /** Célula vazia sob o cursor onde a peça assentaria. null esconde o preview. */
   readonly preview: Cell3D | null;
   /** true quando a ação atual é destrutiva — pinta o cubo de preview de vermelho. */
@@ -148,6 +167,15 @@ export interface IsoScene {
   readonly app: Application;
   /** Registra as peças da paleta e pré-carrega a arte das que têm PNG. */
   setPalette(blocks: readonly BlockDef[]): Promise<void>;
+  /**
+   * Carrega os quadros do personagem antes do modo de teste começar.
+   *
+   * `render` é síncrono e roda a cada quadro; carregar textura lá dentro
+   * pintaria o personagem só depois de alguns quadros, e faria isso de novo a
+   * cada troca de direção. URL que falhar é ignorada — arte que não carrega não
+   * derruba o editor, e o quadro simplesmente não aparece.
+   */
+  preloadActor(urls: readonly string[]): Promise<void>;
   render(state: SceneState): void;
   /** Gira a câmera — imediato, sem animação. Devolve a câmera final. */
   rotateTo(rotation: Rotation, options: RotateOptions): Camera;
@@ -238,6 +266,32 @@ export async function createIsoScene(
 
   // --- texturas ---
   const owned: Texture[] = [];
+
+  /**
+   * Quadros do personagem já carregados, por URL.
+   *
+   * Cache separado do da paleta de propósito: a arte do personagem entra e sai
+   * com o modo de teste, e misturá-la com a dos blocos faria sair do modo de
+   * teste descartar textura de bloco — ou, pior, não descartar nada.
+   */
+  const actorTextures = new Map<string, Texture>();
+
+  const preloadActor = async (urls: readonly string[]): Promise<void> => {
+    const faltando = [...new Set(urls)].filter((u) => !actorTextures.has(u));
+    await Promise.all(
+      faltando.map(async (url) => {
+        try {
+          const tex = await Assets.load<Texture>(url);
+          tex.source.scaleMode = 'nearest';
+          tex.source.autoGenerateMipmaps = false;
+          actorTextures.set(url, tex);
+        } catch {
+          // Quadro que não carrega não derruba o editor — o personagem só não
+          // aparece naquela pose. Mesma política da paleta.
+        }
+      }),
+    );
+  };
 
   const fromCanvas = (c: HTMLCanvasElement): Texture => {
     const tex = Texture.from(c);
@@ -478,6 +532,40 @@ export async function createIsoScene(
     s.y = box.y;
   }
 
+  /**
+   * Posiciona o personagem. Diferente de `place` em duas coisas, e as duas
+   * importam:
+   *
+   * 1. **Âncora nos pés**, no centro de baixo da textura — o cubo ancora no
+   *    vértice de cima do losango, o personagem assenta no chão da célula.
+   * 2. **Deslocamento até o chão da célula**: `cellToScreen` devolve o vértice
+   *    superior do losango do topo da própria célula, e o chão dela fica
+   *    `cubeHeight + tileHeight/2` pixels abaixo — a altura do cubo mais meio
+   *    losango. Sem esse deslocamento o personagem flutua um bloco acima.
+   */
+  function placeActor(
+    s: Sprite,
+    texture: Texture,
+    actor: ActorDraw,
+    camera: Camera,
+  ): void {
+    const p = cellToScreen({ x: actor.x, y: actor.y, z: actor.z }, camera, geom);
+    const chao = geom.zStep + geom.tileHeight / 2 + actor.offsetY;
+    s.texture = texture;
+    const box = spriteBox({
+      screenX: p.x,
+      screenY: p.y + chao * camera.zoom,
+      textureWidth: texture.width,
+      tileWidth: geom.tileWidth,
+      zoom: camera.zoom,
+      anchorX: texture.width / 2,
+      anchorY: texture.height,
+    });
+    s.scale.set(box.scale);
+    s.x = box.x;
+    s.y = box.y;
+  }
+
   interface Drawable {
     readonly cell: Cell3D;
     readonly block: string;
@@ -552,12 +640,34 @@ export async function createIsoScene(
       }
     }
 
-    // --- blocos, do fundo para a frente ---
+    // --- blocos, do fundo para a frente, com o personagem interleaved ---
+    //
+    // O personagem NÃO é uma camada por cima: ele entra na mesma ordenação dos
+    // blocos, pela chave de profundidade da célula em que está. Desenhá-lo
+    // depois de tudo o faria aparecer na frente de paredes que deveriam
+    // escondê-lo; desenhá-lo antes o esconderia atrás do chão em que pisa.
+    const actor = state.actor ?? null;
+    const actorTex = actor ? actorTextures.get(actor.url) : undefined;
+    const actorKey = actor
+      ? depthAt(
+          { x: Math.floor(actor.x), y: Math.floor(actor.y), z: actor.z },
+          camera,
+        )
+      : Number.POSITIVE_INFINITY;
+    let actorDesenhado = actor === null || actorTex === undefined;
+
     for (const d of collect(map, camera)) {
+      if (!actorDesenhado && d.key > actorKey) {
+        placeActor(blockPool.take(), actorTex!, actor!, camera);
+        actorDesenhado = true;
+      }
       const p = cellToScreen(d.cell, camera, geom);
       const base = blockPool.take();
       place(base, textureFor(d.block, vista), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
     }
+    // Personagem à frente de tudo que existe: em cima da pilha mais próxima, ou
+    // num mapa vazio.
+    if (!actorDesenhado) placeActor(blockPool.take(), actorTex!, actor!, camera);
 
     // --- realce da célula atingida ---
     if (state.highlight) {
@@ -617,10 +727,14 @@ export async function createIsoScene(
     animState.clear();
     animFps.clear();
     pingPongFlag.clear();
+    // As texturas do personagem vêm do Assets do PixiJS e não estão em `owned`;
+    // o destroy do app com `texture: true` cuida delas. Aqui só se solta a
+    // referência.
+    actorTextures.clear();
     app.destroy(true, { children: true, texture: true, textureSource: true });
   };
 
-  return { app, setPalette, render, rotateTo, resize, destroy };
+  return { app, setPalette, preloadActor, render, rotateTo, resize, destroy };
 }
 
 /** Só para o caso impossível de girar antes do primeiro desenho. */
