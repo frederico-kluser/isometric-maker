@@ -47,7 +47,13 @@ import {
   makeCatalog,
   type BlockCatalog,
 } from '@isometric-maker/iso-core/block-catalog';
-import { pick3d, pickColumnTop, type Pick3DResult } from '../pick3d.ts';
+import {
+  columnHeight,
+  pick3d,
+  pickColumnTop,
+  type Pick3DResult,
+  type PickCell,
+} from '../pick3d.ts';
 import { createIsoScene, type BlockDef, type IsoScene } from '../scene.ts';
 import {
   canRedo,
@@ -220,11 +226,28 @@ export function MapEditor() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !ready) return;
+
+    // O cubo de preview segue o alvo de cada ferramenta, não um só:
+    //   - remover: o bloco que será removido (cubo vermelho);
+    //   - pintar: o bloco pintado; sem bloco, o piso onde a peça nova assenta;
+    //   - colocar e empilhar: a célula vazia onde a peça nova assenta.
+    let previewCell: PickCell | null = null;
+    let previewInvalid = false;
+    if (pickState) {
+      if (tool === 'remover') {
+        previewCell = pickState.hit ?? null;
+        previewInvalid = true;
+      } else if (tool === 'pintar') {
+        previewCell = pickState.hit ?? pickState.placement;
+      } else {
+        previewCell = pickState.placement;
+      }
+    }
     scene.render({
       map,
       camera,
-      preview: pickState?.placement ?? null,
-      previewInvalid: tool === 'remover',
+      preview: previewCell,
+      previewInvalid,
       highlight: pickState?.hit ?? null,
     });
   }, [map, camera, pickState, tool, ready]);
@@ -251,9 +274,23 @@ export function MapEditor() {
       if (t === 'remover') {
         if (result.hit) next = removeBlock(current, result.hit);
       } else if (t === 'pintar') {
+        // Com bloco sob o cursor, pinta por cima; no vazio, assenta no piso —
+        // é assim que a pintura de chão funciona.
         if (result.hit) next = paintBlock(current, result.hit, block);
+        else next = placeBlock(current, result.placement, block);
       } else {
-        next = placeBlock(current, result.placement, block);
+        // colocar e empilhar. O placement do pick3d é a célula ACIMA do hit,
+        // que na lateral de uma torre pode cair DENTRO da coluna (o mesmo
+        // pixel mapeia para célula diferente em z alto); o topo da coluna é o
+        // assento seguro. O empilhar já entrega o topo — o Math.max é
+        // redundante mas inofensivo.
+        const p = result.placement;
+        const colH = columnHeight(current, p.x, p.y);
+        next = placeBlock(
+          current,
+          { x: p.x, y: p.y, z: Math.max(p.z, colH) },
+          block,
+        );
       }
       return pushHistory(h, next);
     });
