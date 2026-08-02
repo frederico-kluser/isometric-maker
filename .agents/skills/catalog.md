@@ -49,7 +49,7 @@ family.
 
 ## Knowledge — the isometric model, which is this repository's own
 
-Four skills own `packages/iso-core` and `tools/map-builder` — the layer that decides *what is true*
+Four skills own `packages/iso-core` and `tools/character-builder/src/map` — the layer that decides *what is true*
 about the world, as opposed to how it is drawn. Three of them existed as code with hundreds of
 passing tests and no skill pointing at them, which is how an agent ends up reimplementing `canEnter`
 or writing picking from the ADR's wrong constant. The fourth started as a decision **not** taken and

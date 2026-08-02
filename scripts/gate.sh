@@ -94,8 +94,17 @@ stage "pixellab-pipeline · npm run typecheck" \
 # ═══════════════════════════════════════════════════════════════════════
 header "character-builder"
 
-auxiliar_stage "character-builder · npm run typecheck" \
-	"cd tools/character-builder 2>/dev/null && npm run typecheck"
+# O character-builder é o aplicativo inteiro desde a unificação: estúdio de
+# personagem, editor de mapa e tela inicial. Os testes que eram do map-builder
+# (autotile, export, picking, camera, placement, editor/map-state) rodam aqui,
+# pelo glob `src/**/*.test.ts`.
+stage "character-builder · npm run typecheck" \
+	"cd tools/character-builder && npm run typecheck" \
+	"-"
+
+stage "character-builder · npm test" \
+	"cd tools/character-builder && npm test" \
+	"-"
 
 # ═══════════════════════════════════════════════════════════════════════
 header "documentação"
@@ -153,13 +162,6 @@ stage "iso-core · npm test" \
 
 stage "iso-core · npm run typecheck" \
 	"cd packages/iso-core && npm run typecheck" \
-	"-"
-
-# ═══════════════════════════════════════════════════════════════════════
-header "map-builder"
-
-stage "map-builder · npm run typecheck" \
-	"cd tools/map-builder && npm run typecheck" \
 	"-"
 
 # ═══════════════════════════════════════════════════════════════════════

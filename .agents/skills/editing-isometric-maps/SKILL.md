@@ -3,7 +3,7 @@ name: editing-isometric-maps
 description: Owns how this editor places pieces on an isometric map - picking as a downward walk along the grid diagonal instead of sprite hit-testing, the pure floor, stack and edge tools, the RLE column store that keeps no holes, autotiling driven by rules the API returned, and an export that fails loudly when an atlas is missing. Use whenever selecting or placing a bloco, a parede or a porta, painting terrain, stacking or removing a block, wiring a brush, computing a neighbour mask, or exporting the project - including Portuguese phrasings like "colocar a peca no mapa", "empilhar um bloco em cima do outro", "clicou na celula errada", "pintar o terreno", "faltou a peca do autotile", "exportar o projeto", "o atlas nao foi encontrado", "desfazer a edicao". Triggers on pick, pickWithHighlight, pintarChao, empilharBloco, colocarNaAresta, buildMask, autotile, missingMasks, BlockStore, EdgeStore, exportProject, tile_rules, RLE, brush, footprint.
 metadata:
   type: knowledge
-  verification_signal: cd tools/map-builder && npm test
+  verification_signal: cd tools/character-builder && npm test
 ---
 
 # Editing isometric maps
@@ -24,9 +24,9 @@ aims.
 The right method is a walk, and it works because of the identity owned by
 `projecting-isometric-geometry`: each Z level advances exactly `zStep/tileHeight` of a cell in both
 axes, which is half a cell in this geometry
-(`tools/map-builder/src/picking.ts:12@59f858fb`).
+(`tools/character-builder/src/map/picking.ts:12@59f858fb`).
 
-The algorithm (`tools/map-builder/src/picking.ts:160@59f858fb`):
+The algorithm (`tools/character-builder/src/map/picking.ts:160@59f858fb`):
 
 1. Find `zMax`, the highest `z` holding blocks.
 2. For `z` from `zMax` down to 0: convert `(sx, sy, z)` to world, floor to a cell, and if that cell
@@ -37,7 +37,7 @@ Top-down order is what makes it correct: the first hit is the nearest surface to
 bottom-up returns cells buried under other cells.
 
 `pickWithHighlight` returns the picked cell **and** the floor cell below it
-(`tools/map-builder/src/picking.ts:218@59f858fb`), because highlighting only the picked cell leaves
+(`tools/character-builder/src/map/picking.ts:218@59f858fb`), because highlighting only the picked cell leaves
 the user unable to see where a placement would land.
 
 ## The map model constrains the editor, and that is the point
@@ -56,14 +56,14 @@ the user unable to see where a placement would land.
 ## Autotiling consumes rules; it never hardcodes a table
 
 The neighbour mask is 4 bits — a bit set when the neighbour in that direction carries the **same
-terrain at the same `z`** (`tools/map-builder/src/autotile.ts:40@fc26feb1`). The piece is then looked
+terrain at the same `z`** (`tools/character-builder/src/map/autotile.ts:40@fc26feb1`). The piece is then looked
 up in the `tile_rules` the API returned. **Do not write the 16-entry table by hand**
-(`tools/map-builder/src/autotile.ts:12@fc26feb1`).
+(`tools/character-builder/src/map/autotile.ts:12@fc26feb1`).
 
 **A combination with no matching piece is a visible error, never a silent fallback**
-(`tools/map-builder/src/autotile.ts:8@fc26feb1`). `missingMasks` exists so the editor can say
+(`tools/character-builder/src/map/autotile.ts:8@fc26feb1`). `missingMasks` exists so the editor can say
 *which* combinations the tileset failed to deliver
-(`tools/map-builder/src/autotile.ts:145@fc26feb1`). Substituting a nearby tile hides a tileset that
+(`tools/character-builder/src/map/autotile.ts:145@fc26feb1`). Substituting a nearby tile hides a tileset that
 was paid for and came back incomplete.
 
 **The bit order is a guess.** `bit0 = N, bit1 = L, bit2 = S, bit3 = O` is this repo's convention,
@@ -80,11 +80,11 @@ a fact.
 ## Export is a contract, and it fails by absence
 
 `project.json` is **the contract with the runtime**, with paths relative to the project file
-(`tools/map-builder/src/export.ts:7@7b09f10b`). It is written atomically — temp file in the same
+(`tools/character-builder/src/map/export.ts:7@7b09f10b`). It is written atomically — temp file in the same
 directory, then rename.
 
 Every referenced atlas is checked to exist on disk **before** success is declared, and a missing one
-**fails with the filename** (`tools/map-builder/src/export.ts:16@7b09f10b`). Exporting a project that
+**fails with the filename** (`tools/character-builder/src/map/export.ts:16@7b09f10b`). Exporting a project that
 silently omits an atlas produces a runtime that loads and then draws nothing, and the cause is three
 steps removed from the symptom.
 
@@ -114,25 +114,25 @@ a pool so that painting does not allocate per frame.
 **Sprite scale must be uniform and the anchor declared.** Setting `width` and `height` separately
 scales the axes differently, the art's top diamond stops being 2:1 and blocks stop seaming — the
 symptom reads as "the generated art is wrong" and is not. `projecting-isometric-geometry` owns the
-arithmetic; `tools/map-builder/src/placement.ts` is the one implementation, with tests.
+arithmetic; `tools/character-builder/src/map/placement.ts` is the one implementation, with tests.
 
 ## The placement tools that exist, and the state they return
 
 Three modules under the editor's tool directory, all pure: each takes the current store and returns
 a **new** one plus a pt-BR message. Nothing mutates in place, and nothing writes to the screen —
-edits go through `iso-core` operations only (`tools/map-builder/src/tools/paint.ts:11@d704c95a`).
+edits go through `iso-core` operations only (`tools/character-builder/src/map/tools/paint.ts:11@d704c95a`).
 
 | Tool | Operations | Semantics that surprise |
 |---|---|---|
-| floor | `pintarChao`, `apagarChao` | paints at `z = 0` and **replaces** an existing block rather than refusing (`tools/map-builder/src/tools/paint.ts:4@d704c95a`) |
-| stack | `empilharBloco`, `removerBloco`, `alturaColuna` | stacks at the first empty `z` **above the current top**, never into a gap; removes from the top only (`tools/map-builder/src/tools/stack.ts:8@b67dab5f`) |
+| floor | `pintarChao`, `apagarChao` | paints at `z = 0` and **replaces** an existing block rather than refusing (`tools/character-builder/src/map/tools/paint.ts:4@d704c95a`) |
+| stack | `empilharBloco`, `removerBloco`, `alturaColuna` | stacks at the first empty `z` **above the current top**, never into a gap; removes from the top only (`tools/character-builder/src/map/tools/stack.ts:8@b67dab5f`) |
 | edge | `colocarNaAresta`, `removerDaAresta`, `elementoNaAresta`, `arestaProxima` | `arestaProxima` switches the cursor into edge mode by proximity, which is why placing a wall does not need a separate tool selection |
 
 Both column rules follow from the store having no holes: stacking above the top and removing from the
 top are the only operations that keep a column contiguous.
 
 **Edges carry four element types** — `parede`, `porta`, `pilar`, `escada` — where a pillar sits on
-the **vertex**, not the edge (`tools/map-builder/src/tools/wall.ts:23@027ac4e4`). Two of those four
+the **vertex**, not the edge (`tools/character-builder/src/map/tools/wall.ts:23@027ac4e4`). Two of those four
 have documented behaviour the model does not implement: a door is meant to allow passage and a stair
 is meant to allow a step regardless of height, but `CollisionMap.hasEdge` takes no type, so nothing
 can distinguish them. `simulating-isometric-physics` carries the full account. **Do not tell a user
@@ -158,7 +158,7 @@ heuristic obsolete.
   directly and ignores all of it. The **data** exists; the wiring does not.
 
 Two entries that used to live here are now implemented, and claiming otherwise wastes a task:
-**undo/redo** exists as a snapshot stack (`tools/map-builder/src/editor/map-state.ts`), and **camera
+**undo/redo** exists as a snapshot stack (`tools/character-builder/src/map/editor/map-state.ts`), and **camera
 rotation** exists in four views with an animated turn (`rotating-isometric-camera`).
 
 These are absences, not defects. **Do not invent a convention to fill one.** Propose it through
@@ -176,9 +176,9 @@ the failure this skill library exists to prevent.
 
 ## References
 
-- `tools/map-builder/src/picking.ts` — the diagonal walk and the highlight pair
-- `tools/map-builder/src/autotile.ts` — mask, lookup, and the missing-combination report
-- `tools/map-builder/src/export.ts` — the runtime contract and failure by absence
+- `tools/character-builder/src/map/picking.ts` — the diagonal walk and the highlight pair
+- `tools/character-builder/src/map/autotile.ts` — mask, lookup, and the missing-combination report
+- `tools/character-builder/src/map/export.ts` — the runtime contract and failure by absence
 - `packages/iso-core/src/map.ts` — `BlockStore`, `EdgeStore`, the one-cell object rule
 - `packages/iso-core/src/tile-rules.ts` — the five open assumptions AB-370 to AB-374
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the identity that makes picking cheap
