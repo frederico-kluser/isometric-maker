@@ -40,9 +40,13 @@ import {
 } from './cube3d.ts';
 import { createGrid, createGroundPlane, resizeGrid, resizeGroundPlane } from './grid3d.ts';
 import {
+  BASE_YAW,
   createEditorCamera,
+  DEFAULT_DISTANCE,
+  ELEVATION,
   panCamera,
   pixelDeltaToWorld,
+  ROTATION_DURATION_MS,
   setCameraRotation,
   zoomCamera,
 } from './controls3d.ts';
@@ -74,8 +78,10 @@ export interface IsoScene3D {
   pan(dx: number, dy: number, viewportW: number, viewportH: number): void;
   /** Zoom inteiro. */
   zoom(factor: number): void;
-  /** Gira a câmera para a vista discreta. */
+  /** Gira a câmera para a vista discreta (instantâneo). */
   setRotation(rotation: Rotation): void;
+  /** Gira a câmera com animação suave (280 ms, ease-in-out cúbico). */
+  animateRotation(targetRotation: Rotation): void;
   /** Redimensiona o renderer. */
   resize(width: number, height: number): void;
   /** Destrói a cena e libera recursos. */
@@ -88,6 +94,33 @@ const BG_COLOR = 0x0b1020;
 const GRID_MARGIN = 4;
 /** BoxGeometry(1,1,1) tem centro na origem — base fica em -0.5. */
 const HALF_CUBE = 0.5;
+
+// ------------------------------------------------------------------ animação
+
+/** Easing cúbico simétrico — acelera no início, desacelera no fim. */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+/** Estado da animação de rotação em curso. null = parado. */
+let animState: {
+  frameId: number;
+  startPos: THREE.Vector3;
+  targetPos: THREE.Vector3;
+  startTime: number;
+  /** Renderer e câmera referenciados durante a animação. */
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.OrthographicCamera;
+} | null = null;
+
+/** Cancela a animação de rotação em curso, se houver. */
+function cancelRotationAnim(): void {
+  if (animState) {
+    cancelAnimationFrame(animState.frameId);
+    animState = null;
+  }
+}
 
 // ------------------------------------------------------------------ fábrica
 
@@ -270,6 +303,53 @@ export async function createIsoScene3D(
     setCameraRotation(camera, rotation);
   };
 
+  const animateRotation = (targetRotation: Rotation): void => {
+    cancelRotationAnim();
+
+    const startPos = camera.position.clone();
+    const targetYaw = BASE_YAW + targetRotation * (Math.PI / 2);
+    const targetPos = new THREE.Vector3(
+      DEFAULT_DISTANCE * Math.cos(ELEVATION) * Math.sin(targetYaw),
+      DEFAULT_DISTANCE * Math.sin(ELEVATION),
+      DEFAULT_DISTANCE * Math.cos(ELEVATION) * Math.cos(targetYaw),
+    );
+
+    const startTime = performance.now();
+
+    const tick = (now: number): void => {
+      const elapsed = now - startTime;
+      const t = Math.min(1, elapsed / ROTATION_DURATION_MS);
+      const eased = easeInOutCubic(t);
+
+      camera.position.lerpVectors(startPos, targetPos, eased);
+      camera.lookAt(0, 0, 0);
+      camera.updateProjectionMatrix();
+
+      renderer.render(scene, camera);
+
+      if (t < 1) {
+        animState!.frameId = requestAnimationFrame(tick);
+      } else {
+        // Snap ao destino exato
+        camera.position.copy(targetPos);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        animState = null;
+      }
+    };
+
+    animState = {
+      frameId: requestAnimationFrame(tick),
+      startPos,
+      targetPos,
+      startTime,
+      renderer,
+      scene,
+      camera,
+    };
+  };
+
   // --- resize ---
   const resize = (width: number, height: number): void => {
     if (width === 0 || height === 0) return;
@@ -285,6 +365,7 @@ export async function createIsoScene3D(
 
   // --- destroy ---
   const destroy = (): void => {
+    cancelRotationAnim();
     renderer.dispose();
     for (const [, mesh] of blockMeshes) {
       scene.remove(mesh);
@@ -308,6 +389,7 @@ export async function createIsoScene3D(
     pan,
     zoom,
     setRotation,
+    animateRotation,
     resize,
     destroy,
   };

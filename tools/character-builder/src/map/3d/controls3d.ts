@@ -22,13 +22,16 @@ import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts'
 // ------------------------------------------------------------------ constantes
 
 /** Ângulo de elevação da câmera (do plano horizontal). 30° ≈ visual 2:1. */
-const ELEVATION = Math.PI / 6; // 30°
+export const ELEVATION = Math.PI / 6; // 30°
 
 /** Distância da câmera à origem — controla o zoom aparente. */
-const DEFAULT_DISTANCE = 15;
+export const DEFAULT_DISTANCE = 15;
 
 /** Ângulo de yaw base para a vista 0 (câmera ao sul, olhando para norte). */
-const BASE_YAW = Math.PI / 4; // 45°
+export const BASE_YAW = Math.PI / 4; // 45°
+
+/** Duração da animação de rotação em ms. */
+export const ROTATION_DURATION_MS = 280;
 
 // ------------------------------------------------------------------ câmera
 
