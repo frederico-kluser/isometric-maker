@@ -26,6 +26,7 @@
 import * as THREE from 'three';
 import {
   CANONICAL_CUBE,
+  faceAtPixel,
   type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
 import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from '../cube.ts';
@@ -161,45 +162,209 @@ function fallbackColorTexture(hue: number): THREE.Texture {
   return views[0]!; // usa a vista 0 como fallback
 }
 
+// ------------------------------------------------------------------ extração de faces do sprite
+
+/**
+ * Carrega uma imagem a partir de URL. Devolve null em falha.
+ */
+function loadImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/**
+ * Extrai as 3 faces visíveis de um sprite isométrico.
+ *
+ * Usa `faceAtPixel` do iso-core para classificar cada pixel como topo,
+ * esquerda ou direita. Cada face vai para um canvas separado — pixels
+ * que não pertencem à face ficam transparentes.
+ *
+ * O fundo transparente do sprite original é preservado.
+ */
+function extractFaceRegions(
+  sourceImage: HTMLImageElement,
+  geom: IsoCubeGeometry,
+): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } | null {
+  const { spriteWidth: w, spriteHeight: h } = geom;
+
+  // Desenha a fonte num canvas para ler pixels
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = w;
+  srcCanvas.height = h;
+  const srcCtx = srcCanvas.getContext('2d');
+  if (!srcCtx) return null;
+  srcCtx.imageSmoothingEnabled = false;
+  srcCtx.drawImage(sourceImage, 0, 0);
+  const srcData = srcCtx.getImageData(0, 0, w, h);
+
+  // Canvas de saída — mesmo tamanho do sprite, pixels posicionados igual
+  function makeFaceCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; data: ImageData } {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    const data = ctx.createImageData(w, h);
+    return { canvas, ctx, data };
+  }
+
+  const top = makeFaceCanvas();
+  const left = makeFaceCanvas();
+  const right = makeFaceCanvas();
+
+  // Classifica cada pixel e copia para a face correspondente
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const face = faceAtPixel(x, y, geom);
+      if (face === null) continue; // pixel fora da silhueta
+
+      const si = (y * w + x) * 4;
+      const r = srcData.data[si]!;
+      const g = srcData.data[si + 1]!;
+      const b = srcData.data[si + 2]!;
+      const a = srcData.data[si + 3]!;
+
+      let dst: ImageData;
+      if (face === 'top') dst = top.data;
+      else if (face === 'left') dst = left.data;
+      else dst = right.data; // 'right'
+
+      dst.data[si] = r;
+      dst.data[si + 1] = g;
+      dst.data[si + 2] = b;
+      dst.data[si + 3] = a;
+    }
+  }
+
+  top.ctx.putImageData(top.data, 0, 0);
+  left.ctx.putImageData(left.data, 0, 0);
+  right.ctx.putImageData(right.data, 0, 0);
+
+  return { top: top.canvas, left: left.canvas, right: right.canvas };
+}
+
+/**
+ * Extrai as faces de uma URL de sprite e devolve 3 texturas.
+ * Devolve null se a imagem não carregar.
+ */
+async function extractFacesFromUrl(
+  url: string,
+  geom: IsoCubeGeometry,
+): Promise<{ top: THREE.Texture; left: THREE.Texture; right: THREE.Texture } | null> {
+  const img = await loadImage(url);
+  if (!img) return null;
+  const faces = extractFaceRegions(img, geom);
+  if (!faces) return null;
+  return {
+    top: canvasTexture(faces.top),
+    left: canvasTexture(faces.left),
+    right: canvasTexture(faces.right),
+  };
+}
+
+// ------------------------------------------------------------------ mapeamento de faces extraídas para BoxGeometry
+
+/**
+ * Cria os 6 materiais a partir das 3 faces extraídas de UM sprite.
+ *
+ * O sprite mostra o cubo de um ângulo (ex: norte). As faces "right" e "left"
+ * do sprite correspondem a faces físicas diferentes do cubo conforme a
+ * câmera gira. Esta função recebe a rotação e remapeia as texturas.
+ *
+ * Mapeamento por rotação:
+ *
+ *   Rot 0 (sul):  top→+Y,  right→+X (leste),  left→-Z (norte)
+ *   Rot 1 (leste): top→+Y,  right→+Z (sul),   left→+X (leste)
+ *   Rot 2 (norte): top→+Y,  right→-X (oeste), left→+Z (sul)
+ *   Rot 3 (oeste): top→+Y,  right→-Z (norte), left→-X (oeste)
+ *
+ * As 3 faces restantes (-Y, e as duas não visíveis no sprite) recebem cor sólida.
+ */
+function materialsFromExtractedFaces(
+  faces: { top: THREE.Texture; left: THREE.Texture; right: THREE.Texture },
+  rotation: Rotation,
+  hue: number,
+): CubeMaterials {
+  const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
+  const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
+
+  const hidden = new THREE.MeshLambertMaterial({ color: hiddenColor });
+  const topMat = new THREE.MeshLambertMaterial({ map: faces.top });
+  const rightMat = new THREE.MeshLambertMaterial({ map: faces.right });
+  const leftMat = new THREE.MeshLambertMaterial({ map: faces.left });
+  const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
+
+  // Para cada rotação, as faces "right" e "left" do sprite mapeiam para
+  // faces físicas diferentes do cubo.
+  // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
+  const mats: THREE.Material[] = Array.from({ length: 6 });
+
+  mats[BOX_GROUP.top] = topMat;
+  mats[BOX_GROUP.bottom] = bottomMat;
+
+  switch (rotation) {
+    case 0: // sul: right→+X, left→-Z
+      mats[BOX_GROUP.right] = rightMat;
+      mats[BOX_GROUP.left] = hidden;
+      mats[BOX_GROUP.front] = hidden;
+      mats[BOX_GROUP.back] = leftMat;
+      break;
+    case 1: // leste: right→+Z, left→+X
+      mats[BOX_GROUP.right] = leftMat;
+      mats[BOX_GROUP.left] = hidden;
+      mats[BOX_GROUP.front] = rightMat;
+      mats[BOX_GROUP.back] = hidden;
+      break;
+    case 2: // norte: right→-X, left→+Z
+      mats[BOX_GROUP.right] = hidden;
+      mats[BOX_GROUP.left] = rightMat;
+      mats[BOX_GROUP.front] = leftMat;
+      mats[BOX_GROUP.back] = hidden;
+      break;
+    case 3: // oeste: right→-Z, left→-X
+      mats[BOX_GROUP.right] = hidden;
+      mats[BOX_GROUP.left] = leftMat;
+      mats[BOX_GROUP.front] = hidden;
+      mats[BOX_GROUP.back] = rightMat;
+      break;
+  }
+
+  // Preenche os slots que ficaram undefined
+  for (let i = 0; i < 6; i++) {
+    if (!mats[i]) mats[i] = hidden;
+  }
+
+  return { materials: mats, hasTexture: true };
+}
+
 /**
  * Cria os 6 materiais para um cubo a partir de um BlockDef.
  *
  * Estratégia:
- * 1. Se tem `faceUrls` (v2: 4 faces), carrega texturas e mapeia para as faces
+ * 1. Se tem `faceUrls` (v2: 4 faces), extrai as 3 faces do sprite e mapeia
  * 2. Se tem `spritesheetUrl` (v3: textura animada), usa o primeiro frame em
  *    todas as faces laterais
  * 3. Se não tem arte, usa cor procedural com matiz
- *
- * O topo e o fundo sempre usam cor sólida derivada do matiz (a arte isométrica
- * 2D não tem textura separada para o topo — o losango do topo está embutido
- * em cada face).
  */
 export async function createCubeMaterials(
   block: BlockDef,
 ): Promise<CubeMaterials> {
-  const topColor = new THREE.Color().setHSL(
-    (block.hue ?? 210) / 360,
-    block.hue === undefined ? 0 : 0.45,
-    0.62,
-  );
-  const sideColor = new THREE.Color().setHSL(
-    (block.hue ?? 210) / 360,
-    block.hue === undefined ? 0 : 0.45,
-    0.47,
-  );
-
-  // Face URLs (v2: 4 faces por direção)
+  // Face URLs (v2: 4 faces por direção) — extrai topo/esquerda/direita do sprite
   if (block.faceUrls) {
-    const faceTextures = await Promise.all([
-      loadTexture(block.faceUrls.north),
-      loadTexture(block.faceUrls.east),
-      loadTexture(block.faceUrls.south),
-      loadTexture(block.faceUrls.west),
-    ]);
-
-    // Build 6 materials. For each rotation, faceTextures[rot] maps to a
-    // different box face. We build for rotation 0 and the scene remaps.
-    return materialsWithFaces(faceTextures, 0, topColor);
+    // Usa o sprite "north" como base. Conforme a câmera gira, usamos
+    // sprites diferentes (north→0, east→1, south→2, west→3).
+    // Para já, extraímos do north. O remapeamento por rotação é feito
+    // no scene3d.ts trocando os materiais.
+    const faces = await extractFacesFromUrl(block.faceUrls.north, CANONICAL_CUBE);
+    if (faces) {
+      return materialsFromExtractedFaces(faces, 0, block.hue ?? 210);
+    }
+    // fallthrough → procedural se extração falhar
   }
 
   // v3: textura (animada ou estática)
@@ -209,14 +374,14 @@ export async function createCubeMaterials(
   if (staticUrl) {
     try {
       const tex = await loadTexture(staticUrl);
-      return materialsWithSingleTexture(tex, topColor);
+      return materialsWithSingleTexture(tex, block.hue ?? 210);
     } catch {
       // fallthrough → procedural
     }
   } else if (block.spritesheetUrl) {
     try {
       const tex = await loadTexture(block.spritesheetUrl);
-      return materialsWithSingleTexture(tex, topColor);
+      return materialsWithSingleTexture(tex, block.hue ?? 210);
     } catch {
       // fallthrough → procedural
     }
@@ -227,38 +392,13 @@ export async function createCubeMaterials(
 }
 
 /**
- * Materiais com 4 texturas por face (v2), na rotação dada.
- */
-function materialsWithFaces(
-  faceTextures: readonly THREE.Texture[],
-  rotation: number,
-  topColor: THREE.Color,
-): CubeMaterials {
-  const mats: THREE.Material[] = Array.from({ length: 6 });
-
-  // Top and bottom: cor sólida
-  mats[BOX_GROUP.top] = new THREE.MeshLambertMaterial({ color: topColor });
-  mats[BOX_GROUP.bottom] = new THREE.MeshLambertMaterial({ color: topColor });
-
-  // Mapeia as 4 faces cardinais para os grupos do BoxGeometry
-  const order = [BOX_GROUP.front, BOX_GROUP.right, BOX_GROUP.back, BOX_GROUP.left];
-  for (let i = 0; i < 4; i++) {
-    const texIdx = ((i - rotation) % 4 + 4) % 4;
-    mats[order[i]!] = new THREE.MeshLambertMaterial({
-      map: faceTextures[texIdx]!,
-    });
-  }
-
-  return { materials: mats, hasTexture: true };
-}
-
-/**
  * Materiais com uma única textura nas faces laterais.
  */
 function materialsWithSingleTexture(
   tex: THREE.Texture,
-  topColor: THREE.Color,
+  hue: number,
 ): CubeMaterials {
+  const topColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.62);
   const sideMat = new THREE.MeshLambertMaterial({ map: tex });
   const mats: THREE.Material[] = [
     sideMat,  // right (+X)

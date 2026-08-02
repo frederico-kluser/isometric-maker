@@ -86,6 +86,8 @@ export interface IsoScene3D {
 
 const BG_COLOR = 0x0b1020;
 const GRID_MARGIN = 4;
+/** BoxGeometry(1,1,1) tem centro na origem — base fica em -0.5. */
+const HALF_CUBE = 0.5;
 
 // ------------------------------------------------------------------ fábrica
 
@@ -193,7 +195,7 @@ export async function createIsoScene3D(
               const mats = materialsByBlock.get(run.block);
               if (mats) {
                 mesh = createCubeMesh(mats);
-                mesh.position.set(x, blockY, z);
+                mesh.position.set(x, blockY + HALF_CUBE, z);
                 mesh.userData = { blockId: run.block, cellX: x, cellY: z, cellZ: blockY };
                 scene.add(mesh);
                 blockMeshes.set(meshKey, mesh);
@@ -228,7 +230,7 @@ export async function createIsoScene3D(
       previewMesh = createPreviewMesh(state.previewInvalid === true);
       previewMesh.position.set(
         state.preview.x,
-        state.preview.z, // z do mapa → Y do Three.js
+        state.preview.z + HALF_CUBE, // z do mapa → Y do Three.js
         state.preview.y, // y do mapa → Z do Three.js
       );
       scene.add(previewMesh);
@@ -239,7 +241,7 @@ export async function createIsoScene3D(
       highlightMesh = createHighlightMesh();
       highlightMesh.position.set(
         state.highlight.x,
-        state.highlight.z, // z do mapa → Y do Three.js
+        state.highlight.z + HALF_CUBE, // z do mapa → Y do Three.js
         state.highlight.y, // y do mapa → Z do Three.js
       );
       scene.add(highlightMesh);
