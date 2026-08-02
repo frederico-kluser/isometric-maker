@@ -6,6 +6,18 @@
  * A agulha acompanha o giro suave da câmera mesmo que o React só receba o
  * estado final da rotação (o giro de 280 ms roda no ticker do PixiJS).
  *
+ * ## Por que duas camadas SVG (fixa + agulha)
+ *
+ * CSS `transform-origin` em elementos `<g>` do SVG tem comportamento
+ * inconsistente entre navegadores: `transform-box: view-box` não é suportado
+ * universalmente, e sem ele `50% 50%` cai no bounding box do `<g>` (que é
+ * a agulha alongada, ~8×52) — o centro da rotação sai do centro da rosa e
+ * a agulha "orbita" em vez de girar no lugar.
+ *
+ * A solução: a agulha vive num `<div>` HTML (não SVG) absolutamente
+ * posicionado sobre a rosa fixa. `<div>` recebe `transform: rotate()` com
+ * `transform-origin: center`, que funciona em qualquer navegador.
+ *
  * ## Por que ângulo acumulado, e não `(2 - rotation) * 90`
  *
  * O ângulo alvo é `(2 - rotation) * 90`: rotação 0 (Sul) = agulha para baixo,
@@ -59,35 +71,44 @@ export function Compass({ rotation }: { rotation: Rotation }) {
       aria-label={T.bussola.ariaLabel(vista)}
       title={T.bussola.titulo(vista)}
     >
-      <svg viewBox="-50 -50 100 100" className="block size-16 text-foreground">
-        {/* Rosa dos ventos FIXA: os rótulos são direções do mundo, não giram. */}
-        <circle r="30" fill="none" strokeWidth="2" className="stroke-foreground/25" />
-        <g
-          className="fill-muted-foreground"
-          fontSize="16"
-          fontWeight="600"
-          textAnchor="middle"
-          dominantBaseline="central"
+      <div className="relative size-16">
+        {/* Rosa dos ventos FIXA: círculo e rótulos N/S/L/O. */}
+        <svg
+          viewBox="-50 -50 100 100"
+          className="absolute inset-0 size-full text-foreground"
         >
-          <text y="-38">N</text>
-          <text y="38">S</text>
-          <text x="-38">O</text>
-          <text x="38">L</text>
-        </g>
-        {/* Agulha: a metade escura é a ponta, e aponta para a vista atual. */}
-        <g
+          <circle r="30" fill="none" strokeWidth="2" className="stroke-foreground/25" />
+          <g
+            className="fill-muted-foreground"
+            fontSize="16"
+            fontWeight="600"
+            textAnchor="middle"
+            dominantBaseline="central"
+          >
+            <text y="-38">N</text>
+            <text y="38">S</text>
+            <text x="-38">O</text>
+            <text x="38">L</text>
+          </g>
+        </svg>
+
+        {/* Agulha: camada HTML sobreposta. O `<div>` gira com CSS
+            transition — `transform-origin: center` funciona em HTML,
+            não tem os problemas de SVG `transform-box`. */}
+        <div
+          className="absolute inset-0"
           style={{
             transform: `rotate(${needleAngle}deg)`,
-            transformBox: 'view-box',
-            transformOrigin: '50% 50%',
             transition: `transform ${ROTATION_DURATION_MS}ms ${COMPASS_EASE}`,
           }}
         >
-          <polygon points="0,-26 4,0 0,0 -4,0" className="fill-foreground" />
-          <polygon points="0,0 4,0 0,26 -4,0" className="fill-foreground/35" />
-          <circle r="3.5" className="fill-background stroke-foreground/50" strokeWidth="1.5" />
-        </g>
-      </svg>
+          <svg viewBox="-50 -50 100 100" className="size-full" overflow="visible">
+            <polygon points="0,-26 4,0 0,0 -4,0" className="fill-foreground" />
+            <polygon points="0,0 4,0 0,26 -4,0" className="fill-foreground/35" />
+            <circle r="3.5" className="fill-background stroke-foreground/50" strokeWidth="1.5" />
+          </svg>
+        </div>
+      </div>
     </div>
   );
 }
