@@ -6,7 +6,7 @@
  * O formulário é disclosure simples (o registry @motion não tem disclosure de
  * formulário — accordion é para listas, sheet é drawer de página).
  */
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,6 +31,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { HoldToConfirmButton } from '@/components/motion-ui/hold-to-confirm';
 import type { Character, Silhouette } from '../../../../server/model.ts';
 import { wizard } from '../../../strings/wizard.ts';
 import {
@@ -59,28 +60,73 @@ export function CharacterHeader({
 	const { characterId, setCharacterId } = useSelectedCharacter();
 	const mannequinReady = isMannequinReady(studio);
 	const [open, setOpen] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+
+	const chars = studio.characters;
+	const isEmpty = chars.length === 0;
+	const selectedChar = chars.find((c) => c.id === characterId);
+	// Bloqueia deletar se houver job rodando para o personagem selecionado.
+	const hasRunningJob = selectedChar
+		? Object.entries(studio.jobs).some(
+				([key, job]) =>
+					key.startsWith(selectedChar.id + '::') && job.status === 'gerando',
+			)
+		: false;
+
+	const handleDelete = async (): Promise<void> => {
+		if (!selectedChar) return;
+		setDeleting(true);
+		try {
+			await api('characters', {
+				method: 'DELETE',
+				body: JSON.stringify({ characterId: selectedChar.id }),
+			});
+			// Seleciona o primeiro restante ou limpa.
+			const fresh = await api<StudioResponse>('studio');
+			const remaining = fresh.characters.filter((c) => c.id !== selectedChar.id);
+			if (remaining.length > 0) {
+				setCharacterId(remaining[0]!.id);
+			}
+		} catch {
+			// Erro aparece no estado do action — o refresh já atualiza.
+		} finally {
+			setDeleting(false);
+			await refresh();
+		}
+	};
 
 	return (
 		<div className="flex flex-col gap-4">
+			{isEmpty ? (
+				<div className="rounded-lg border border-dashed border-border p-6 text-center">
+					<p className="text-sm font-medium text-muted-foreground">
+						{wizard.header.semPersonagens}
+					</p>
+					<p className="mt-1 text-xs text-muted-foreground">
+						{wizard.header.semPersonagensNota}
+					</p>
+				</div>
+			) : null}
 			<div className="flex flex-wrap items-end gap-3">
 				<div className="flex flex-col gap-2">
 					<span className="text-sm font-medium">
 						{wizard.header.personagem}
 					</span>
 					<Select
-						value={characterId}
+						value={isEmpty ? '' : characterId}
 						onValueChange={(v) => {
-							if (typeof v === 'string') setCharacterId(v);
+							if (typeof v === 'string' && v !== '') setCharacterId(v);
 						}}
+						disabled={isEmpty}
 					>
 						<SelectTrigger
 							className="w-56"
 							aria-label={wizard.header.seletorAria}
 						>
-							<SelectValue />
+							<SelectValue placeholder={isEmpty ? wizard.header.semPersonagens : undefined} />
 						</SelectTrigger>
 						<SelectContent>
-							{studio.characters.map((c) => (
+							{chars.map((c) => (
 								<SelectItem key={c.id} value={c.id}>
 									{c.label}
 								</SelectItem>
@@ -88,7 +134,7 @@ export function CharacterHeader({
 						</SelectContent>
 					</Select>
 				</div>
-				{mannequinReady ? (
+				{isEmpty || mannequinReady ? (
 					<Button variant="outline" onClick={() => setOpen((o) => !o)}>
 						<Plus aria-hidden />
 						{wizard.header.novo}
@@ -104,6 +150,30 @@ export function CharacterHeader({
 						<TooltipContent>{wizard.header.novoBloqueado}</TooltipContent>
 					</Tooltip>
 				)}
+				{selectedChar && !isEmpty ? (
+					hasRunningJob ? (
+						<Tooltip>
+							<TooltipTrigger render={<span className="inline-flex" />}>
+								<Button variant="ghost" size="icon" disabled>
+									<Trash2 aria-hidden className="size-4" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>
+								{wizard.header.deletarBloqueado}
+							</TooltipContent>
+						</Tooltip>
+					) : (
+						<HoldToConfirmButton
+							holdSeconds={2}
+							mode="callback"
+							onConfirm={() => void handleDelete()}
+							className="h-9 px-3"
+						>
+							<Trash2 aria-hidden className="size-4" />
+							<span className="ml-1.5">{wizard.header.deletar}</span>
+						</HoldToConfirmButton>
+					)
+				) : null}
 			</div>
 			{open ? (
 				<NewCharacterForm

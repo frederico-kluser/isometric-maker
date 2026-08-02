@@ -187,7 +187,7 @@ const store: StudioStore = { load, save };
 interface Job {
 	readonly key: string;
 	readonly label: string;
-	status: "gerando" | "pronto" | "falhou";
+	status: "gerando" | "pronto" | "falhou" | "cancelado";
 	message?: string;
 	startedAt: number;
 }
@@ -492,8 +492,15 @@ function spawn(
 	void (async () => {
 		try {
 			await work();
-			jobs.set(key, { key, label, status: "pronto", startedAt: Date.now() });
+			// Só atualiza se o job ainda está gerando — um cancelamento entre o
+			// fim do work e aqui troca o status para "cancelado".
+			if (jobs.get(key)?.status === "gerando") {
+				jobs.set(key, { key, label, status: "pronto", startedAt: Date.now() });
+			}
 		} catch (err) {
+			// Idem: falha de job cancelado é esperada (a chamada remota pode ter
+			// sido abortada) — não sobrescreve o status de cancelado.
+			if (jobs.get(key)?.status !== "gerando") return;
 			const message = err instanceof Error ? err.message : String(err);
 			jobs.set(key, {
 				key,
@@ -814,6 +821,37 @@ export async function handle(
 			return true;
 		}
 
+		// ---- jobs: cancelar -------------------------------------------------------
+		if (url.pathname.startsWith("/api/jobs/") && req.method === "DELETE") {
+			const jobKey = url.pathname.slice("/api/jobs/".length);
+			if (!jobKey) {
+				badRequest(res, "chave do job é obrigatória");
+				return true;
+			}
+			const job = jobs.get(jobKey);
+			if (!job) {
+				json(res, 404, { error: `job "${jobKey}" não encontrado` });
+				return true;
+			}
+			if (job.status !== "gerando") {
+				json(res, 200, { ok: true, status: job.status });
+				return true;
+			}
+			jobs.set(jobKey, { ...job, status: "cancelado" });
+			// Reseta as células associadas que não estão prontas: uma célula
+			// "vazio" ou "na-fila" volta ao estado inicial, e o wizard vai
+			// oferecer o botão de gerar de novo. Células "pronto" não são
+			// tocadas — são o progresso pago que sobrevive ao cancelamento.
+			const s = await load();
+			const cell = s.cells[jobKey];
+			if (cell && cell.status !== "pronto") {
+				delete s.cells[jobKey];
+			}
+			await save(s);
+			json(res, 200, { ok: true, status: "cancelado" });
+			return true;
+		}
+
 		// ---- wizard: config -----------------------------------------------------
 		if (url.pathname === "/api/wizard/config" && req.method === "POST") {
 			const b = await readBody<{
@@ -830,31 +868,15 @@ export async function handle(
 				fitFrames?: boolean;
 			}>(req);
 
-			// Só o manequim trava a config; todo personagem derivado herda o lock.
-			if (b.characterId !== "manequim") {
-				badRequest(
-					res,
-					"só o manequim trava a configuração — os demais personagens herdam o lock do wizard",
-				);
-				return true;
-			}
+			// Só o primeiro personagem trava a config; personagens derivados herdam o lock.
 			const s = await load();
-			const ch = s.characters.find((c) => c.id === "manequim");
+			const ch = s.characters.find((c) => c.id === b.characterId);
 			if (!ch) {
-				json(res, 404, { error: "manequim não encontrado" });
+				json(res, 404, { error: `personagem "${b.characterId}" não encontrado` });
 				return true;
 			}
-			if (ch.wizard?.etapa === "pronto") {
-				badRequest(res, "a configuração é imutável depois do manequim pronto");
-				return true;
-			}
-			if ((ch.wizard?.southVersions.length ?? 0) > 0) {
-				badRequest(
-					res,
-					"já existe uma versão da sul gerada — a configuração só muda via reset do manequim",
-				);
-				return true;
-			}
+			// Valida os campos ANTES de checar o lock: um POST com enum inválido
+			// não deve parecer que o lock está bloqueando.
 			if (b.frameCount !== 4 && b.frameCount !== 8 && b.frameCount !== 16) {
 				badRequest(
 					res,
@@ -866,8 +888,6 @@ export async function handle(
 				badRequest(res, "fps precisa ser um número positivo");
 				return true;
 			}
-			// Faixa do create-character-v3 no spec vendorizado:
-			// from-scratch image_size 32–256; reference mode é advisory.
 			if (
 				typeof b.size !== "number" ||
 				!Number.isInteger(b.size) ||
@@ -881,63 +901,48 @@ export async function handle(
 				return true;
 			}
 			if (b.silhouette !== undefined && !SILHOUETTES.includes(b.silhouette)) {
+				badRequest(res, `silhouette desconhecida: ${b.silhouette}`);
+				return true;
+			}
+			if (b.detail !== undefined && !DETAIL_OPTIONS.includes(b.detail as DetailOption)) {
 				badRequest(
 					res,
-					`silhouette desconhecida: ${b.silhouette} (válidas: ${SILHOUETTES.join(", ")})`,
+					`detail inválido: ${b.detail} (válidos: ${DETAIL_OPTIONS.join(", ")})`,
 				);
 				return true;
 			}
-			// Qualidade: detail e outline existem no create-character-v3 mas são
-			// IGNORADOS em modo reference_image. Mantidos para modo from-scratch.
-			// shading e guidanceScale foram removidos — o v3 não tem esses parâmetros.
-			if (b.detail !== undefined && !DETAIL_OPTIONS.includes(b.detail)) {
+			if (b.outline !== undefined && !OUTLINE_OPTIONS.includes(b.outline as OutlineOption)) {
 				badRequest(
 					res,
-					`detail desconhecido: ${String(b.detail)} (válidos: ${DETAIL_OPTIONS.join(", ")})`,
+					`outline inválido: ${b.outline} (válidos: ${OUTLINE_OPTIONS.join(", ")})`,
 				);
 				return true;
 			}
-			if (b.outline !== undefined && !OUTLINE_OPTIONS.includes(b.outline)) {
-				badRequest(
-					res,
-					`outline desconhecido: ${String(b.outline)} (válidos: ${OUTLINE_OPTIONS.join(", ")})`,
-				);
+			if (b.view !== undefined && !VIEW_OPTIONS.includes(b.view as ViewOption)) {
+				badRequest(res, `view inválida: ${b.view} (válidas: ${VIEW_OPTIONS.join(", ")})`);
 				return true;
 			}
-			if (b.view !== undefined && !VIEW_OPTIONS.includes(b.view)) {
-				badRequest(
-					res,
-					`view desconhecida: ${String(b.view)} (válidas: ${VIEW_OPTIONS.join(", ")})`,
-				);
-				return true;
-			}
-			if (b.templateId !== undefined && !TEMPLATE_OPTIONS.includes(b.templateId)) {
-				badRequest(
-					res,
-					`templateId desconhecido: ${String(b.templateId)} (válidos: ${TEMPLATE_OPTIONS.join(", ")})`,
-				);
-				return true;
-			}
-
-			// coverage_percentage do /create-image-bitforge: 0–100 no spec.
 			if (
-				b.coverage !== undefined &&
-				(typeof b.coverage !== "number" ||
-					!Number.isFinite(b.coverage) ||
-					b.coverage < 0 ||
-					b.coverage > 100)
+				b.templateId !== undefined &&
+				!TEMPLATE_OPTIONS.includes(b.templateId as TemplateOption)
 			) {
 				badRequest(
 					res,
-					"coverage precisa ser um número entre 0 e 100 (coverage_percentage do create-image-bitforge)",
+					`templateId inválido: ${b.templateId} (válidos: ${TEMPLATE_OPTIONS.join(", ")})`,
 				);
 				return true;
 			}
-			if (b.fitFrames !== undefined && typeof b.fitFrames !== "boolean") {
-				badRequest(res, "fitFrames precisa ser booleano");
+			if (ch.wizard?.etapa === "pronto") {
+				badRequest(res, "a configuração é imutável depois do personagem pronto");
 				return true;
 			}
-
+			if ((ch.wizard?.southVersions.length ?? 0) > 0) {
+				badRequest(
+					res,
+					"já existe uma versão da sul gerada — a configuração só muda via reset do personagem",
+				);
+				return true;
+			}
 			s.lock = {
 				frameCount: b.frameCount,
 				fps: b.fps,
@@ -949,7 +954,7 @@ export async function handle(
 				...(b.coverage !== undefined ? { coverage: b.coverage } : {}),
 				...(b.fitFrames !== undefined ? { fitFrames: b.fitFrames } : {}),
 			};
-			const idx = s.characters.findIndex((c) => c.id === "manequim");
+			const idx = s.characters.findIndex((c) => c.id === ch.id);
 			s.characters[idx] = {
 				...ch,
 				size: b.size,
@@ -1587,19 +1592,19 @@ export async function handle(
 				seed?: number;
 			}>(req);
 			const s = await load();
-			const mannequin = s.characters.find((c) => c.id === "manequim");
-			if (mannequin?.wizard?.etapa !== "pronto") {
-				badRequest(
-					res,
-					"personagens derivados exigem o manequim pronto — conclua o wizard do manequim primeiro",
-				);
-				return true;
-			}
 			const lock = s.lock;
 			if (!lock) {
 				badRequest(
 					res,
-					"trave a configuração do manequim primeiro (POST /api/wizard/config)",
+					"trave a configuração primeiro (POST /api/wizard/config)",
+				);
+				return true;
+			}
+			const base = s.characters.find((c) => c.wizard?.etapa === "pronto");
+			if (!base) {
+				badRequest(
+					res,
+					"é preciso ter um personagem com wizard concluído para derivar novos",
 				);
 				return true;
 			}
@@ -1632,7 +1637,7 @@ export async function handle(
 				description: b.description,
 				// Sem silhueta informada, o derivado herda a do manequim: é o corpo
 				// de referência, e peça só vale dentro da mesma silhueta.
-				silhouette: b.silhouette ?? mannequin.silhouette,
+				silhouette: b.silhouette ?? base.silhouette,
 				size: lock.size,
 				seed: b.seed ?? Math.floor(Math.random() * 100000),
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
@@ -1641,6 +1646,48 @@ export async function handle(
 			s.characters.push(ch);
 			await save(s);
 			json(res, 200, ch);
+			return true;
+		}
+
+		if (url.pathname === "/api/characters" && req.method === "DELETE") {
+			const b = await readBody<{ characterId?: string }>(req);
+			if (typeof b.characterId !== "string" || b.characterId.trim() === "") {
+				badRequest(res, "characterId é obrigatório");
+				return true;
+			}
+			const s = await load();
+			const idx = s.characters.findIndex((c) => c.id === b.characterId);
+			if (idx === -1) {
+				json(res, 404, { error: `personagem "${b.characterId}" não encontrado` });
+				return true;
+			}
+			const ch = s.characters[idx];
+			if (ch?.builtin) {
+				badRequest(res, "personagens embutidos não podem ser deletados");
+				return true;
+			}
+			// Bloqueia se houver QUALQUER job gerando para este personagem.
+			const prefix = b.characterId + "::";
+			for (const [jobKey, job] of jobs) {
+				if (jobKey.startsWith(prefix) && job.status === "gerando") {
+					json(res, 409, {
+						error: `o personagem "${ch.label}" está sendo gerado agora — espere terminar para apagar`,
+						code: "character-generating",
+					});
+					return true;
+				}
+			}
+			// Remove o personagem do array.
+			s.characters.splice(idx, 1);
+			// Remove todas as células com prefixo do personagem.
+			for (const ck of Object.keys(s.cells)) {
+				if (ck.startsWith(prefix)) delete s.cells[ck];
+			}
+			await save(s);
+			// Remove assets em disco (assíncrono: melhor esforço, não trava o response).
+			const assetDir = join(ASSETS, "wizard", b.characterId);
+			rm(assetDir, { recursive: true, force: true }).catch(() => {});
+			json(res, 200, { ok: true });
 			return true;
 		}
 

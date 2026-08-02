@@ -48,6 +48,18 @@ export const wizard = {
     criar: 'Criar personagem',
     /** Botão de cancelar */
     cancelar: 'Cancelar',
+    /** Botão de deletar personagem (hold-to-confirm) */
+    deletar: 'Deletar personagem',
+    /** Rótulo interno do hold-to-confirm ao deletar */
+    deletarHold: 'Segure para deletar',
+    /** Tooltip quando deletar está bloqueado por job rodando */
+    deletarBloqueado: 'não pode deletar enquanto houver geração em andamento',
+    /** Mensagem quando não há personagens no estúdio */
+    semPersonagens: 'Nenhum personagem no estúdio',
+    /** Instrução quando a lista está vazia */
+    semPersonagensNota:
+      'Crie um personagem para começar — ele percorre o wizard ' +
+      '(configuração → face sul → 8 direções) e serve de corpo-base.',
   },
 
   /** Rótulos visíveis das silhuetas (chave = Silhouette do model) */

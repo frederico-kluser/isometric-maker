@@ -10,13 +10,15 @@
  * servidor e "Tentar de novo" na mesma rota — a célula não está `pronto`,
  * então a idempotência não bloqueia a nova tentativa.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
 	Confetti,
 	type ConfettiHandle,
 } from '@/components/motion-ui/confetti';
 import { Skeleton } from '@/components/motion-ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { DIRECTIONS, DIR_SHORT } from '../../../../server/model.ts';
+import { directions8Key } from '../../../../server/model.ts';
 import { direcaoAria, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
@@ -34,8 +36,23 @@ export function DirectionsStep({
 	readonly busy: boolean;
 }) {
 	const action = useAction(refresh);
+	const [cancelling, setCancelling] = useState(false);
 	const confettiRef = useRef<ConfettiHandle>(null);
 	const prevReady = useRef<boolean | undefined>(undefined);
+
+	const jobKey = directions8Key(progress.character.id);
+
+	const cancel = async (): Promise<void> => {
+		setCancelling(true);
+		try {
+			await api(`jobs/${encodeURIComponent(jobKey)}`, { method: 'DELETE' });
+			await refresh();
+		} catch {
+			// Melhor esforço — o poll vai corrigir o estado de qualquer jeito.
+		} finally {
+			setCancelling(false);
+		}
+	};
 
 	useEffect(() => {
 		if (prevReady.current === false && progress.dir8Ready) {
@@ -98,14 +115,25 @@ export function DirectionsStep({
 							/>
 						</FailureNotice>
 					) : (
-						<ActionButton
-							state={action.state}
-							message={action.message}
-							generating={generating}
-label={wizard.direcoes8.gerar}
-disabled={!progress.southReady || !progress.locked || busy}
-							onClick={generate}
-						/>
+						<div className="flex items-center gap-3">
+							<ActionButton
+								state={action.state}
+								message={action.message}
+								generating={generating}
+								label={wizard.direcoes8.gerar}
+								disabled={!progress.southReady || !progress.locked || busy}
+								onClick={generate}
+							/>
+							{generating ? (
+								<Button
+									variant="ghost"
+									disabled={cancelling}
+									onClick={() => void cancel()}
+								>
+									{wizard.header.cancelar}
+								</Button>
+							) : null}
+						</div>
 					)}
 					{!progress.locked ? (
 						<p className="text-sm text-muted-foreground">
