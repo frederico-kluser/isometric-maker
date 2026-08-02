@@ -22,6 +22,8 @@ import {
   HammerIcon,
   Layers2Icon,
   PaintBucketIcon,
+  PencilIcon,
+  PlayIcon,
   RedoIcon,
   RotateCwIcon,
   Trash2Icon,
@@ -29,6 +31,25 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from 'lucide-react';
+import {
+  createMovementState,
+  DEFAULT_CONFIG,
+  type MovementInput,
+  type MovementState,
+} from '../../../../../packages/iso-core/src/movement.ts';
+import { stepWithMap } from '../../../../../packages/iso-core/src/simulate.ts';
+import { visualOffsetY } from '../../../../../packages/iso-core/src/jump.ts';
+import { buildCollisionMap, spawnZAt } from '../collision-map.ts';
+import {
+  actionFor,
+  directionNameFor,
+  frameUrl,
+  viewDirectionIndex,
+  worldDirectionFromKeys,
+  type ActorFrames,
+  type HeldDirections,
+} from '../actor.ts';
+import type { Studio } from '../../../server/model.ts';
 import type { MapData } from '../../../../../packages/iso-core/src/map.ts';
 import {
   ROTATION_LABELS,
@@ -54,7 +75,7 @@ import {
   type Pick3DResult,
   type PickCell,
 } from '../pick3d.ts';
-import { createIsoScene, type BlockDef, type IsoScene } from '../scene.ts';
+import { createIsoScene, type ActorDraw, type BlockDef, type IsoScene } from '../scene.ts';
 import {
   canRedo,
   canUndo,
@@ -88,6 +109,9 @@ import { editor as T } from '../strings.ts';
 
 const GEOM = DEFAULT_GEOMETRY;
 const ZOOM_STEPS = [1, 2, 3, 4] as const;
+
+/** Altura visual do pulo em pixels de mundo — igual ao zStep canônico. */
+const JUMP_PX = 24;
 
 /** Ferramentas do editor. Cada uma lê o clique de um jeito diferente. */
 const TOOLS = ['empilhar', 'colocar', 'pintar', 'remover'] as const;
@@ -128,12 +152,30 @@ export function MapEditor() {
   const [ready, setReady] = useState(false);
   const toasts = useMessages();
 
+  // ─── modo de teste
+  const [mode, setMode] = useState<'editar' | 'testar'>('editar');
+  const [actorState, setActorState] = useState<MovementState | null>(null);
+
+  // Refs para o ticker: ler estado React dentro do callback do Pixi recriaria
+  // o callback a cada digitação; refs deixam o ticker ler o valor atual sem se
+  // reinscrever.
+  const actorRef = useRef<MovementState | null>(null);
+  const collisionRef = useRef<ReturnType<typeof buildCollisionMap> | null>(null);
+  const actorFramesRef = useRef<ActorFrames | null>(null);
+  const actorBaseRef = useRef<Record<string, readonly string[]> | null>(null);
+  const testTickRef = useRef(0);
+  const heldRef = useRef<HeldDirections>({ up: false, down: false, left: false, right: false });
+  const jumpRef = useRef(false);
+  const crouchRef = useRef(false);
+  const walkRef = useRef(false);
+  const tickerRef = useRef<(() => void) | null>(null);
+
   const map = history.present;
 
   // Refs espelhando o estado: os handlers de ponteiro são registrados uma vez
   // e precisam ler o valor atual sem se reinscrever a cada tecla digitada.
-  const stateRef = useRef({ map, camera, tool, selectedBlock });
-  stateRef.current = { map, camera, tool, selectedBlock };
+  const stateRef = useRef({ map, camera, tool, selectedBlock, mode });
+  stateRef.current = { map, camera, tool, selectedBlock, mode };
 
   // ---------------------------------------------------------------- paleta
 
@@ -193,6 +235,9 @@ export function MapEditor() {
 
     return () => {
       disposed = true;
+      const tick = tickerRef.current;
+      if (scene && tick) scene.app.ticker.remove(tick);
+      tickerRef.current = null;
       sceneRef.current = null;
       scene?.destroy();
     };
@@ -223,11 +268,21 @@ export function MapEditor() {
     return () => observer.disconnect();
   }, []);
 
+  // Reconstruir CollisionMap quando o mapa muda durante o teste.
+  useEffect(() => {
+    if (mode !== 'testar') return;
+    collisionRef.current = buildCollisionMap(map);
+  }, [map, mode]);
+
   // Desenho: uma chamada por mudança de estado, não um laço por quadro. O
   // documento só muda por comando do usuário (ADR 0010 — editor local).
+  //
+  // No modo teste, o ticker chama scene.render a cada quadro — o efeito de
+  // render do React não compete com ele.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !ready) return;
+    if (mode === 'testar') return; // ticker desenha
 
     // O cubo de preview segue o alvo de cada ferramenta, não um só:
     //   - remover: o bloco que será removido (cubo vermelho);
@@ -252,7 +307,7 @@ export function MapEditor() {
       previewInvalid,
       highlight: pickState?.hit ?? null,
     });
-  }, [map, camera, pickState, tool, ready]);
+  }, [map, camera, pickState, tool, ready, mode]);
 
   // ---------------------------------------------------------------- ponteiro
 
@@ -310,6 +365,8 @@ export function MapEditor() {
         setCamera((c) => ({ ...c, panX: c.panX + dx, panY: c.panY + dy }));
         return;
       }
+      // No modo teste, sem pan ativo, não há picking nem edição.
+      if (stateRef.current.mode === 'testar') return;
       const result = pickAt(e.clientX, e.clientY);
       setPickState(result);
       // Arrastar com o botão pintando é o que torna terreno grande viável.
@@ -321,6 +378,13 @@ export function MapEditor() {
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
+      // No modo teste, o ponteiro não edita — só move a câmera.
+      if (stateRef.current.mode === 'testar') {
+        if (e.button === 1 || e.button === 0) {
+          panning.current = { x: e.clientX, y: e.clientY };
+        }
+        return;
+      }
       // Botão do meio ou espaço+arrastar movem a câmera; o esquerdo edita.
       if (e.button === 1 || e.shiftKey) {
         panning.current = { x: e.clientX, y: e.clientY };
@@ -351,7 +415,148 @@ export function MapEditor() {
     });
   }, []);
 
-  // ---------------------------------------------------------------- câmera
+  // ---------------------------------------------------------------- modo teste
+
+  const enterTestMode = useCallback(async () => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    try {
+      const res = await fetch('/api/studio');
+      if (!res.ok) throw new Error(`${res.status}`);
+      const studio: Studio = await res.json();
+      const character = studio.characters[0];
+      if (!character) {
+        toasts.push(T.modo.semPersonagem);
+        return;
+      }
+
+      // Monta ActorFrames a partir das células do estúdio.
+      const frames: Record<string, Readonly<Record<string, readonly string[]>>> = {};
+      const allUrls: string[] = [];
+      for (const pose of studio.poses) {
+        const cellKey = `${character.id}::${pose.id}`;
+        const cell = studio.cells[cellKey];
+        if (cell?.frames) {
+          frames[pose.id] = cell.frames;
+          for (const dirFrames of Object.values(cell.frames)) {
+            for (const u of dirFrames as string[]) allUrls.push(u);
+          }
+        }
+      }
+      // Direções base (sempre existem depois do wizard pronto).
+      const baseKey = `${character.id}::__directions8__`;
+      const baseCell = studio.cells[baseKey];
+      const baseDirs: Record<string, readonly string[]> =
+        (baseCell?.frames as Record<string, readonly string[]> | undefined) ?? {};
+      if (Object.keys(baseDirs).length > 0) {
+        for (const urls of Object.values(baseDirs)) {
+          for (const u of urls) allUrls.push(u);
+        }
+      }
+
+      await scene.preloadActor(allUrls);
+
+      actorFramesRef.current = frames;
+      actorBaseRef.current = Object.keys(baseDirs).length > 0 ? baseDirs : null;
+
+      const colisao = buildCollisionMap(stateRef.current.map);
+      collisionRef.current = colisao;
+
+      const z = spawnZAt(colisao, 5, 5);
+      const initial = createMovementState(5, 5, z);
+      actorRef.current = initial;
+      setActorState(initial);
+
+      // Tick de animação recomeça do zero ao entrar no teste.
+      testTickRef.current = 0;
+
+      // O ticker é registrado UMA VEZ e lê os refs.
+      const tick = (): void => {
+        const s = sceneRef.current;
+        const col = collisionRef.current;
+        const actor = actorRef.current;
+        const frames = actorFramesRef.current;
+        const base = actorBaseRef.current;
+        if (!s || !col || !actor || !frames) return;
+
+        const held = heldRef.current;
+        const dir = worldDirectionFromKeys(held, stateRef.current.camera.rotation);
+        const input: MovementInput = {
+          dir,
+          jump: jumpRef.current,
+          stepUp: false,
+          stepDown: false,
+          ...(walkRef.current ? { walk: true as const } : {}),
+          ...(crouchRef.current ? { crouch: true as const } : {}),
+        };
+
+        const dt = s.app.ticker.deltaMS / 1000;
+        const next = stepWithMap(actor, input, dt, DEFAULT_CONFIG, col);
+        actorRef.current = next;
+
+        const action = actionFor(next);
+        const vIdx = viewDirectionIndex(next.facing, stateRef.current.camera.turn);
+        const vName = directionNameFor(vIdx);
+        const url = frameUrl(frames, base ?? undefined, action, vName, testTickRef.current);
+        testTickRef.current += 1;
+
+        if (!url) return;
+
+        const offsetY = visualOffsetY(next.jump.progress, JUMP_PX);
+        const draw: ActorDraw = {
+          url,
+          x: next.pos.x,
+          y: next.pos.y,
+          z: next.z,
+          offsetY,
+        };
+
+        const cam = stateRef.current.camera;
+        s.render({
+          map: stateRef.current.map,
+          camera: cam,
+          actor: draw,
+          preview: null,
+          highlight: null,
+        });
+      };
+
+      tickerRef.current = tick;
+      scene.app.ticker.add(tick);
+      setMode('testar');
+    } catch (err) {
+      toasts.push(T.modo.erroCarregar);
+      // eslint-disable-next-line no-console
+      console.error('[test-mode] erro ao carregar personagem:', err);
+    }
+  }, [toasts]);
+
+  const exitTestMode = useCallback(() => {
+    const scene = sceneRef.current;
+    const tick = tickerRef.current;
+    if (scene && tick) {
+      scene.app.ticker.remove(tick);
+    }
+    tickerRef.current = null;
+    actorRef.current = null;
+    collisionRef.current = null;
+    actorFramesRef.current = null;
+    actorBaseRef.current = null;
+    heldRef.current = { up: false, down: false, left: false, right: false };
+    jumpRef.current = false;
+    crouchRef.current = false;
+    walkRef.current = false;
+    setActorState(null);
+    setMode('editar');
+    // Redesenha sem o personagem.
+    scene?.render({
+      map: stateRef.current.map,
+      camera: stateRef.current.camera,
+      preview: null,
+      highlight: null,
+    });
+  }, []);
 
   const host = hostRef.current;
 
@@ -391,26 +596,78 @@ export function MapEditor() {
     });
   }, []);
 
-  // Teclado: R gira, Z/Y desfazem, 1–4 escolhem a vista.
+  // Teclado: R gira, Z/Y desfazem, 1–4 escolhem a vista. No modo teste, Esc sai.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      if (e.key === 'Escape' && stateRef.current.mode === 'testar') {
+        exitTestMode();
+        return;
+      }
+
+      // Rotação funciona nos dois modos.
       if (e.key === 'r' || e.key === 'R') {
         rotateTo(turn(stateRef.current.camera.rotation, e.shiftKey ? -1 : 1));
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        return;
+      }
+      if (/^[1-4]$/.test(e.key)) {
+        rotateTo((Number(e.key) - 1) as Rotation);
+        return;
+      }
+
+      // No modo teste, as demais teclas de edição não fazem nada.
+      if (stateRef.current.mode === 'testar') return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         setHistory((h) => (e.shiftKey ? redo(h) : undo(h)));
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
         e.preventDefault();
         setHistory(redo);
-      } else if (/^[1-4]$/.test(e.key)) {
-        rotateTo((Number(e.key) - 1) as Rotation);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rotateTo]);
+  }, [rotateTo, exitTestMode]);
+
+  // Teclas do personagem: WASD/setas + modificadores. Rastreia keydown/keyup
+  // para movimento contínuo — keydown sozinho não sabe quando a tecla soltou.
+  useEffect(() => {
+    const updateHeld = (key: string, pressed: boolean): boolean => {
+      switch (key) {
+        case 'w': case 'W': case 'ArrowUp':
+          heldRef.current = { ...heldRef.current, up: pressed }; return true;
+        case 's': case 'S': case 'ArrowDown':
+          heldRef.current = { ...heldRef.current, down: pressed }; return true;
+        case 'a': case 'A': case 'ArrowLeft':
+          heldRef.current = { ...heldRef.current, left: pressed }; return true;
+        case 'd': case 'D': case 'ArrowRight':
+          heldRef.current = { ...heldRef.current, right: pressed }; return true;
+        case ' ': jumpRef.current = pressed; return true;
+        case 'Control': crouchRef.current = pressed; return true;
+        case 'Shift': walkRef.current = pressed; return true;
+      }
+      return false;
+    };
+
+    const onDown = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (updateHeld(e.key, true)) e.preventDefault();
+    };
+    const onUp = (e: KeyboardEvent): void => {
+      updateHeld(e.key, false);
+    };
+
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, []);
 
   // ---------------------------------------------------------------- render
 
@@ -450,6 +707,49 @@ export function MapEditor() {
     toasts.push(T.toast.exportado);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Exporta o PROJETO inteiro (ADR 0033): mapa + personagem + blocos num JSON
+   * autocontido, com os PNGs embutidos em base64 pelo servidor. Bloco cujo PNG
+   * não está mais em disco sai de fora do pacote — quem importar vê o cubo
+   * procedural para ele (degradação herdada, não erro).
+   */
+  const handleExportProject = useCallback(async () => {
+    const dados = buildExport(stateRef.current.map, catalogRef.current, {
+      tileWidth: GEOM.tileWidth,
+      tileHeight: GEOM.tileHeight,
+      cubeHeight: GEOM.zStep,
+    });
+    try {
+      const res = await fetch('/api/project/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ map: dados, name: 'projeto' }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
+      const bundle: unknown = await res.json();
+      const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'projeto.isomaker.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      toasts.push(T.toast.projetoExportado);
+    } catch (err) {
+      toasts.push(
+        T.toast.erroExportarProjeto(err instanceof Error ? err.message : String(err)),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toasts]);
 
   return (
     <div className="flex h-dvh w-full flex-col bg-background text-foreground">
@@ -512,6 +812,28 @@ export function MapEditor() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          {mode === 'editar' ? (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={enterTestMode}
+              disabled={!ready}
+              aria-label={T.modo.botaoTestar}
+            >
+              <PlayIcon className="size-4" />
+              <span className="ml-1.5">{T.modo.botaoTestar}</span>
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exitTestMode}
+              aria-label={T.modo.botaoEditar}
+            >
+              <PencilIcon className="size-4" />
+              <span className="ml-1.5">{T.modo.botaoEditar}</span>
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -537,6 +859,9 @@ export function MapEditor() {
           <Badge variant="outline">{camera.zoom}×</Badge>
           <Button variant="ghost" size="sm" onClick={() => zoomBy(1)} aria-label={T.camera.aumentar}>
             <ZoomInIcon className="size-4" />
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleExportProject}>
+            {T.acoes.exportarProjeto}
           </Button>
           <Button variant="secondary" size="sm" onClick={handleExport}>
             {T.acoes.exportar}
@@ -616,14 +941,23 @@ export function MapEditor() {
             <span>
               {T.status.vista} <strong>{ROTATION_LABELS[camera.rotation]}</strong>
             </span>
-            <span>
-              {T.status.alvo}{' '}
-              <strong>
-                {pickState
-                  ? `x ${pickState.placement.x} · y ${pickState.placement.y} · z ${pickState.placement.z}`
-                  : '—'}
-              </strong>
-            </span>
+            {mode === 'testar' && actorState ? (
+              <span>
+                Personagem{' '}
+                <strong>
+                  x {actorState.pos.x.toFixed(1)} · y {actorState.pos.y.toFixed(1)} · z {actorState.z}
+                </strong>
+              </span>
+            ) : (
+              <span>
+                {T.status.alvo}{' '}
+                <strong>
+                  {pickState
+                    ? `x ${pickState.placement.x} · y ${pickState.placement.y} · z ${pickState.placement.z}`
+                    : '—'}
+                </strong>
+              </span>
+            )}
             <span>
               {T.status.pecas} <strong>{total}</strong>
               {selected ? ` · ${selected.label}` : ''}
@@ -631,7 +965,7 @@ export function MapEditor() {
           </div>
 
           <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg border border-border bg-card/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
-            {T.status.atalhos}
+            {mode === 'testar' ? T.modo.atalhos : T.status.atalhos}
           </div>
         </main>
       </div>

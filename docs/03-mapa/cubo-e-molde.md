@@ -2,11 +2,11 @@
 
 > **Quick Start (TL;DR)**
 >
-> Um cubo de verdade em dimétrica 2:1 tem aresta vertical `d = W·√6/4 ≈ 0,6124·W`. A geometria do projeto é **tile 48×24 px, aresta 29 px, sprite 48×53 px**, definida uma vez em `iso-cube.ts`. O molde desenhado por código abre toda geração de bloco como `init_image` da primeira face; dali, ou o resultado dela vira o molde das outras três (técnica `chained`), ou o v3 a rotaciona para 8 direções (técnica `rotated`) — todo bloco tem as quatro vistas com arte própria ([ADR 0029](../adr/0029-quatro-vistas-molde-encadeado-e-rotate.md)).
+> Um cubo de verdade em dimétrica 2:1 tem aresta vertical `d = W·√6/4 ≈ 0,6124·W`. A geometria do projeto é **tile 48×24 px, aresta 29 px, sprite 48×53 px**, definida uma vez em `iso-cube.ts`. O molde desenhado por código abre toda geração de bloco como `init_image` da primeira face; dali, ou o resultado dela vira o molde das outras três (técnica `chained`), ou o v3 a rotaciona para 8 direções (técnica `rotated`) — todo bloco tem as quatro vistas com arte própria ([ADR 0029](../adr/0029-quatro-vistas-molde-encadeado-e-rotate.md)). Desde a [ADR 0032](../adr/0032-textura-animada-unica-abandono-3d.md), bloco **novo** tem UMA textura animada; as quatro vistas continuam só nos blocos legados.
 >
 > ```bash
 > cd /home/ondokai/Projects/isometric-maker/packages/iso-core && npm test
-> cd /home/ondokai/Projects/isometric-maker/tools/map-builder && npm test
+> cd /home/ondokai/Projects/isometric-maker/tools/character-builder && npm test   # autotile, export e picking moram aqui
 > curl -s http://localhost:5174/api/block-geometry
 > ```
 
@@ -114,12 +114,13 @@ O que muda entre as vistas é o **desenho do material**. Cubos procedurais varia
 ## Referências
 
 - [`ADR 0024`](../adr/0024-cubo-isometrico-canonico.md) — a geometria canônica e a correção do `zStep`
-- [`ADR 0029`](../adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) — as quatro vistas, o molde encadeado e a técnica `rotated`
+- [`ADR 0029`](../adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) — as quatro vistas, o molde encadeado e a técnica `rotated` (legado)
+- [`ADR 0032`](../adr/0032-textura-animada-unica-abandono-3d.md) — substitui a 0029: bloco novo tem UMA textura animada
 - [`ADR 0026`](../adr/0026-giro-de-camera-animado.md) — o giro animado da câmera
 - [`ADR 0027`](../adr/0027-exportacao-v2-instancias-e-materiais.md) — a exportação com instâncias e materiais
 - [`ADR 0013`](../adr/0013-geometria-isometrica-64x32-z16.md) — a geometria original, vigente exceto pelos números
 - `/home/ondokai/Projects/isometric-maker/packages/iso-core/src/iso-cube.ts` — a definição e a derivação
 - `/home/ondokai/Projects/isometric-maker/tools/character-builder/server/world-block.ts` — as duas cadeias de geração
-- `/home/ondokai/Projects/isometric-maker/tools/map-builder/src/placement.ts` — escala uniforme e âncora declarada
+- `/home/ondokai/Projects/isometric-maker/tools/character-builder/src/map/placement.ts` — escala uniforme e âncora declarada
 
-**Última atualização:** 2026-08-01
+**Última atualização:** 2026-08-02

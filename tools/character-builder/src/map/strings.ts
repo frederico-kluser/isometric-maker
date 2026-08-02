@@ -48,6 +48,7 @@ export const editor = {
     desfazerDica: 'Desfazer (Ctrl+Z)',
     refazer: 'Refazer',
     exportar: 'Exportar JSON',
+    exportarProjeto: 'Exportar projeto',
     limpar: 'Segure para limpar o mapa',
   },
 
@@ -63,6 +64,15 @@ export const editor = {
     titulo: (vista: string): string => `Câmera apontando para ${vista}`,
   },
 
+  modo: {
+    botaoTestar: 'Testar',
+    botaoEditar: 'Editar',
+    semPersonagem: 'Gere um personagem primeiro. Vá para a tela inicial e entre no estúdio.',
+    erroCarregar: 'Erro ao carregar o personagem.',
+    atalhos:
+      'WASD ou setas move · Shift anda · Espaço pula · Control agacha · Esc sai do teste',
+  },
+
   toast: {
     paletaCarregada: (n: number): string =>
       n === 1
@@ -73,5 +83,8 @@ export const editor = {
       '"Blocos do mundo" e volte para esta tela.',
     mapaLimpo: 'Mapa limpo. Ctrl+Z desfaz.',
     exportado: 'mapa.json exportado.',
+    projetoExportado: 'projeto.isomaker.json exportado.',
+    erroExportarProjeto: (msg: string): string =>
+      `Não deu para exportar o projeto: ${msg}`,
   },
 } as const;

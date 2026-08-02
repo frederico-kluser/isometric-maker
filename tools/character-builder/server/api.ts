@@ -71,7 +71,9 @@ import {
 	exportWizardBundle,
 	importSpriteBundle,
 	parseSpriteBundle,
+	type WizardBundle,
 } from "./sprite-bundle.ts";
+import type { MapExportV2 } from "../../../packages/iso-core/src/map-instances.ts";
 import {
 	DIRECTIONS,
 	DETAIL_OPTIONS,
@@ -513,6 +515,171 @@ function spawn(
 			await save(s);
 		}
 	})();
+}
+
+// ---------------------------------------------------------------- pacote de projeto (ADR 0033)
+
+/**
+ * Pacote de projeto autocontido (ADR 0033): mapa + personagem + blocos num
+ * JSON só, com os PNGs embutidos em base64 — portável entre máquinas, sem a
+ * pasta de assets.
+ */
+interface ProjectBundleV1 {
+	readonly version: 1;
+	readonly name: string;
+	readonly map: MapExportV2;
+	/** null quando nenhum personagem fechou o wizard na origem. */
+	readonly character: WizardBundle | null;
+	/** hash do bloco → base64 do primeiro frame (norte no v2, base no v3). */
+	readonly blocks: Record<string, string>;
+	readonly createdAt: string;
+}
+
+function invalidBundle(reason: string): never {
+	throw new Error(`pacote de projeto inválido: ${reason}`);
+}
+
+function projectMapOf(raw: unknown): MapExportV2 {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+		invalidBundle('campo "map" precisa ser um objeto');
+	}
+	const rec = raw as Record<string, unknown>;
+	if (rec["schemaVersion"] !== 2 || !Array.isArray(rec["palette"])) {
+		invalidBundle(
+			'campo "map" precisa ser uma exportação v2 (schemaVersion 2 com palette)',
+		);
+	}
+	return rec as unknown as MapExportV2;
+}
+
+/** Assinatura PNG (89 50 4E 47) — rejeita texto/JSON disfarçado de imagem. */
+function isPngBase64(b64: string): boolean {
+	const buf = Buffer.from(b64, "base64");
+	return (
+		buf.length >= 4 &&
+		buf[0] === 0x89 &&
+		buf[1] === 0x50 &&
+		buf[2] === 0x4e &&
+		buf[3] === 0x47
+	);
+}
+
+/**
+ * Valida um pacote desconhecido e o devolve tipado. Estrutura, PNGs do
+ * personagem (via parseSpriteBundle) e chaves de bloco são validados AQUI —
+ * depois do parse, o pacote é confiável e nenhuma escrita sai pela metade.
+ */
+function parseProjectBundle(raw: unknown): ProjectBundleV1 {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+		invalidBundle("o pacote precisa ser um objeto");
+	}
+	const obj = raw as Record<string, unknown>;
+	if (obj["version"] !== 1) {
+		invalidBundle(
+			`campo "version" precisa ser 1 (recebido ${String(obj["version"])})`,
+		);
+	}
+	const name = obj["name"];
+	if (typeof name !== "string" || name.trim() === "") {
+		invalidBundle('campo "name" precisa ser string não vazia');
+	}
+	const createdAt = obj["createdAt"];
+	if (
+		typeof createdAt !== "string" ||
+		!Number.isFinite(Date.parse(createdAt))
+	) {
+		invalidBundle('campo "createdAt" precisa ser uma data ISO');
+	}
+	const map = projectMapOf(obj["map"]);
+
+	// Personagem: null (não havia) ou bundle do wizard já validado — bundle de
+	// sprite-lab é recusado: o pacote só carrega a base fechada do wizard.
+	let character: WizardBundle | null = null;
+	if (obj["character"] !== null) {
+		const parsed = parseSpriteBundle(obj["character"]);
+		if (parsed.kind !== "sprite-wizard-directions") {
+			invalidBundle(
+				'"character" precisa ser um bundle do wizard (sprite-wizard-directions)',
+			);
+		}
+		character = parsed;
+	}
+
+	const blocksRaw = obj["blocks"];
+	if (
+		blocksRaw === null ||
+		typeof blocksRaw !== "object" ||
+		Array.isArray(blocksRaw)
+	) {
+		invalidBundle('campo "blocks" precisa ser um objeto hash → base64');
+	}
+	const blocks: Record<string, string> = {};
+	for (const [hash, b64] of Object.entries(blocksRaw as Record<string, unknown>)) {
+		if (!isWorldBlockHash(hash)) {
+			invalidBundle(`"${hash}" não é hash de bloco (16 caracteres hexadecimais)`);
+		}
+		if (typeof b64 !== "string" || !isPngBase64(b64)) {
+			invalidBundle(`campo "blocks[${hash}]" precisa ser um PNG em base64`);
+		}
+		blocks[hash] = b64;
+	}
+
+	return { version: 1, name, map, character, blocks, createdAt };
+}
+
+/**
+ * Primeiro frame de um bloco em disco, em base64: a norte (formato v2, a
+ * primeira das 4 faces) ou o cubo base (formato v3, o primeiro frame da
+ * textura). Hash sem PNG não é erro — devolve null, o pacote segue sem o
+ * bloco, e quem importar vê o cubo procedural (decisão da ADR 0033).
+ */
+async function readBlockBasePng(
+	assetsDir: string,
+	hash: string,
+): Promise<string | null> {
+	const dir = join(assetsDir, "world-blocks", hash);
+	for (const rel of ["north.png", "base.png", "frames/frame_000.png"]) {
+		try {
+			return (await readFile(join(dir, rel))).toString("base64");
+		} catch {
+			// tenta o próximo candidato
+		}
+	}
+	return null;
+}
+
+/**
+ * Grava um bloco importado no catálogo: o PNG como cubo base estático
+ * (manifesto v3, animated false) — o mínimo que listWorldBlocks e
+ * readWorldBlockResult aceitam. A arte viaja sem a animação nem as 4 vistas;
+ * regerar no destino com a mesma configuração reaproveita o base.png.
+ */
+async function writeImportedBlock(
+	assetsDir: string,
+	hash: string,
+	b64: string,
+): Promise<void> {
+	const dir = join(assetsDir, "world-blocks", hash);
+	await mkdir(dir, { recursive: true });
+	await writeFile(join(dir, "base.png"), Buffer.from(b64, "base64"));
+	const manifest = {
+		version: 3,
+		hash,
+		technique: "texture",
+		description: "bloco importado de um pacote de projeto",
+		geometry: {
+			tileWidth: BLOCK_GEOMETRY.tileWidth,
+			tileHeight: BLOCK_GEOMETRY.tileHeight,
+			cubeHeight: BLOCK_GEOMETRY.cubeHeight,
+			spriteWidth: BLOCK_GEOMETRY.spriteWidth,
+			spriteHeight: BLOCK_GEOMETRY.spriteHeight,
+		},
+		action: "static",
+		animated: false,
+		frameCount: 0,
+		fps: 8,
+	};
+	await writeFile(join(dir, "block.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 // ---------------------------------------------------------------- http
@@ -1508,6 +1675,94 @@ export async function handle(
 					);
 				}
 				json(res, 200, created);
+			} catch (err) {
+				badRequest(res, err instanceof Error ? err.message : String(err));
+			}
+			return true;
+		}
+
+		// ---- pacote de projeto (ADR 0033) --------------------------------------------------
+		if (url.pathname === "/api/project/export" && req.method === "POST") {
+			const b = await readBody<{ map?: unknown; name?: unknown }>(req);
+			let map: MapExportV2;
+			try {
+				map = projectMapOf(b.map);
+			} catch (err) {
+				badRequest(res, err instanceof Error ? err.message : String(err));
+				return true;
+			}
+			const name =
+				typeof b.name === "string" && b.name.trim() !== ""
+					? b.name.trim()
+					: "projeto";
+
+			const s = await load();
+			// Primeiro personagem do estúdio. Sem base fechada, o pacote segue
+			// SEM personagem — degradação, não erro (ADR 0033).
+			let character: WizardBundle | null = null;
+			const first = s.characters[0];
+			if (first) {
+				try {
+					character = await exportWizardBundle(store, first.id, ASSETS);
+				} catch (err) {
+					console.log(
+						`[projeto] sem personagem no pacote: ${
+							err instanceof Error ? err.message : String(err)
+						}`,
+					);
+				}
+			}
+
+			// Hashes referenciados na palette do mapa → primeiro frame em base64.
+			// Hash fora do formato (16 hex) ou sem PNG em disco é pulado: o mapa
+			// do pacote continua válido e o destino cai no cubo procedural.
+			const blocks: Record<string, string> = {};
+			for (const p of map.palette) {
+				const hash = p.sourceHash;
+				if (typeof hash !== "string" || !isWorldBlockHash(hash)) continue;
+				if (blocks[hash] !== undefined) continue;
+				const b64 = await readBlockBasePng(ASSETS, hash);
+				if (b64 !== null) blocks[hash] = b64;
+			}
+
+			json(res, 200, {
+				version: 1,
+				name,
+				map,
+				character,
+				blocks,
+				createdAt: new Date().toISOString(),
+			} satisfies ProjectBundleV1);
+			return true;
+		}
+
+		if (url.pathname === "/api/project/import" && req.method === "POST") {
+			const b = await readBody<unknown>(req);
+			try {
+				// Validação TOTAL (schema + PNGs + chaves) antes da primeira
+				// escrita — mesmo padrão dos outros imports.
+				const bundle = parseProjectBundle(b);
+
+				let characterId: string | null = null;
+				if (bundle.character) {
+					// Personagem NOVO com o nome do projeto — a mesma lógica de
+					// POST /api/characters/import; conflito de id é erro nomeado.
+					const { characterId: id } = await importSpriteBundle(
+						store,
+						bundle.character,
+						{ kind: "new", label: bundle.name },
+						ASSETS,
+					);
+					characterId = id;
+				}
+
+				let blockCount = 0;
+				for (const [hash, b64] of Object.entries(bundle.blocks)) {
+					await writeImportedBlock(ASSETS, hash, b64);
+					blockCount += 1;
+				}
+
+				json(res, 200, { success: true, characterId, blockCount });
 			} catch (err) {
 				badRequest(res, err instanceof Error ? err.message : String(err));
 			}

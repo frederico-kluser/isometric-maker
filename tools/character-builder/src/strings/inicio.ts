@@ -32,4 +32,17 @@ export const inicio = {
     label: 'Início',
     ariaLabel: 'Voltar para a tela inicial',
   },
+
+  /** Importação de um pacote de projeto autocontido (ADR 0033) */
+  projectImport: {
+    titulo: 'Importar projeto',
+    descricao:
+      'Restaura um pacote .isomaker.json exportado antes: o personagem e os ' +
+      'blocos gerados voltam ao estúdio, e o editor de mapa abre em seguida.',
+    importando: 'Importando…',
+    arquivoInvalido: 'O arquivo não é um JSON válido.',
+    formatoInvalido:
+      'O arquivo não é um pacote de projeto (version 1) exportado por este editor.',
+    erro: (msg: string): string => `Não deu para importar o projeto: ${msg}`,
+  },
 } as const;

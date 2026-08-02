@@ -4,11 +4,14 @@ Um **construtor de jogos isométricos**: monta o personagem a partir de uma imag
 
 > **Quick Start (TL;DR)**
 >
-> A ferramenta de arte já funciona; o editor ainda não existe. Comece pelo pipeline, que planeja custo sem gastar nada.
+> O editor inteiro já funciona: tela inicial, estúdio de personagem e editor de
+> mapa — tudo em **um aplicativo só**, que o `npm run dev` da raiz sobe num
+> processo. O pipeline planeja custo sem gastar nada.
 >
 > ```bash
-> cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline
-> npm install
+> cd /home/ondokai/Projects/isometric-maker
+> npm run dev                          # o editor inteiro, em http://localhost:5174/
+> cd tools/pixellab-pipeline
 > export PIXELLAB_SECRET="seu-token"   # https://pixellab.ai/account
 > node src/cli.ts doctor               # confere ambiente e spec vendorizado
 > node src/cli.ts plan                 # estima o catálogo SEM gastar
@@ -25,11 +28,14 @@ Um **construtor de jogos isométricos**: monta o personagem a partir de uma imag
 
 ## O que o editor faz
 
-Quatro partes, construídas nesta ordem:
+Quatro partes, construídas nesta ordem — e, desde 2026-08-02, todas dentro de
+**um aplicativo só** ([ADR 0034](docs/adr/0034-aplicativo-unificado-com-tela-inicial.md)):
+tela inicial com duas portas, `#/personagem` (estúdio) e `#/mundo` (editor de
+mapa), roteamento por hash, e o `npm run dev` da raiz sobe tudo num processo:
 
-1. **Construtor de personagem.** Você anexa uma imagem e informa a altura. O editor gera as 8 direções, estima o esqueleto para você aprovar, e produz andar, correr e pular. A prévia mostra o personagem animado com seletor de direção e ação.
-2. **Construtor de mapa.** Grade isométrica com eixo Z **inteiro**: blocos empilhados, paredes em aresta, degraus. Tile de 48×24, um nível de altura vale 29 px — a aresta vertical do cubo canônico (ADR 0024).
-3. **Mecânicas.** Movimento, colisão, e salto cuja altura determina quais níveis são alcançáveis.
+1. **Construtor de personagem.** Você anexa uma imagem e informa a altura. O editor gera as 8 direções, estima o esqueleto para você aprovar, e produz andar, correr e pular. A prévia mostra o personagem animado com seletor de direção e ação. O molde de proporção adulto/criança controla a silhueta ([ADR 0035](docs/adr/0035-molde-de-proporcao-como-referencia-de-geracao.md)).
+2. **Construtor de mapa.** Grade isométrica com eixo Z **inteiro**: blocos empilhados, paredes em aresta, degraus. Tile de 48×24, um nível de altura vale 29 px — a aresta vertical do cubo canônico (ADR 0024). O editor de mapa mora em `tools/character-builder/src/map/`, junto com o estúdio.
+3. **Mecânicas.** Movimento, colisão, e salto cuja altura determina quais níveis são alcançáveis. O personagem é jogável no mapa: marchas (corrida, andar, agachar), gravidade e degrau ([ADR 0036](docs/adr/0036-fisica-de-marchas-agachar-e-gravidade.md)).
 4. **Runtime.** Carrega o projeto exportado e roda, sem interface de edição.
 
 O artefato final é **um projeto em JSON mais os atlas de sprite**. Nada de nuvem, nada de conta, nada de sincronização.
@@ -56,12 +62,12 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 | Parte | Estado |
 | --- | --- |
 | Pipeline de assets | **funcional** — 9 comandos, idempotente, guard de custo, empacotador de atlas |
-| Sprite Studio (vira o construtor de personagem) | **funcional** — gera personagem em 8 direções, poses e guarda-roupa |
-| Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 29 skills verificadas |
-| Documentação | **28 docs escritos.** O índice não lista arquivo inexistente |
-| Construtor de personagem (prévia PixiJS, editor de esqueleto) | **funcional** — estúdio com editor de esqueleto e diálogo de custo |
-| Construtor de mapa (geometria, tiles, autoladrilhamento) | **funcional** — `packages/iso-core` (5.612 linhas) + `tools/map-builder` (2.716 linhas) |
-| Runtime (renderizador, exportação, preview) | **funcional** — `tools/runtime` (795 linhas) |
+| Sprite Studio (o motor do estúdio de personagem) | **funcional** — gera personagem em 8 direções, poses e guarda-roupa |
+| Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 30 skills verificadas |
+| Documentação | **48 arquivos em `docs/`, 33 ADRs.** O índice não lista arquivo inexistente |
+| Aplicativo único (tela inicial + estúdio + editor de mapa) | **funcional** — `tools/character-builder` (459 testes), roteador por hash com 3 rotas (ADR 0034); o `tools/map-builder` foi fundido nele |
+| Mapa e mecânicas (geometria, autoladrilhamento, física) | **funcional** — `packages/iso-core` (473 testes) + editor de mapa em `tools/character-builder/src/map/` |
+| Runtime (renderizador, exportação, preview) | **funcional** — `tools/runtime` (795 linhas em `src/`) |
 | Assets gerados | **zero.** O lockfile não existe e o ledger está vazio |
 
 ## Convenções
@@ -79,4 +85,4 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 - [`AGENTS.md`](AGENTS.md) — instruções para agentes de código
 - [`docs/adr/`](docs/adr/) — as decisões e seus motivos
 
-**Última atualização:** 2026-07-30
+**Última atualização:** 2026-08-02

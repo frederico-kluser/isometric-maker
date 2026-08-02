@@ -94,10 +94,10 @@ v3-mode fields (characters and objects):
   enhanced description is reused across all requested directions; on objects it requires
   `animation_description` (cannot enhance an inherited one).
 
-`directions` defaults differ by mode: **template animates every direction the character has; v3
-defaults to south only**. Omitting it in template mode buys eight animations when you wanted one;
-omitting it in v3 mode delivers one when you needed eight. Since v3 is the auto-detected default,
-the second trap is reachable without ever setting `mode`.
+`directions` defaults differ by mode — **opposite defaults**: template animates every direction the
+character has; v3 defaults to south only. Omitting it in template mode buys eight animations when
+you wanted one; omitting it in v3 mode delivers one when you needed eight. Since v3 is the
+auto-detected default, the second trap is reachable without ever setting `mode`.
 
 Character v3 queues **one job per direction** — eight directions is eight jobs, eight ids to persist,
 and eight chances to lose a paid generation. The response returns `background_job_ids` (plural) and
@@ -191,7 +191,7 @@ all inside `tools/character-builder/server/world-block.ts`:
 3. **Animation** — `POST /animate-with-text-v3` with `first_frame` (the base image as Base64Image),
    `action` (the LLM-generated text), and `frame_count` (4, 8 or 16; user-configured). One job for
    all frames; the 48×48 canvas stays far below the 524,288 pixel budget even at 16 frames
-   (`tools/character-builder/server/world-block.ts:54@759f4615`).
+   (`tools/character-builder/server/world-block.ts:54@1d398b54`).
 
 `/animate-with-text-v3` is asynchronous but answers **200** (not 202), and the job's result shape is
 `BackgroundJobResponse` with `last_response.images[]`. The spritesheet is a horizontal strip packed

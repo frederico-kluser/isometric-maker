@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-01**: **41 arquivos em `docs/` — 26 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-02**: **48 arquivos em `docs/` — 33 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -59,7 +59,7 @@ Numeração reservada. A convenção 12 diz que doc de infra escrita antes de ex
 
 | Pasta | O que mora ali | Código correspondente |
 | --- | --- | --- |
-| `03-mapa/` | Projeção e coordenadas, o formato do mapa XYZ, autoladrilhamento | `packages/iso-core` + `tools/map-builder` — **código existe, doc pendente** |
+| `03-mapa/` | Projeção e coordenadas, o formato do mapa XYZ, autoladrilhamento | `packages/iso-core` + editor de mapa em `tools/character-builder/src/map/` — **código existe, doc parcial: [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) escrito** |
 | `04-mecanicas/` | Movimento, colisão, degrau e salto por altura | `packages/iso-core` — **código existe, doc pendente** |
 | `05-runtime/` | Como o projeto exportado é carregado e executado | `tools/runtime` — **código existe, doc pendente** |
 | `06-editor/` | Arquitetura do editor, o formato do arquivo de projeto, strings e i18n | — |
@@ -69,7 +69,8 @@ Numeração reservada. A convenção 12 diz que doc de infra escrita antes de ex
 | Ferramenta | O que faz | Estado |
 | --- | --- | --- |
 | [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de custo e empacotador de atlas | **funcional** |
-| [`tools/character-builder`](../tools/character-builder/README.md) | Sprite Studio: wizard do manequim nas 8 direções, poses, guarda-roupa e laboratório de rotação | **funcional** |
+| [`tools/character-builder`](../tools/character-builder/README.md) | **O aplicativo inteiro**: tela inicial, estúdio de personagem (Sprite Studio) e editor de mapa — o `tools/map-builder` foi fundido nele | **funcional** |
+| [`tools/runtime`](../tools/runtime/) | Carrega o projeto exportado e roda, sem interface de edição (795 linhas em `src/`, coberto pelo gate) | **funcional** |
 | [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
 
 ## ADR — decisões registradas
@@ -112,14 +113,18 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0030`](./adr/0030-giro-rigido-do-quadro-composto.md) | O giro é do quadro composto: dois snapshots sob a mesma afim, nunca peça por peça | vigente |
 | [`0031`](./adr/0031-canvas-multiplo-de-4-e-init-image-quebrado.md) | O canvas da API é múltiplo de 4, e o init_image do tile está quebrado no fornecedor | vigente · corrige 0029 |
 | [`0032`](./adr/0032-textura-animada-unica-abandono-3d.md) | Textura animada única: abandono das 4 vistas 3D em favor de animação por `animate-with-text-v3` | vigente · substitui 0029 |
+| [`0033`](./adr/0033-pacote-de-projeto-autocontido.md) | Pacote de projeto autocontido: mapa, personagem e blocos num JSON só, PNGs em base64 | vigente |
+| [`0034`](./adr/0034-aplicativo-unificado-com-tela-inicial.md) | Um aplicativo só: map-builder fundido no character-builder, tela inicial e rotas por hash, tela inativa desmontada | vigente |
+| [`0035`](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md) | Molde de proporção como `init_image` (força 320), referência do usuário como `style_image` (força 50) | vigente |
+| [`0036`](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md) | Física jogável: corrida é o default, Shift anda, agachar não pula, gravidade contra o mapa com passo fixo | vigente |
 
 ## Skills
 
-**33 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
+**30 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
 
 Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, e o restante é tarefa e meta.
 
-As quatro do modelo são novas. Três existem porque `packages/iso-core` e `tools/map-builder` tinham 363 testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md) e [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md). A separação entre elas e as do PixiJS é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
+As quatro do modelo são novas. Três existem porque o modelo isométrico — `packages/iso-core` mais o editor de mapa, hoje dentro do character-builder — tinha 363 testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md) e [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md). A separação entre elas e as do PixiJS é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
 
 A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-camera/SKILL.md), reuniu o material para uma decisão que ainda não tinha sido tomada: girar a câmera em quatro vistas. A decisão foi tomada em 2026-08-01 na [ADR 0021](./adr/0021-rotacao-de-camera-em-quatro-vistas.md), com os números lidos do OpenRCT2 e do Godot — inclusive o que desanima, que é o motor de referência manter duas implementações de ordenação e ainda chamar a correção de oclusão de parcial. A skill continua sendo onde esse material mora.
 
@@ -139,6 +144,8 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-01 | **Todo bloco passa a ter quatro vistas** ([ADR 0029](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md)): o modo uniforme e a canonização saem, o molde vira encadeado (o resultado da norte é o `init_image` das outras faces) e nasce a técnica `rotated` via `create-character-v3` para comparar; os cinco blocos uniformes pagos foram arquivados |
 | 2026-08-01 | **O mapa gira como um corpo só** ([ADR 0030](./adr/0030-giro-rigido-do-quadro-composto.md)): a transição vira dois snapshots sob a mesma afim (squash–rotate–unsquash), com o precedente do Mode 7 e o insight do Doom; e a primeira compra real das quatro vistas revela duas restrições fora do spec ([ADR 0031](./adr/0031-canvas-multiplo-de-4-e-init-image-quebrado.md)) — canvas múltiplo de 4, e o `init_image` do tile quebrado no fornecedor, com fallback sem referência de imagem |
 | 2026-08-02 | **Abandono do 3D: textura animada única** ([ADR 0032](./adr/0032-textura-animada-unica-abandono-3d.md)): as técnicas `chained` e `rotated` (4 vistas) saem em favor de UMA textura animada por bloco — `create-image-pixflux` gera a imagem base, um LLM escreve a ação da animação, e o `/animate-with-text-v3` produz os frames; número de frames configurável (4/8/16); a câmera continua girando (ADR 0030) mas a arte do bloco não muda com a perspectiva |
+| 2026-08-02 | **O projeto inteiro num arquivo só** ([ADR 0033](./adr/0033-pacote-de-projeto-autocontido.md)): mapa + personagem + blocos num JSON autocontido, com PNGs em base64 — exporta (POST /api/project/export) e restaura (POST /api/project/import) personagem e blocos; bloco ausente degrada para o cubo procedural |
+| 2026-08-02 | **Um aplicativo só** ([ADR 0034](./adr/0034-aplicativo-unificado-com-tela-inicial.md)): o map-builder é fundido no character-builder — tela inicial (`#/`), estúdio (`#/personagem`) e editor de mapa (`#/mundo`) num processo só, `npm run dev` na raiz; molde de proporção adulto/criança como referência de geração ([ADR 0035](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md)); física jogável no iso-core — marchas, agachar, gravidade e degrau na travessia ([ADR 0036](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md)) |
 
 ## Referências
 
@@ -147,4 +154,4 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 - [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
 - [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-08-01
+**Última atualização:** 2026-08-02

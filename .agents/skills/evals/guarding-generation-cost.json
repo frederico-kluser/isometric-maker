@@ -25,8 +25,8 @@
       "why": "rescue-before-resume is the recovery order that saves ephemeral resources from expiring"
     },
     {
-      "must_contain": "drops `remote`",
-      "why": "the resume trap permanently breaks child animations and is only recoverable by paying again"
+      "must_contain": "reconstructs `remote` from the queue record's",
+      "why": "resume rewrites the lock entry from the queue record; the parent's remote id must be rebuilt from the stored resourceId or children lose their character_id injection"
     },
     {
       "must_contain": "never resubmitted",

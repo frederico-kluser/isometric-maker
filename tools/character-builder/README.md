@@ -1,15 +1,43 @@
-# Sprite Studio — estúdio de autoria de personagens (tools/character-builder)
+# O aplicativo do editor — tela inicial, estúdio de personagem e editor de mapa (tools/character-builder)
 
 > **Quick Start (TL;DR)**
 >
-> Estúdio local de sprites: o Laboratório (Sprite Studio) cria a pose sul via create-character-v3 com N saídas em paralelo e exporta JSON; o wizard importa esse bundle, deriva as 8 direções e exporta JSON de volta — e poses, guarda-roupa e personagens derivados saem daí. O token nunca chega ao navegador.
+> Este é o **aplicativo inteiro** do editor: tela inicial, estúdio de
+> personagem e editor de mapa, num processo só. O estúdio cria o corpo base nas
+> 8 direções via create-character-v3 com N saídas em paralelo e exporta JSON; o
+> wizard importa esse bundle, deriva as 8 direções e exporta JSON de volta — e
+> poses, guarda-roupa e personagens derivados saem daí. O token nunca chega ao
+> navegador.
 >
 > ```bash
-> cd /home/ondokai/Projects/isometric-maker/tools/character-builder
-> # O token fica no .env — não precisa exportar na shell.
-> # Se quiser sobrescrever, export PIXELLAB_SECRET="..." prevalece.
-> npm run dev        # http://localhost:5174
+> cd /home/ondokai/Projects/isometric-maker
+> npm run dev        # raiz: sobe o editor inteiro em http://localhost:5174/
 > ```
+>
+> (equivale a `cd tools/character-builder && npm run dev`; o token fica no
+> `.env` — `export PIXELLAB_SECRET="..."` só se quiser sobrescrever.)
+
+## O aplicativo
+
+Três telas, um Vite só, roteamento por hash ([ADR 0034](../../docs/adr/0034-aplicativo-unificado-com-tela-inicial.md)):
+
+| Rota | Tela | Arquivo |
+| --- | --- | --- |
+| `#/` | inicial — as duas portas (personagem e mundo) | `src/app/home/home-screen.tsx` |
+| `#/personagem` | estúdio (wizard / poses / itens / laboratório) | `src/app/shell.tsx` |
+| `#/mundo` | editor de mapa | `src/map/editor/map-editor.tsx` |
+
+O `tools/map-builder` foi fundido aqui em 2026-08-02: a geometria, o
+autoladrilhamento e a exportação do mapa moram em `src/map/`, e a fundação do
+personagem jogável (direção, entrada, colisão) em `src/map/actor.ts` e
+`src/map/collision-map.ts`. A tela inativa é **desmontada**, não escondida —
+com as duas montadas, o editor de mapa continuaria sondando `api/world-blocks`
+a cada 3 s enquanto o usuário desenha no estúdio.
+
+O restante deste README documenta o **estúdio de personagem** — a parte mais
+antiga e a mais testada do aplicativo.
+
+## A ideia
 
 ## A ideia
 
@@ -103,7 +131,9 @@ server/rotate-lab.ts      playground do /rotate (sub-seção do Laboratório)
 server/sprite-lab.ts      Sprite Studio: N candidatos v3 em paralelo, extrai a sul
 server/sprite-bundle.ts   bundles JSON (lab/wizard): validação total, import/export sem rede
 server/freeze-proof.ts    prova de que as cardeais sobreviveram congeladas
-src/app/                  shell + as 4 telas (React)
+src/app/                  tela inicial + shell + as 4 telas (React)
+src/app/router.ts         roteador por hash (3 rotas), tela inativa desmontada
+src/map/                  editor de mapa, autoladrilhamento, ator e colisão (ex-map-builder)
 src/strings/              todo texto visível, pt-BR, acesso por propriedade
 studio.json               estado de autoria v2: versionável, diffável, no git
 studio.v1.arquivado-2026-07-31.json   estado v1 arquivado (sem migração)
@@ -132,4 +162,4 @@ Três decisões, e o porquê de cada uma:
 - `/home/ondokai/Projects/isometric-maker/docs/adr/0012-guard-de-orcamento-informativo.md` — o guard informa e nunca recusa
 - `/home/ondokai/Projects/isometric-maker/docs/02-personagem/guarda-roupa-e-silhueta.md` — silhueta como restrição real
 
-**Última atualização:** 2026-08-01
+**Última atualização:** 2026-08-02

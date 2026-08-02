@@ -81,20 +81,20 @@ Se algo não foi verificado, escreva que não foi verificado. Documentação que
 
 ## Comandos
 
-Não existe workspace nem `package.json` na raiz. Todo comando roda de dentro da sua ferramenta.
+Não existe workspace npm. Desde 2026-08-02 há um `package.json` na raiz com um único script de conveniência — `npm run dev`, que sobe o editor inteiro (`cd tools/character-builder && npm run dev`, em `http://localhost:5174/`). Todo o resto roda de dentro da sua ferramenta.
 
 ```bash
+# O editor inteiro (tela inicial + estúdio + editor de mapa)
+npm run dev                                     # na raiz; http://localhost:5174/
 # Pipeline e assets
 cd tools/pixellab-pipeline && npm test              # node --test src/*.test.ts (76 testes)
 cd tools/pixellab-pipeline && npm run typecheck
-# Estúdio de personagem
+# O aplicativo (estúdio de personagem + editor de mapa — o map-builder foi fundido aqui)
 cd tools/character-builder && npm run typecheck
-cd tools/character-builder && npm test              # 24 arquivos de teste (284 testes)
+cd tools/character-builder && npm test              # 459 testes (inclui os do ex-map-builder: autotile, export, picking)
 # Mapa e geometria
 cd packages/iso-core && npm run typecheck
-cd packages/iso-core && npm test                    # 366 testes
-cd tools/map-builder && npm run typecheck
-cd tools/map-builder && npm test                    # autotile, export, picking
+cd packages/iso-core && npm test                    # 473 testes
 # Runtime
 cd tools/runtime && npm run typecheck
 # Verificadores e docs
@@ -109,7 +109,7 @@ Não há linter, formatter nem CI neste repositório. O compilador e os scripts 
 
 | Script | O que verifica |
 | --- | --- |
-| `scripts/gate.sh` | Portão de merge: typecheck + testes de `pixellab-pipeline`, `iso-core`, `map-builder`, `runtime`; `check-docs.sh`; pin do PixiJS; fronteira do runtime; validadores de plano e ledger |
+| `scripts/gate.sh` | Portão de merge: typecheck + testes de `pixellab-pipeline`, `character-builder`, `iso-core`, `runtime`; `check-docs.sh`; pin do PixiJS; fronteira do runtime; validadores de plano e ledger |
 | `scripts/check-docs.sh` | Convenções de documentação, termos proibidos, links |
 | `scripts/check-pixi-pin.mjs` | Versão do PixiJS está congelada |
 | `scripts/check-runtime-boundary.sh` | Fronteira entre `iso-core` e `runtime` não foi violada |
