@@ -39,7 +39,9 @@
         "southVersions": [],
         "activeSouth": 0
       },
-      "createdAt": "2026-07-31T14:21:41.226Z"
+      "createdAt": "2026-07-31T14:21:41.226Z",
+      "mannequin": true,
+      "mold": "adulto"
     },
     {
       "id": "teste",
@@ -109,7 +111,14 @@
     }
   ],
   "wardrobe": [],
-  "cells": {},
+  "cells": {
+    "manequim::__south__": {
+      "key": "manequim::__south__",
+      "status": "falhou",
+      "error": "500 em POST /create-image-bitforge: {\"detail\":\"style_image must be size (128, 128), not torch.Size([1393, 860])\"}",
+      "updatedAt": "2026-08-02T18:28:17.502Z"
+    }
+  },
   "lock": {
     "frameCount": 8,
     "fps": 8,

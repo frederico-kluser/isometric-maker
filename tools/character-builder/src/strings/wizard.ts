@@ -297,6 +297,23 @@ export const wizard = {
     referenciaFormato: 'formato inválido — envie um PNG ou JPG',
     /** Erro local quando o arquivo escolhido não decodifica como imagem */
     referenciaLeitura: 'não consegui ler a imagem escolhida',
+
+    // ── editor de recorte da referência ──
+    recorte: {
+      titulo: 'Recortar referência',
+      nota:
+        'A imagem de referência precisa ter o mesmo tamanho da saída ' +
+        '({size}×{size} px). Arraste o quadrado para escolher a região, ' +
+        'use a roda do mouse para dar zoom.',
+      zoom: 'Zoom',
+      modo: {
+        crop: 'Cortar',
+        fitWidth: 'Largura',
+        fitHeight: 'Altura',
+      },
+      confirmar: 'Usar recorte',
+      cancelar: 'Cancelar',
+    },
   },
 
   // ── passo 3: oito direções ───────────────────────────────────

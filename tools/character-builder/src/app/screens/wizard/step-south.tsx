@@ -36,6 +36,7 @@ import {
 	ReferencePicker,
 	type ReferenceImage,
 } from './reference-picker.tsx';
+import { ReferenceCropEditor } from './reference-crop-editor.tsx';
 import { useAction } from './use-action.ts';
 import type { WizardProgress } from './wizard-progress.ts';
 
@@ -76,6 +77,9 @@ function SouthGenerate({
 	);
 	const [refImage, setRefImage] = useState<ReferenceImage | null>(null);
 	const [refProbe, setRefProbe] = useState(0);
+	// Imagem recém-escolhida que ainda não foi cropada — abre o editor de
+	// recorte. null = editor fechado.
+	const [pendingCropImage, setPendingCropImage] = useState<ReferenceImage | null>(null);
 	// Molde de proporção. Default: o que o personagem já tem. Nenhum molde é
 	// escolha válida e é o caminho histórico — não vale forçar "adulto" em quem
 	// nunca pediu molde.
@@ -119,6 +123,16 @@ function SouthGenerate({
 			}
 		});
 
+	const handleCropConfirm = (croppedBase64: string): void => {
+		if (!pendingCropImage) return;
+		setRefImage({
+			dataUri: `data:image/png;base64,${croppedBase64}`,
+			base64: croppedBase64,
+			name: pendingCropImage.name,
+		});
+		setPendingCropImage(null);
+	};
+
 	return (
 		<>
 			{generating ? (
@@ -129,7 +143,10 @@ function SouthGenerate({
 				<ReferencePicker
 					characterId={progress.character.id}
 					image={refImage}
-					onChange={setRefImage}
+					onChange={(img) => {
+						if (img) setPendingCropImage(img);
+						else setRefImage(null);
+					}}
 					probeKey={refProbe}
 					refresh={refresh}
 					disabled={generating || busy}
@@ -214,6 +231,15 @@ function SouthGenerate({
 					onClick={generate}
 				/>
 			)}
+
+			{pendingCropImage ? (
+				<ReferenceCropEditor
+					imageDataUri={pendingCropImage.dataUri}
+					outputSize={progress.character.size}
+					onConfirm={handleCropConfirm}
+					onCancel={() => setPendingCropImage(null)}
+				/>
+			) : null}
 		</>
 	);
 }
