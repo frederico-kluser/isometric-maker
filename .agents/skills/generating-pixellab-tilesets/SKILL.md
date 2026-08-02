@@ -76,8 +76,12 @@ the **vertical edge varied between 20 and 22 px** block to block. Blocks that do
 not stack.
 
 What the endpoint does have is `init_image` plus `init_image_strength` (integer 1–999, default 300).
-That is the lever this project uses: a cube drawn in code goes as the initial image
-(`docs/adr/0025-molde-como-referencia-de-geracao.md`).
+That is the lever this project uses, **chained**: the code-drawn cube mould opens the first face, and
+that face's RESULT becomes the `init_image` (and `color_image`) of the remaining three views — every
+block ships four distinct views, one per camera rotation
+(`docs/adr/0029-quatro-vistas-molde-encadeado-e-rotate.md`, superseding ADR 0022/0025). A second
+technique routes the same first face through `/create-character-v3` as `reference_image` and derives
+the four views from the character's `rotation_urls` — the two are cached separately to be compared.
 
 Two traps ride along:
 

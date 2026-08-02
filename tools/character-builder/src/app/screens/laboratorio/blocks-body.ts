@@ -14,13 +14,11 @@
 /** Erros que a tela detecta sozinha. O resto vem em pt-BR do servidor. */
 export type BlockErrorCode =
   | 'description-missing'
-  | 'size-invalid'
   | 'seed-invalid'
   | 'guidance-invalid';
 
 export interface WorldBlockBody {
   readonly description: string;
-  readonly size: number;
   readonly shape?: string;
   readonly tileUnitSize?: number;
   readonly outline?: string;
@@ -28,12 +26,8 @@ export interface WorldBlockBody {
   readonly detail?: string;
   readonly textGuidanceScale?: number;
   readonly seed?: number;
-  readonly facingMode?: string;
-  readonly lockPalette?: boolean;
-  /** `'canonica'` manda o molde como referência; `'legado'` é o comportamento antigo. */
-  readonly geometry?: string;
-  /** PNG base64 da referência do usuário. Ausente = o molde do projeto. */
-  readonly referencePngB64?: string;
+  /** 'chained' (molde encadeado) ou 'rotated' (rotate via v3). */
+  readonly technique?: string;
 }
 
 export interface WorldBlockAccepted {
@@ -47,12 +41,12 @@ export interface WorldBlockFace {
   readonly facing: 'north' | 'east' | 'south' | 'west';
   readonly seed: number;
   readonly pngB64: string;
-  readonly reused: boolean;
   readonly tileId?: string;
 }
 
 export interface WorldBlockResult {
   readonly hash: string;
+  readonly technique: string;
   readonly faces: readonly WorldBlockFace[];
   readonly fromCache: boolean;
   readonly generated: number;
@@ -60,21 +54,15 @@ export interface WorldBlockResult {
 
 export interface BlockFormInput {
   readonly description: string;
-  readonly size: number;
-  readonly shape: string;
   /** '' = não enviar (usa o default do endpoint). */
+  readonly shape: string;
   readonly tileUnitSize: string;
   readonly outline: string;
   readonly shading: string;
   readonly detail: string;
   readonly guidanceText: string;
   readonly seedText: string;
-  readonly facingMode: string;
-  readonly lockPalette: boolean;
-  /** `'canonica'` (padrão) ou `'legado'`. */
-  readonly geometry: string;
-  /** Base64 puro do PNG de referência. '' = usar o molde do projeto. */
-  readonly referencePngB64: string;
+  readonly technique: string;
 }
 
 export type BuildResult =
@@ -91,14 +79,6 @@ export type BuildResult =
 export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
   const description = input.description.trim();
   if (description === '') return { ok: false, code: 'description-missing' };
-
-  if (
-    !Number.isInteger(input.size) ||
-    input.size < 16 ||
-    input.size > 64
-  ) {
-    return { ok: false, code: 'size-invalid' };
-  }
 
   let seed: number | undefined;
   const seedText = input.seedText.trim();
@@ -124,13 +104,10 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
     if (parsed === 16 || parsed === 32) tileUnitSize = parsed;
   }
 
-  const oriented = input.facingMode === 'oriented';
-
   return {
     ok: true,
     body: {
       description,
-      size: input.size,
       ...(input.shape !== '' ? { shape: input.shape } : {}),
       ...(tileUnitSize !== undefined ? { tileUnitSize } : {}),
       ...(input.outline !== '' ? { outline: input.outline } : {}),
@@ -138,14 +115,9 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
       ...(input.detail !== '' ? { detail: input.detail } : {}),
       ...(guidance !== undefined ? { textGuidanceScale: guidance } : {}),
       ...(seed !== undefined ? { seed } : {}),
-      ...(input.facingMode !== '' ? { facingMode: input.facingMode } : {}),
-      // lockPalette só significa alguma coisa no modo orientado; enviá-lo no
-      // uniforme sujaria o hash e criaria dois caches para o mesmo bloco.
-      ...(oriented ? { lockPalette: input.lockPalette } : {}),
-      ...(input.geometry !== '' ? { geometry: input.geometry } : {}),
-      // A referência entra no hash. Mandar '' criaria um cache diferente do de
-      // "sem referência", que é a MESMA geração.
-      ...(input.referencePngB64 !== '' ? { referencePngB64: input.referencePngB64 } : {}),
+      // A técnica entra sempre que informada — ela faz parte do hash: o mesmo
+      // prompt nas duas técnicas são dois artefatos, comparáveis lado a lado.
+      ...(input.technique !== '' ? { technique: input.technique } : {}),
     },
   };
 }

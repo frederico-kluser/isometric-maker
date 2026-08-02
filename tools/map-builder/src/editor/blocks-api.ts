@@ -30,12 +30,10 @@ import type { BlockDef, Facing } from '../scene.ts';
 interface WorldBlockSummary {
   readonly hash: string;
   readonly description: string;
-  readonly size: number;
   readonly shape: string;
-  readonly facingMode: string;
+  /** 'chained' (molde encadeado) ou 'rotated' (rotate via v3) — ADR 0029. */
+  readonly technique: string;
   readonly faceUrls: Record<Facing, string>;
-  /** Presente nas respostas novas; ausente nos blocos anteriores ao molde. */
-  readonly canonical?: boolean;
   readonly geometry?: {
     readonly tileWidth: number;
     readonly tileHeight: number;
@@ -101,8 +99,6 @@ export interface PaletteLoad {
   readonly catalog: BlockCatalog;
   /** Quantas peças vieram de arte gerada (o resto é procedural). */
   readonly generatedCount: number;
-  /** Quantas dessas já estão alinhadas ao molde. */
-  readonly canonicalCount: number;
   /** Preenchido quando o catálogo não pôde ser lido — a UI mostra verbatim. */
   readonly warning?: string;
 }
@@ -142,28 +138,16 @@ export async function loadPalette(): Promise<PaletteLoad> {
       ...DEFAULT_BLOCKS,
     ];
 
-    const naoAlinhados = summaries.filter((b) => b.canonical === false).length;
-
     return {
       blocks: [...generated, ...FALLBACK_BLOCKS],
       catalog: makeCatalog(definitions),
       generatedCount: generated.length,
-      canonicalCount: generated.length - naoAlinhados,
-      ...(naoAlinhados > 0
-        ? {
-            warning:
-              `${naoAlinhados} bloco(s) gerado(s) ainda não foram alinhados ao molde do ` +
-              'projeto e podem não encaixar no grid. Alinhar não custa nada e não gera ' +
-              'arte nova — é o botão "Alinhar ao molde" no Sprite Studio.',
-          }
-        : {}),
     };
   } catch (err) {
     return {
       blocks: FALLBACK_BLOCKS,
       catalog: FALLBACK_CATALOG,
       generatedCount: 0,
-      canonicalCount: 0,
       warning:
         'Não deu para ler o catálogo de blocos gerados ' +
         `(${err instanceof Error ? err.message : String(err)}). ` +

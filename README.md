@@ -28,7 +28,7 @@ Um **construtor de jogos isométricos**: monta o personagem a partir de uma imag
 Quatro partes, construídas nesta ordem:
 
 1. **Construtor de personagem.** Você anexa uma imagem e informa a altura. O editor gera as 8 direções, estima o esqueleto para você aprovar, e produz andar, correr e pular. A prévia mostra o personagem animado com seletor de direção e ação.
-2. **Construtor de mapa.** Grade isométrica com eixo Z **inteiro**: blocos empilhados, paredes em aresta, degraus. Tile de 64×32, um nível de altura vale 16 px.
+2. **Construtor de mapa.** Grade isométrica com eixo Z **inteiro**: blocos empilhados, paredes em aresta, degraus. Tile de 48×24, um nível de altura vale 29 px — a aresta vertical do cubo canônico (ADR 0024).
 3. **Mecânicas.** Movimento, colisão, e salto cuja altura determina quais níveis são alcançáveis.
 4. **Runtime.** Carrega o projeto exportado e roda, sem interface de edição.
 

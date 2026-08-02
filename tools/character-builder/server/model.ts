@@ -570,14 +570,15 @@ export type TileDetail = (typeof TILE_DETAILS)[number];
 export const TILE_UNIT_SIZES = [16, 32] as const;
 export type TileUnitSize = (typeof TILE_UNIT_SIZES)[number];
 
-/** image_size sugeridos dentro da faixa 16–64 do spec. */
-export const BLOCK_SIZE_PRESETS = [32, 48, 64] as const;
-export const DEFAULT_BLOCK_SIZE = 48;
-
 /**
- * Uniforme = 1 geração servindo as 4 vistas (grama, pedra, terra).
- * Orientado = 1 geração POR vista (uma face com porta, uma quina de muralha).
+ * As duas técnicas de derivar as 4 vistas — TODO bloco tem 4 artes distintas
+ * (ADR 0029); o que muda é de onde elas saem.
+ *
+ * 'chained': a norte nasce do molde do cubo e o RESULTADO dela vira o
+ * init_image das outras três. 4 gerações de tile.
+ * 'rotated': a norte de tile vira reference_image do create-character-v3, que
+ * rotaciona para 8 direções; as 4 vistas saem de rotation_urls. 1 tile + 1 v3.
  */
-export const FACING_MODES = ['uniform', 'oriented'] as const;
-export type FacingMode = (typeof FACING_MODES)[number];
+export const BLOCK_TECHNIQUES = ['chained', 'rotated'] as const;
+export type BlockTechnique = (typeof BLOCK_TECHNIQUES)[number];
 

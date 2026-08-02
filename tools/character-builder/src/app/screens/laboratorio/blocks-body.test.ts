@@ -3,7 +3,8 @@
  *
  * O que se prova é a regra de omissão: campo em branco NÃO vira `null` nem
  * `''` no request. Mandar vazio troca o default do fornecedor por um palpite
- * nosso — e o default do fornecedor é o que o spec documenta.
+ * nosso — e o default do fornecedor é o que o spec documenta. E a técnica
+ * sempre acompanha o body, porque ela entra no hash do servidor.
  *
  * Execute com: node --test src/app/screens/laboratorio/blocks-body.test.ts
  */
@@ -14,7 +15,6 @@ import { buildWorldBlockBody, type BlockFormInput } from './blocks-body.ts';
 function form(over: Partial<BlockFormInput> = {}): BlockFormInput {
   return {
     description: 'grass on top of dirt',
-    size: 48,
     shape: 'block',
     tileUnitSize: '',
     outline: '',
@@ -22,131 +22,87 @@ function form(over: Partial<BlockFormInput> = {}): BlockFormInput {
     detail: '',
     guidanceText: '',
     seedText: '',
-    facingMode: 'uniform',
-    lockPalette: true,
-    geometry: 'canonica',
-    referencePngB64: '',
+    technique: 'chained',
     ...over,
   };
 }
 
-test('descrição vazia ou só espaço → description-missing', () => {
-  for (const description of ['', '   ', '\n\t']) {
-    const r = buildWorldBlockBody(form({ description }));
-    assert.equal(r.ok, false);
-    assert.equal(r.ok === false && r.code, 'description-missing');
+test('body mínimo: description + shape + technique, nada de campo vazio', () => {
+  const built = buildWorldBlockBody(form());
+  assert.ok(built.ok);
+  assert.deepEqual(built.body, {
+    description: 'grass on top of dirt',
+    shape: 'block',
+    technique: 'chained',
+  });
+});
+
+test('description vazia ou só espaços → description-missing', () => {
+  for (const description of ['', '   ']) {
+    const built = buildWorldBlockBody(form({ description }));
+    assert.ok(!built.ok);
+    assert.equal(built.code, 'description-missing');
   }
 });
 
-test('descrição é aparada antes de virar body', () => {
-  const r = buildWorldBlockBody(form({ description: '  pedra musgosa  ' }));
-  assert.ok(r.ok);
-  assert.equal(r.ok && r.body.description, 'pedra musgosa');
+test('a description é aparada antes de ir', () => {
+  const built = buildWorldBlockBody(form({ description: '  mossy stone  ' }));
+  assert.ok(built.ok);
+  assert.equal(built.body.description, 'mossy stone');
 });
 
-test('size fora de 16–64 ou fracionário → size-invalid', () => {
-  for (const size of [15, 65, 48.5, Number.NaN]) {
-    const r = buildWorldBlockBody(form({ size }));
-    assert.equal(r.ok, false, `size ${size} deveria ser recusado`);
-    assert.equal(r.ok === false && r.code, 'size-invalid');
+test('seed inválida → seed-invalid; válida vira número', () => {
+  for (const seedText of ['-1', '1.5', 'abc']) {
+    const built = buildWorldBlockBody(form({ seedText }));
+    assert.ok(!built.ok, `"${seedText}" tinha que falhar`);
+    assert.equal(built.code, 'seed-invalid');
   }
-  assert.ok(buildWorldBlockBody(form({ size: 16 })).ok);
-  assert.ok(buildWorldBlockBody(form({ size: 64 })).ok);
+  const ok = buildWorldBlockBody(form({ seedText: ' 42 ' }));
+  assert.ok(ok.ok);
+  assert.equal(ok.body.seed, 42);
 });
 
-test('seed inválida → seed-invalid; em branco é OMITIDA', () => {
-  for (const seedText of ['-1', '2.5', 'abc']) {
-    const r = buildWorldBlockBody(form({ seedText }));
-    assert.equal(r.ok, false, `seed "${seedText}" deveria ser recusada`);
-    assert.equal(r.ok === false && r.code, 'seed-invalid');
+test('guidance fora de 1–20 → guidance-invalid; válida aceita fração', () => {
+  for (const guidanceText of ['0', '21', 'x']) {
+    const built = buildWorldBlockBody(form({ guidanceText }));
+    assert.ok(!built.ok, `"${guidanceText}" tinha que falhar`);
+    assert.equal(built.code, 'guidance-invalid');
   }
-  const vazio = buildWorldBlockBody(form({ seedText: '  ' }));
+  const ok = buildWorldBlockBody(form({ guidanceText: '7.5' }));
+  assert.ok(ok.ok);
+  assert.equal(ok.body.textGuidanceScale, 7.5);
+});
+
+test('tileUnitSize só entra quando é 16 ou 32', () => {
+  const ok = buildWorldBlockBody(form({ tileUnitSize: '32' }));
+  assert.ok(ok.ok);
+  assert.equal(ok.body.tileUnitSize, 32);
+
+  const fora = buildWorldBlockBody(form({ tileUnitSize: '24' }));
+  assert.ok(fora.ok);
+  assert.equal(fora.body.tileUnitSize, undefined, '24 não é do enum e é omitido');
+});
+
+test('as duas técnicas passam no body — são dois artefatos do mesmo prompt', () => {
+  const chained = buildWorldBlockBody(form({ technique: 'chained' }));
+  const rotated = buildWorldBlockBody(form({ technique: 'rotated' }));
+  assert.ok(chained.ok && rotated.ok);
+  assert.equal(chained.body.technique, 'chained');
+  assert.equal(rotated.body.technique, 'rotated');
+});
+
+test('qualidade preenchida entra; em branco é omitida', () => {
+  const built = buildWorldBlockBody(
+    form({ outline: 'lineless', shading: 'basic shading', detail: 'medium detail' }),
+  );
+  assert.ok(built.ok);
+  assert.equal(built.body.outline, 'lineless');
+  assert.equal(built.body.shading, 'basic shading');
+  assert.equal(built.body.detail, 'medium detail');
+
+  const vazio = buildWorldBlockBody(form());
   assert.ok(vazio.ok);
-  assert.equal(vazio.ok && 'seed' in vazio.body, false, 'seed em branco não vai no request');
-
-  const ok = buildWorldBlockBody(form({ seedText: '0' }));
-  assert.equal(ok.ok && ok.body.seed, 0, 'zero é seed válida, não ausência');
-});
-
-test('guidance fora de 1–20 → guidance-invalid; em branco é OMITIDA', () => {
-  for (const guidanceText of ['0', '20.5', 'x']) {
-    const r = buildWorldBlockBody(form({ guidanceText }));
-    assert.equal(r.ok, false, `guidance "${guidanceText}" deveria ser recusada`);
-    assert.equal(r.ok === false && r.code, 'guidance-invalid');
-  }
-  const ok = buildWorldBlockBody(form({ guidanceText: '12.5' }));
-  assert.equal(ok.ok && ok.body.textGuidanceScale, 12.5);
-  assert.equal(
-    buildWorldBlockBody(form()).ok && 'textGuidanceScale' in buildWorldBlockBody(form()),
-    false,
-  );
-});
-
-test('qualidade em branco é OMITIDA do body (não vira null nem string vazia)', () => {
-  const r = buildWorldBlockBody(form());
-  assert.ok(r.ok);
-  if (!r.ok) return;
-  for (const key of ['outline', 'shading', 'detail', 'tileUnitSize', 'textGuidanceScale', 'seed']) {
-    assert.equal(key in r.body, false, `${key} em branco não pode entrar no request`);
-  }
-});
-
-test('qualidade informada entra no body', () => {
-  const r = buildWorldBlockBody(
-    form({
-      outline: 'lineless',
-      shading: 'medium shading',
-      detail: 'highly detailed',
-      tileUnitSize: '32',
-    }),
-  );
-  assert.ok(r.ok);
-  if (!r.ok) return;
-  assert.equal(r.body.outline, 'lineless');
-  assert.equal(r.body.shading, 'medium shading');
-  assert.equal(r.body.detail, 'highly detailed');
-  assert.equal(r.body.tileUnitSize, 32);
-});
-
-test('tileUnitSize fora do enum [16,32] é ignorado em vez de virar valor inválido', () => {
-  const r = buildWorldBlockBody(form({ tileUnitSize: '24' }));
-  assert.ok(r.ok);
-  assert.equal(r.ok && 'tileUnitSize' in r.body, false);
-});
-
-test('lockPalette só vai no modo orientado — no uniforme sujaria o hash', () => {
-  const uniforme = buildWorldBlockBody(form({ facingMode: 'uniform', lockPalette: true }));
-  assert.ok(uniforme.ok);
-  assert.equal(uniforme.ok && 'lockPalette' in uniforme.body, false);
-
-  const orientado = buildWorldBlockBody(form({ facingMode: 'oriented', lockPalette: false }));
-  assert.ok(orientado.ok);
-  assert.equal(orientado.ok && orientado.body.lockPalette, false);
-  assert.equal(orientado.ok && orientado.body.facingMode, 'oriented');
-});
-
-// ------------------------------------------------------------------ molde
-
-test('a geometria vai no body, e a canônica é a que a tela manda por padrão', () => {
-  const r = buildWorldBlockBody(form());
-  assert.equal(r.ok, true);
-  assert.equal(r.ok === true && r.body.geometry, 'canonica');
-});
-
-test('geometria em branco é OMITIDA — o servidor decide o default', () => {
-  const r = buildWorldBlockBody(form({ geometry: '' }));
-  assert.equal(r.ok, true);
-  assert.equal(r.ok === true && 'geometry' in r.body, false);
-});
-
-test('referência vazia é OMITIDA — mandar "" criaria um cache separado do mesmo bloco', () => {
-  const r = buildWorldBlockBody(form({ referencePngB64: '' }));
-  assert.equal(r.ok, true);
-  assert.equal(r.ok === true && 'referencePngB64' in r.body, false);
-});
-
-test('referência preenchida vai crua no body', () => {
-  const r = buildWorldBlockBody(form({ referencePngB64: 'iVBORw0KGgo=' }));
-  assert.equal(r.ok, true);
-  assert.equal(r.ok === true && r.body.referencePngB64, 'iVBORw0KGgo=');
+  assert.ok(!('outline' in vazio.body));
+  assert.ok(!('shading' in vazio.body));
+  assert.ok(!('detail' in vazio.body));
 });

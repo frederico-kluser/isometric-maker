@@ -1,5 +1,5 @@
 /**
- * Painel "Blocos do mundo" — bancada do /create-isometric-tile.
+ * Painel "Blocos do mundo" — bancada das duas técnicas de bloco (ADR 0029).
  *
  * Mesma forma do painel de sprite sul: POST devolve 202 {key, hash} e o
  * resultado chega por GET /api/world-block/{hash}, que responde 200 com um
@@ -17,28 +17,20 @@ import { api } from '../../studio-store.tsx';
 // importa node:crypto e node:fs, e o navegador não tem nenhum dos dois.
 import {
   BLOCK_FACINGS,
-  FACING_MODES,
+  BLOCK_TECHNIQUES,
   TILE_DETAILS,
   TILE_OUTLINES,
   TILE_SHADINGS,
   TILE_SHAPES,
   TILE_UNIT_SIZES,
-  BLOCK_SIZE_PRESETS,
-  DEFAULT_BLOCK_SIZE,
   type BlockFacing,
 } from '../../../../server/model.ts';
-// Módulo PURO do iso-core: geometria e validação de proporção, sem node:*.
-// A MESMA função que o servidor usa — duas implementações da mesma regra é
-// como a tela aprova o que o servidor recusa.
-import {
-  CANONICAL_CUBE,
-  checkReferenceProportion,
-} from '../../../../../../packages/iso-core/src/iso-cube.ts';
+// Módulo PURO do iso-core: só a geometria, para mostrar o molde em escala.
+import { CANONICAL_CUBE } from '../../../../../../packages/iso-core/src/iso-cube.ts';
 import { blocos as SB, custoEstimado } from '../../../strings/blocos.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -65,7 +57,6 @@ import {
 
 const CLIENT_ERROR_TEXT: Record<BlockErrorCode, string> = {
   'description-missing': SB.erros.descricaoObrigatoria,
-  'size-invalid': SB.erros.tamanhoInvalido,
   'seed-invalid': SB.erros.seedInvalida,
   'guidance-invalid': SB.erros.guidanceInvalida,
 };
@@ -75,9 +66,9 @@ const API_DEFAULT = 'default';
 
 /**
  * O gatilho do Select mostra o VALOR selecionado, não o rótulo do item — então
- * sem isto a tela exibia `default` e `48` crus, em inglês e sem unidade, apesar
- * de a lista mostrar "padrão da API" e "48 px". Todo texto que o usuário lê é
- * pt-BR (ADR 0016), e o gatilho é texto que o usuário lê.
+ * sem isto a tela exibia `default` cru, em inglês, apesar de a lista mostrar
+ * "padrão da API". Todo texto que o usuário lê é pt-BR (ADR 0016), e o gatilho
+ * é texto que o usuário lê.
  */
 const rotulo = (v: unknown, sufixo = ''): string =>
   v === API_DEFAULT || v === null || v === undefined
@@ -89,45 +80,13 @@ type ButtonState = 'idle' | 'running' | 'done' | 'error';
 interface CatalogEntry {
   readonly hash: string;
   readonly description: string;
-  readonly size: number;
   readonly shape: string;
-  readonly facingMode: string;
+  readonly technique: 'chained' | 'rotated';
   readonly faceUrls: Record<BlockFacing, string>;
-  /** Ausente nas respostas antigas — `undefined` conta como não alinhado. */
-  readonly canonical?: boolean;
-}
-
-/** Resposta de POST /api/world-block/{hash}/canon. */
-interface CanonizeReport {
-  readonly hash: string;
-  readonly faces: ReadonlyArray<{ readonly facing: BlockFacing; readonly coverage: number }>;
-  readonly avisos: readonly string[];
-}
-
-/**
- * Lê largura e altura de um PNG escolhido pelo usuário, sem decodificar pixels.
- *
- * `createImageBitmap` faz o navegador ler o cabeçalho e nada mais — validar
- * proporção não precisa dos 60 KB de pixels descomprimidos.
- */
-async function pngSize(file: File): Promise<{ width: number; height: number }> {
-  const bitmap = await createImageBitmap(file);
-  const size = { width: bitmap.width, height: bitmap.height };
-  bitmap.close();
-  return size;
-}
-
-/** `File` → base64 puro, sem o prefixo `data:`. */
-async function toBase64(file: File): Promise<string> {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let s = '';
-  for (let i = 0; i < buf.length; i += 1) s += String.fromCharCode(buf[i]!);
-  return btoa(s);
 }
 
 export function BlocksPanel() {
   const [description, setDescription] = useState('');
-  const [sizeText, setSizeText] = useState(String(DEFAULT_BLOCK_SIZE));
   const [shape, setShape] = useState<string>('block');
   const [tileUnit, setTileUnit] = useState(API_DEFAULT);
   const [outline, setOutline] = useState(API_DEFAULT);
@@ -135,16 +94,7 @@ export function BlocksPanel() {
   const [detail, setDetail] = useState(API_DEFAULT);
   const [guidanceText, setGuidanceText] = useState('');
   const [seedText, setSeedText] = useState('');
-  const [facingMode, setFacingMode] = useState<string>('uniform');
-  const [lockPalette, setLockPalette] = useState(true);
-  const [geometry, setGeometry] = useState<string>('canonica');
-  const [reference, setReference] = useState<{
-    b64: string;
-    width: number;
-    height: number;
-  } | null>(null);
-  const [referenceError, setReferenceError] = useState<string | null>(null);
-  const [canonizing, setCanonizing] = useState<string | null>(null);
+  const [technique, setTechnique] = useState<string>('chained');
 
   const [buttonState, setButtonState] = useState<ButtonState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +167,6 @@ export function BlocksPanel() {
   const handleGenerate = async (): Promise<void> => {
     const built = buildWorldBlockBody({
       description,
-      size: Number(sizeText),
       shape,
       tileUnitSize: tileUnit === API_DEFAULT ? '' : tileUnit,
       outline: outline === API_DEFAULT ? '' : outline,
@@ -225,10 +174,7 @@ export function BlocksPanel() {
       detail: detail === API_DEFAULT ? '' : detail,
       guidanceText,
       seedText,
-      facingMode,
-      lockPalette,
-      geometry,
-      referencePngB64: reference?.b64 ?? '',
+      technique,
     });
     if (!built.ok) {
       setError(CLIENT_ERROR_TEXT[built.code]);
@@ -278,47 +224,6 @@ export function BlocksPanel() {
       <XIcon className="size-4" />
     ) : undefined;
 
-  const geracoes = facingMode === 'uniform' ? 1 : 4;
-  const canonica = geometry === 'canonica';
-
-  /**
-   * Aceita a referência do usuário só se a PROPORÇÃO bater com a do molde.
-   *
-   * A checagem roda no navegador antes de qualquer ida ao servidor, com a mesma
-   * função que o servidor usa — `checkReferenceProportion` do iso-core. Duas
-   * implementações da mesma regra é como a tela aprova o que o servidor recusa.
-   */
-  const handleReference = async (file: File | undefined): Promise<void> => {
-    if (!file) return;
-    setReferenceError(null);
-    try {
-      const { width, height } = await pngSize(file);
-      const check = checkReferenceProportion(width, height, CANONICAL_CUBE);
-      if (!check.ok) {
-        setReference(null);
-        setReferenceError(check.motivo);
-        return;
-      }
-      setReference({ b64: await toBase64(file), width, height });
-    } catch (err) {
-      setReference(null);
-      setReferenceError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  /** Alinha ao molde a arte já paga. Zero chamadas à API, zero custo. */
-  const handleCanonize = async (hash: string): Promise<void> => {
-    setCanonizing(hash);
-    try {
-      await api<CanonizeReport>(`world-block/${hash}/canon`, { method: 'POST' });
-      loadCatalog();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCanonizing(null);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
@@ -336,82 +241,24 @@ export function BlocksPanel() {
             <CardHeader>
               <CardTitle>{SB.molde.titulo}</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="flex items-start gap-4">
-                <img
-                  src={reference ? `data:image/png;base64,${reference.b64}` : '/api/block-mould.png'}
-                  alt={SB.molde.titulo}
-                  width={CANONICAL_CUBE.spriteWidth * 2}
-                  height={CANONICAL_CUBE.spriteHeight * 2}
-                  className="shrink-0 rounded border border-border bg-muted/40 [image-rendering:pixelated]"
-                />
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-sm">{SB.molde.descricao}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {SB.molde.geometria(
-                      CANONICAL_CUBE.tileWidth,
-                      CANONICAL_CUBE.tileHeight,
-                      CANONICAL_CUBE.cubeHeight,
-                    )}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{SB.molde.porQueCinza}</p>
-                </div>
-              </div>
-
+            <CardContent className="flex items-start gap-4">
+              <img
+                src="/api/block-mould.png"
+                alt={SB.molde.titulo}
+                width={CANONICAL_CUBE.spriteWidth * 2}
+                height={CANONICAL_CUBE.spriteHeight * 2}
+                className="shrink-0 rounded border border-border bg-muted/40 [image-rendering:pixelated]"
+              />
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="bloco-ref">{SB.molde.referenciaRotulo}</Label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    id="bloco-ref"
-                    type="file"
-                    accept="image/png"
-                    className="max-w-xs"
-                    onChange={(e) => void handleReference(e.target.files?.[0])}
-                  />
-                  {reference !== null && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setReference(null);
-                        setReferenceError(null);
-                      }}
-                    >
-                      {SB.molde.referenciaLimpar}
-                    </Button>
+                <p className="text-sm">{SB.molde.descricao}</p>
+                <p className="text-xs text-muted-foreground">
+                  {SB.molde.geometria(
+                    CANONICAL_CUBE.tileWidth,
+                    CANONICAL_CUBE.tileHeight,
+                    CANONICAL_CUBE.cubeHeight,
                   )}
-                </div>
-                <p className="text-xs text-muted-foreground">{SB.molde.referenciaNota}</p>
-                <p className="text-xs" role="status">
-                  {reference !== null
-                    ? SB.molde.referenciaAceita(reference.width, reference.height)
-                    : SB.molde.semReferencia}
                 </p>
-                {referenceError !== null && (
-                  <p
-                    role="alert"
-                    className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-                  >
-                    {referenceError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="bloco-geom">{SB.molde.geometriaRotulo}</Label>
-                <SegmentedToggle
-                  value={geometry}
-                  onChange={setGeometry}
-                  ariaLabel={SB.molde.geometriaRotulo}
-                >
-                  <SegmentedToggleOption value="canonica">
-                    {SB.molde.geometriaCanonica}
-                  </SegmentedToggleOption>
-                  <SegmentedToggleOption value="legado">
-                    {SB.molde.geometriaLegado}
-                  </SegmentedToggleOption>
-                </SegmentedToggle>
-                <p className="text-xs text-muted-foreground">{SB.molde.geometriaNota}</p>
+                <p className="text-xs text-muted-foreground">{SB.molde.porQueCinza}</p>
               </div>
             </CardContent>
           </Card>
@@ -434,41 +281,6 @@ export function BlocksPanel() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="bloco-size">{SB.form.tamanhoRotulo}</Label>
-                  {canonica ? (
-                    // Na geometria canônica o canvas é o bounding box exato do
-                    // cubo. Deixar o seletor ativo prometeria um controle que
-                    // o molde já decidiu.
-                    <div
-                      id="bloco-size"
-                      className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-muted-foreground"
-                    >
-                      {SB.molde.tamanhoDoMolde(
-                        CANONICAL_CUBE.spriteWidth,
-                        CANONICAL_CUBE.spriteHeight,
-                      )}
-                    </div>
-                  ) : (
-                    <Select
-                      value={sizeText}
-                      onValueChange={(v) => {
-                        if (v !== null) setSizeText(v);
-                      }}
-                    >
-                      <SelectTrigger id="bloco-size" className="w-full">
-                        <SelectValue>{(v) => rotulo(v, ' px')}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BLOCK_SIZE_PRESETS.map((s) => (
-                          <SelectItem key={s} value={String(s)}>
-                            {s} px
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5">
                   <Label htmlFor="bloco-shape">{SB.form.formaRotulo}</Label>
                   <Select
                     value={shape}
@@ -488,73 +300,61 @@ export function BlocksPanel() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="bloco-unit">{SB.form.unidadeRotulo}</Label>
+                  <Select
+                    value={tileUnit}
+                    onValueChange={(v) => {
+                      if (v !== null) setTileUnit(v);
+                    }}
+                  >
+                    <SelectTrigger id="bloco-unit" className="w-full">
+                      <SelectValue>{(v) => rotulo(v)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={API_DEFAULT}>{SB.form.padraoApi}</SelectItem>
+                      {TILE_UNIT_SIZES.map((s) => (
+                        <SelectItem key={s} value={String(s)}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                {SB.form.tamanhoNota} {SB.form.formaNota}
+                {SB.form.formaNota} {SB.form.unidadeNota}
               </p>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="bloco-unit">{SB.form.unidadeRotulo}</Label>
-                <Select
-                  value={tileUnit}
-                  onValueChange={(v) => {
-                    if (v !== null) setTileUnit(v);
-                  }}
-                >
-                  <SelectTrigger id="bloco-unit" className="w-full">
-                    <SelectValue>{(v) => rotulo(v)}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={API_DEFAULT}>{SB.form.padraoApi}</SelectItem>
-                    {TILE_UNIT_SIZES.map((s) => (
-                      <SelectItem key={s} value={String(s)}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">{SB.form.unidadeNota}</p>
-              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>{SB.form.cartaoVistas}</CardTitle>
+              <CardTitle>{SB.form.cartaoTecnica}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <Label>{SB.form.modoRotulo}</Label>
+                <Label>{SB.form.tecnicaRotulo}</Label>
                 <SegmentedToggle
-                  value={facingMode}
-                  onChange={(v) => setFacingMode(v)}
-                  ariaLabel={SB.form.modoRotulo}
+                  value={technique}
+                  onChange={(v) => setTechnique(v)}
+                  ariaLabel={SB.form.tecnicaRotulo}
                 >
-                  {FACING_MODES.map((m) => (
-                    <SegmentedToggleOption key={m} value={m}>
-                      {m === 'uniform' ? SB.form.modoUniforme : SB.form.modoOrientado}
+                  {BLOCK_TECHNIQUES.map((t) => (
+                    <SegmentedToggleOption key={t} value={t}>
+                      {t === 'chained' ? SB.form.tecnicaEncadeada : SB.form.tecnicaRotate}
                     </SegmentedToggleOption>
                   ))}
                 </SegmentedToggle>
-                <p className="text-xs text-muted-foreground">{SB.form.modoNota}</p>
+                <p className="text-xs text-muted-foreground">
+                  {technique === 'chained'
+                    ? SB.form.tecnicaEncadeadaNota
+                    : SB.form.tecnicaRotateNota}
+                </p>
               </div>
 
-              {facingMode === 'oriented' && (
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="bloco-palette"
-                      checked={lockPalette}
-                      onCheckedChange={(c) => setLockPalette(c === true)}
-                    />
-                    <Label htmlFor="bloco-palette">{SB.form.travarPaleta}</Label>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{SB.form.travarPaletaNota}</p>
-                </div>
-              )}
-
               <Badge variant="secondary" className="w-fit">
-                {custoEstimado(geracoes)}
+                {custoEstimado(technique)}
               </Badge>
             </CardContent>
           </Card>
@@ -687,19 +487,18 @@ export function BlocksPanel() {
                         <span className="text-xs text-muted-foreground">
                           {SB.resultado.face[f.facing]}
                         </span>
-                        {f.reused && (
-                          <Badge variant="outline" className="text-[10px]">
-                            {SB.resultado.reuso}
-                          </Badge>
-                        )}
                       </div>
                     ))}
                   </div>
-                  {semGasto && (
-                    <Badge variant="outline" className="w-fit">
-                      {SB.resultado.doCache}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {SB.catalogo.tecnica[result.technique as 'chained' | 'rotated'] ??
+                        result.technique}
                     </Badge>
-                  )}
+                    {semGasto && (
+                      <Badge variant="outline">{SB.resultado.doCache}</Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{SB.resultado.aviso}</p>
                 </>
               )}
@@ -735,31 +534,15 @@ export function BlocksPanel() {
                         <span className="line-clamp-2 text-center text-xs leading-tight">
                           {b.description}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {b.size} px · {b.shape}
-                        </span>
-                        {b.canonical === true ? (
-                          <Badge variant="outline" className="text-[10px]">
-                            {SB.catalogo.jaAlinhado}
-                          </Badge>
-                        ) : (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="w-full text-[10px]"
-                            disabled={canonizing === b.hash}
-                            onClick={() => void handleCanonize(b.hash)}
-                          >
-                            {canonizing === b.hash
-                              ? SB.catalogo.alinhando
-                              : SB.catalogo.alinhar}
-                          </Button>
-                        )}
+                        <span className="text-[10px] text-muted-foreground">{b.shape}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {SB.catalogo.tecnica[b.technique] ?? b.technique}
+                        </Badge>
                       </div>
                     ))}
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    {SB.catalogo.alinharNota}
+                    {SB.catalogo.comparacaoNota}
                   </p>
                 </>
               )}

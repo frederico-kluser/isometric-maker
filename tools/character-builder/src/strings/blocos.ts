@@ -3,28 +3,23 @@
  * Chaves em inglês, valores em pt-BR (ADR 0008, ADR 0016).
  *
  * Nomes de parâmetro da API aparecem entre parênteses de propósito: esta tela
- * é uma bancada do endpoint, e reconhecer o campo do spec é metade do uso.
+ * é uma bancada dos endpoints, e reconhecer o campo do spec é metade do uso.
  */
 
 export const blocos = {
   titulo: 'Blocos do mundo',
   descricao:
-    'Bancada do /create-isometric-tile: gera as peças de terreno já desenhadas na ' +
-    'projeção isométrica do gênero — topo mais duas faces laterais, prontas para ' +
-    'assentar no grid do editor de mapa.',
+    'Bancada de blocos de terreno: toda geração produz as QUATRO vistas da câmera, ' +
+    'cada uma com arte própria — é o que faz a rotação do mapa mostrar perspectivas ' +
+    'diferentes do mesmo bloco. Escolha a técnica e compare os resultados no catálogo.',
 
   form: {
     cartaoBloco: 'Bloco',
     descricaoRotulo: 'Descrição (description)',
     descricaoPlaceholder: 'grama por cima de terra',
     descricaoNota:
-      'Descreva o MATERIAL, não a forma do cubo — a forma vem do parâmetro de ' +
-      'espessura abaixo. Prompt em inglês costuma render melhor.',
-
-    tamanhoRotulo: 'Tamanho (image_size)',
-    tamanhoNota:
-      'Faixa do endpoint: 16 a 64 px. O próprio spec observa que acima de 24 px ' +
-      'costuma dar melhor resultado.',
+      'Descreva o MATERIAL, não a forma do cubo — a forma vem do molde e do parâmetro ' +
+      'de espessura abaixo. Prompt em inglês costuma render melhor.',
 
     formaRotulo: 'Espessura (isometric_tile_shape)',
     formaNota:
@@ -45,22 +40,21 @@ export const blocos = {
     seedRotulo: 'Seed',
     seedPlaceholder: 'em branco = derivada do hash',
     seedNota:
-      'Mesma seed com a mesma configuração produz o mesmo bloco. As faces usam ' +
+      'Mesma seed com a mesma configuração produz o mesmo bloco. As chamadas usam ' +
       'seed base + índice.',
 
-    cartaoVistas: 'Vistas',
-    modoRotulo: 'Como gerar as quatro vistas',
-    modoUniforme: 'Uniforme (1 geração)',
-    modoOrientado: 'Orientado (4 gerações)',
-    modoNota:
-      'O endpoint NÃO tem parâmetro de orientação. Uniforme gera uma arte e reusa ' +
-      'nas quatro vistas da câmera — é o certo para grama, pedra e terra, e custa ' +
-      'um quarto. Orientado gera uma por vista, guiado por texto, e só vale quando ' +
-      'o bloco tem um lado distinto (uma porta, uma quina, um brasão).',
-    travarPaleta: 'Travar a paleta na primeira face (color_image)',
-    travarPaletaNota:
-      'Só vale no modo orientado. Sem isso, as quatro vistas do mesmo bloco derivam ' +
-      'de cor e param de parecer o mesmo bloco.',
+    cartaoTecnica: 'Técnica das 4 vistas',
+    tecnicaRotulo: 'Como derivar as quatro vistas',
+    tecnicaEncadeada: 'Molde encadeado (4 tiles)',
+    tecnicaRotate: 'Rotate v3 (1 tile + 1 v3)',
+    tecnicaEncadeadaNota:
+      'A face norte nasce do molde do cubo (init_image) e o RESULTADO dela vira o ' +
+      'molde das outras três, com sufixo de face no prompt e a paleta travada ' +
+      '(color_image). Quatro gerações do create-isometric-tile.',
+    tecnicaRotateNota:
+      'A mesma norte de tile vai como reference_image do create-character-v3, que a ' +
+      'rotaciona para 8 direções; as 4 vistas saem de rotation_urls, que já vêm como ' +
+      'imagens separadas — nada é extraído de GIF. Uma geração de tile + uma do v3.',
 
     gerar: 'Gerar bloco',
     gerando: 'Gerando…',
@@ -73,10 +67,9 @@ export const blocos = {
     titulo: 'Resultado',
     vazio: 'Nenhum bloco gerado ainda nesta sessão.',
     aguardando:
-      'Gerando. O endpoint pode responder na hora ou em segundo plano — os dois ' +
-      'caminhos estão cobertos. Não feche a aba.',
+      'Gerando as quatro vistas. O caminho pode responder na hora ou em segundo ' +
+      'plano — os dois estão cobertos. Não feche a aba.',
     doCache: 'do cache — nenhuma chamada saiu',
-    reuso: 'reuso da norte',
     face: {
       north: 'Norte',
       east: 'Leste',
@@ -85,57 +78,39 @@ export const blocos = {
     } as const,
     aviso:
       'As quatro faces já estão no catálogo. Abra o editor de mapa em ' +
-      'http://localhost:5175 e recarregue para vê-las na paleta.',
+      'http://localhost:5175 e recarregue para vê-las na paleta — e gire a câmera ' +
+      'para conferir as quatro perspectivas.',
   },
 
   molde: {
     titulo: 'Molde do cubo',
     descricao:
-      'Toda geração vai acompanhada deste molde como imagem inicial (init_image). ' +
-      'É a única alavanca de proporção que o endpoint oferece — não existe ' +
-      'parâmetro de aresta vertical nem de razão.',
+      'A primeira face de toda geração nasce deste molde como imagem inicial ' +
+      '(init_image). Dali, a técnica escolhida abaixo decide como as outras três ' +
+      'vistas são derivadas dela.',
     geometria: (w: number, h: number, d: number) =>
       `Losango ${w}×${h} px, aresta vertical ${d} px, sprite ${w}×${h + d} px. ` +
       'Um cubo de verdade: mesma medida em largura, profundidade e altura.',
     porQueCinza:
       'O molde é acromático de propósito: init_image carrega forma E cor, e um ' +
       'molde colorido faria todo bloco nascer da cor dele.',
-    referenciaRotulo: 'Referência própria (substitui o molde)',
-    referenciaNota:
-      'Só é aceita se tiver a MESMA proporção do molde — em qualquer tamanho. ' +
-      'Outra proporção não é outro estilo, é outra projeção, e outra projeção não ' +
-      'encaixa no mesmo grid.',
-    referenciaEscolher: 'Escolher PNG…',
-    referenciaLimpar: 'Voltar ao molde',
-    referenciaAceita: (w: number, h: number) => `Referência aceita: ${w}×${h} px.`,
-    semReferencia: 'Usando o molde do projeto.',
-    geometriaRotulo: 'Geometria',
-    geometriaCanonica: 'Canônica (com molde)',
-    geometriaLegado: 'Legado (sem molde)',
-    geometriaNota:
-      'Legado reproduz o comportamento anterior e existe por um motivo só: manter ' +
-      'o hash dos blocos já pagos. Trocar o hash de um asset pago é gerá-lo de novo.',
-    tamanhoDoMolde: (w: number, h: number) => `${w}×${h} px — vem do molde`,
   },
 
   catalogo: {
     titulo: 'Catálogo',
     vazio: 'Nenhum bloco completo em disco ainda.',
     recarregar: 'Recarregar',
-    alinhar: 'Alinhar ao molde',
-    alinhando: 'Alinhando…',
-    alinhado: 'Alinhado',
-    alinharNota:
-      'Alinhar reposiciona a arte já paga sobre a âncora do molde e completa a base. ' +
-      'Não chama a API, não custa nada e não toca no PNG original.',
-    jaAlinhado: 'Já alinhado',
-    naoAlinhado: 'Fora do molde',
-    cobertura: (pct: number) => `cobertura ${pct}%`,
+    tecnica: {
+      chained: 'molde encadeado',
+      rotated: 'rotate v3',
+    } as const,
+    comparacaoNota:
+      'O mesmo prompt pode ser gerado nas duas técnicas — cada uma tem seu próprio ' +
+      'cache, e a etiqueta diz de qual veio cada bloco.',
   },
 
   erros: {
     descricaoObrigatoria: 'Escreva a descrição do bloco — o endpoint não gera sem prompt.',
-    tamanhoInvalido: 'Tamanho fora da faixa do endpoint: inteiro entre 16 e 64.',
     seedInvalida: 'Seed precisa ser um inteiro maior ou igual a zero.',
     guidanceInvalida: 'Aderência ao texto precisa ser um número entre 1 e 20.',
     jobFalhou: 'A geração falhou. Veja o log do servidor.',
@@ -143,13 +118,8 @@ export const blocos = {
 } as const;
 
 /** Rótulo do custo estimado — sempre "estimado", como a própria PixelLab rotula. */
-export function custoEstimado(geracoes: number): string {
-  return geracoes === 1
-    ? '1 geração (preço estimado)'
-    : `${geracoes} gerações (preço estimado)`;
-}
-
-/** Resumo do lote para o histórico. */
-export function resumoBloco(size: number, shape: string, modo: string): string {
-  return `${size} px · ${shape} · ${modo === 'uniform' ? 'uniforme' : 'orientado'}`;
+export function custoEstimado(tecnica: string): string {
+  return tecnica === 'rotated'
+    ? '1 geração de tile + 1 do v3 (preço estimado)'
+    : '4 gerações de tile (preço estimado)';
 }

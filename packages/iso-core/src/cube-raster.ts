@@ -231,10 +231,10 @@ function drawOutline(
  * aleatoriedade, sem estado. A mesma peça na mesma vista sai idêntica em
  * qualquer execução, o que é o que permite cachear a textura.
  *
- * **Isto vale para a arte PROCEDURAL.** Um bloco gerado no modo `uniform` tem
- * uma arte só, reusada nas quatro vistas — é o que significa uniforme, e é o
- * que faz ele custar uma geração em vez de quatro. Quatro vistas realmente
- * distintas de arte gerada exigem o modo `oriented`, com quatro gerações.
+ * **Isto vale para a arte PROCEDURAL** — aqui a variação por vista é de graça.
+ * Arte gerada tem sempre quatro vistas distintas desde a ADR 0029 (molde
+ * encadeado, ou rotate via v3), pagas como quatro gerações de tile ou como
+ * um tile mais um create-character-v3.
  */
 export function materialShader(hue: number, view: number, saturation = 0.45): Shader {
   const palette = paletteFromHue(hue, saturation);

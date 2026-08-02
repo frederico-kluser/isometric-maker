@@ -16,8 +16,6 @@ import {
   IsoCubeGeometryError,
   PIXELLAB_TILE_MAX,
   assertFitsPixelLab,
-  canonicalAspect,
-  checkReferenceProportion,
   columnBounds,
   cubeHeightError,
   diamondRow,
@@ -195,31 +193,4 @@ test('as três faces existem e ocupam áreas plausíveis', () => {
   assert.equal(conta['top'], G.tileHeight * (G.tileHeight + 2), 'o topo é o losango inteiro');
   assert.equal(conta['left'], (G.tileWidth / 2) * G.cubeHeight, 'meia largura × a aresta');
   assert.equal(conta['top']! + conta['left']! + conta['right']!, silhouetteArea(G));
-});
-
-// ------------------------------------------------------------------ proporção
-
-test('a referência canônica e seus múltiplos passam', () => {
-  assert.ok(checkReferenceProportion(48, 53).ok);
-  assert.ok(checkReferenceProportion(96, 106).ok);
-  assert.ok(checkReferenceProportion(24, 26).ok, '26/24 fica dentro dos 2 %');
-});
-
-test('referência quadrada e referência em isometria de 30° são recusadas', () => {
-  const quadrada = checkReferenceProportion(48, 48);
-  assert.equal(quadrada.ok, false);
-  assert.match(quadrada.motivo, /48×48/);
-  // Isometria verdadeira (30°): H = W/√3, sprite = W·(1/√3 + 1/√3·√... ) — a
-  // razão real é ~1,1547, contra 1,1042 daqui. Fora da tolerância.
-  assert.equal(checkReferenceProportion(48, 56).ok, false);
-});
-
-test('a razão canônica bate com a geometria', () => {
-  assert.equal(canonicalAspect(G), 53 / 48);
-});
-
-test('dimensão inválida não explode, devolve motivo', () => {
-  const r = checkReferenceProportion(0, 10);
-  assert.equal(r.ok, false);
-  assert.match(r.motivo, /dimensões/);
 });

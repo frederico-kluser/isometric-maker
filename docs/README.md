@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-01**: **40 arquivos em `docs/` — 25 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-01**: **41 arquivos em `docs/` — 26 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -42,7 +42,7 @@ A API que gera a arte. Ela **muda sem versionar**, então a prosa aqui é mínim
 
 | Arquivo | Descrição |
 |---|---|
-| [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) | A conta do cubo isométrico, os três erros clássicos de perspectiva, o molde mandado à PixelLab e o alinhamento da arte |
+| [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) | A conta do cubo isométrico, os três erros clássicos de perspectiva e o molde encadeado nas duas técnicas de bloco |
 
 ## Plano de execução
 
@@ -100,14 +100,15 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0018`](./adr/0018-artefato-de-exportacao.md) | O artefato de exportação: `project.json` v1 | vigente |
 | [`0019`](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) | `create-character-v3` é o caminho do personagem, e o que isso custa | vigente |
 | [`0020`](./adr/0020-identidade-da-diagonal-de-picking.md) | A diagonal do picking avança `zStep/tileHeight` por nível, não uma célula | vigente |
-| [`0021`](./adr/0021-rotacao-de-camera-em-quatro-vistas.md) | Rotação de câmera em quatro vistas, como parâmetro de vista | vigente |
-| [`0022`](./adr/0022-blocos-do-mundo-isometricos.md) | Blocos do mundo vêm do `/create-isometric-tile`, e o default é uma geração por bloco | vigente |
+| [`0021`](./adr/0021-rotacao-de-camera-em-quatro-vistas.md) | Rotação de câmera em quatro vistas, como parâmetro de vista | vigente · consequência corrigida pela 0029 |
+| [`0022`](./adr/0022-blocos-do-mundo-isometricos.md) | Blocos do mundo vêm do `/create-isometric-tile`, e o default é uma geração por bloco | substituída por 0029 |
 | [`0023`](./adr/0023-caminho-de-volta-ao-artefato-pago.md) | Toda geração paga registra o caminho de volta ao artefato, e andamento nunca é 404 | vigente |
 | [`0024`](./adr/0024-cubo-isometrico-canonico.md) | O cubo isométrico canônico: tile 48×24, aresta vertical 29 | vigente · corrige 0013 |
-| [`0025`](./adr/0025-molde-como-referencia-de-geracao.md) | O molde do cubo acompanha toda geração de bloco | vigente |
+| [`0025`](./adr/0025-molde-como-referencia-de-geracao.md) | O molde do cubo acompanha toda geração de bloco | substituída por 0029 |
 | [`0026`](./adr/0026-giro-de-camera-animado.md) | O giro da câmera é animado: posição interpolada, sprite nunca rotacionado | vigente |
 | [`0027`](./adr/0027-exportacao-v2-instancias-e-materiais.md) | Exportação v2: cada bloco colocado sai com id, posição, tipo e material | vigente |
 | [`0028`](./adr/0028-modo-manequim-e-preenchimento-do-quadro.md) | O manequim é prompt, não `template_id`; e o quadro cheio é pós-processamento | vigente |
+| [`0029`](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) | Todo bloco tem quatro vistas: molde encadeado, e rotate via v3 para comparar | vigente |
 
 ## Skills
 
@@ -132,6 +133,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-01 | **O cubo vira cubo** ([ADR 0024](./adr/0024-cubo-isometrico-canonico.md)): a aresta vertical era 40,8 % do valor geométrico, e o erro aparecia como "a arte não encaixa no mapa". Com ela vieram o molde mandado em toda geração ([ADR 0025](./adr/0025-molde-como-referencia-de-geracao.md)), o giro animado da câmera ([ADR 0026](./adr/0026-giro-de-camera-animado.md)) e a exportação com instâncias e materiais ([ADR 0027](./adr/0027-exportacao-v2-instancias-e-materiais.md)) |
 | 2026-08-01 | Modo manequim e preenchimento do quadro ([ADR 0028](./adr/0028-modo-manequim-e-preenchimento-do-quadro.md)): `template_id` era esqueleto e não aparência, `negative_description` e `coverage_percentage` nunca tinham sido enviados, e a moldura estufada da v3 passou a ser recortada com uma bbox só para as 8 direções |
 | 2026-08-01 | Spec revendorizado; [ADR 0019](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) alinha a decisão de personagem ao código em v3; [ADR 0020](./adr/0020-identidade-da-diagonal-de-picking.md) corrige a diagonal do picking e estreia o campo `**Corrige:**`; quatro skills novas para o modelo isométrico, incluindo a de rotação de câmera |
+| 2026-08-01 | **Todo bloco passa a ter quatro vistas** ([ADR 0029](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md)): o modo uniforme e a canonização saem, o molde vira encadeado (o resultado da norte é o `init_image` das outras faces) e nasce a técnica `rotated` via `create-character-v3` para comparar; os cinco blocos uniformes pagos foram arquivados |
 
 ## Referências
 

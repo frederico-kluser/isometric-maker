@@ -182,11 +182,11 @@ load-bearing for rotation too, not as something rotation could relax.
 
 ## What the four views cost in art, and what they do not
 
-A `uniform` world block has **one** artwork reused across all four views — that is what uniform means,
-and it is what makes a block cost one generation instead of four
-(`docs/adr/0022-blocos-do-mundo-isometricos.md`). Turning the camera on one does not change its
-drawing, and the cross-fade correctly has nothing to show. Four genuinely distinct views of generated
-art require `oriented` mode and four generations.
+Since ADR 0029, **every generated world block ships four distinct views** — the `uniform` mode (one
+artwork reused across the four views, one generation) was removed precisely because turning the
+camera on one showed the same drawing and the cross-fade had nothing to show
+(`docs/adr/0029-quatro-vistas-molde-encadeado-e-rotate.md`). The art budget is 4 tile generations
+(`chained`) or 1 tile + 1 `create-character-v3` (`rotated`) per block, by explicit user decision.
 
 Procedural cubes vary per view for free: same face tone, different material grain
 (`packages/iso-core/src/cube-raster.ts`, `materialShader`).

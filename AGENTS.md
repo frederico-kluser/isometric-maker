@@ -89,10 +89,10 @@ cd tools/pixellab-pipeline && npm test              # node --test src/*.test.ts 
 cd tools/pixellab-pipeline && npm run typecheck
 # Estúdio de personagem
 cd tools/character-builder && npm run typecheck
-cd tools/character-builder && npm test              # 18 arquivos de teste (197 testes)
+cd tools/character-builder && npm test              # 24 arquivos de teste (284 testes)
 # Mapa e geometria
 cd packages/iso-core && npm run typecheck
-cd packages/iso-core && npm test                    # 290 testes
+cd packages/iso-core && npm test                    # 366 testes
 cd tools/map-builder && npm run typecheck
 cd tools/map-builder && npm test                    # autotile, export, picking
 # Runtime

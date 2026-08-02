@@ -58,7 +58,6 @@ import {
 	runWorldBlock,
 	readWorldBlockResult,
 	listWorldBlocks,
-	canonizeWorldBlock,
 	worldBlockHash,
 	validateWorldBlockConfig,
 	WorldBlockValidationError,
@@ -1302,32 +1301,6 @@ export async function handle(
 				},
 				mouldUrl: "/api/block-mould.png",
 			});
-			return true;
-		}
-
-		// Alinha ao molde a arte JÁ PAGA de um bloco. Zero chamadas à API, zero
-		// custo — e o PNG original nunca é tocado.
-		if (
-			url.pathname.startsWith("/api/world-block/") &&
-			url.pathname.endsWith("/canon") &&
-			req.method === "POST"
-		) {
-			const hash = url.pathname.slice(
-				"/api/world-block/".length,
-				url.pathname.length - "/canon".length,
-			);
-			if (hash === "" || hash.includes("/")) {
-				badRequest(res, "hash de bloco inválido");
-				return true;
-			}
-			try {
-				json(res, 200, await canonizeWorldBlock(hash, ASSETS));
-			} catch (err) {
-				badRequest(
-					res,
-					`não deu para alinhar o bloco "${hash}": ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
 			return true;
 		}
 
