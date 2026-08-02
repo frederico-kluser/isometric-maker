@@ -26,45 +26,7 @@
     "#9c7345",
     "#c79d63"
   ],
-  "characters": [
-    {
-      "id": "manequim",
-      "label": "Manequim base",
-      "silhouette": "humano-medio",
-      "description": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view, featureless humanoid base body mannequin, completely bald head with no hair, blank faceless head with no eyes, no nose, no mouth, smooth untextured skin, uniform flat skin color, wearing no clothing at all, no armor, no accessories, neutral standing pose, arms slightly away from the body, symmetrical, single character, full body visible from head to feet",
-      "size": 128,
-      "seed": 1,
-      "wizard": {
-        "etapa": "direcoes8",
-        "southVersions": [
-          {
-            "prompt": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view",
-            "effective": "ragnarok online 2002 classic korean mmorpg style, chibi anime character base body mannequin, bald head, no clothes, neutral standing pose, arms slightly away from body, pixel art, cel-shaded with bold dark outlines, vibrant saturated colors, game sprite, low top-down view, featureless humanoid base body mannequin, completely bald head with no hair, blank faceless head with no eyes, no nose, no mouth, smooth untextured skin, uniform flat skin color, wearing no clothing at all, no armor, no accessories, neutral standing pose, arms slightly away from the body, symmetrical, single character, full body visible from head to feet",
-            "mannequin": true,
-            "at": "2026-08-02T20:05:38.627Z"
-          }
-        ],
-        "activeSouth": 0
-      },
-      "createdAt": "2026-07-31T14:21:41.226Z",
-      "mannequin": true,
-      "mold": "adulto"
-    },
-    {
-      "id": "teste",
-      "label": "teste",
-      "description": "aaaa",
-      "silhouette": "humano-medio",
-      "size": 128,
-      "seed": 2996,
-      "wizard": {
-        "etapa": "sul",
-        "southVersions": [],
-        "activeSouth": 0
-      },
-      "createdAt": "2026-08-01T01:27:26.933Z"
-    }
-  ],
+  "characters": [],
   "poses": [
     {
       "id": "parado",
@@ -118,22 +80,5 @@
     }
   ],
   "wardrobe": [],
-  "cells": {
-    "manequim::__south__": {
-      "key": "manequim::__south__",
-      "status": "pronto",
-      "error": "500 em POST /create-image-bitforge: {\"detail\":\"style_image must be size (128, 128), not torch.Size([1393, 860])\"}",
-      "updatedAt": "2026-08-02T20:05:38.627Z",
-      "frames": {
-        "south": [
-          "/assets/wizard/manequim/south-v0.png"
-        ]
-      }
-    }
-  },
-  "lock": {
-    "frameCount": 8,
-    "fps": 8,
-    "size": 64
-  }
+  "cells": {}
 }

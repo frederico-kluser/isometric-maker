@@ -48,7 +48,9 @@ export function WizardScreen() {
 	const character = resolveCharacter(studio, characterId);
 	if (!character) {
 		return (
-			<p className="text-sm text-muted-foreground">{wizard.carregando}</p>
+			<div className="flex flex-col gap-6">
+				<CharacterHeader studio={studio} refresh={refresh} />
+			</div>
 		);
 	}
 	const progress = deriveWizard(studio, character, studio.jobs);

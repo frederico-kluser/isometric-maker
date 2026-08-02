@@ -16,6 +16,7 @@
  */
 import { useState } from 'react';
 import { Skeleton } from '@/components/motion-ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,6 +28,7 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { MoldId } from '../../../../server/model.ts';
+import { southKey } from '../../../../server/model.ts';
 import { versaoSulAria, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
@@ -95,8 +97,23 @@ function SouthGenerate({
 		progress.character.negativePrompt ?? '',
 	);
 	const action = useAction(refresh);
+	const [cancelling, setCancelling] = useState(false);
 	const generating = progress.southGenerating;
 	const failure = generating ? undefined : progress.southError;
+
+	const jobKey = southKey(progress.character.id);
+
+	const cancel = async (): Promise<void> => {
+		setCancelling(true);
+		try {
+			await api(`jobs/${encodeURIComponent(jobKey)}`, { method: 'DELETE' });
+			await refresh();
+		} catch {
+			// Melhor esforço — o poll vai corrigir o estado de qualquer jeito.
+		} finally {
+			setCancelling(false);
+		}
+	};
 
 	const generate = (): void =>
 		void action.run(async () => {
@@ -222,14 +239,25 @@ function SouthGenerate({
 					/>
 				</FailureNotice>
 			) : (
-				<ActionButton
-					state={action.state}
-					message={action.message}
-					generating={generating}
-					label={wizard.sul.gerar}
-					disabled={description.trim() === '' || busy}
-					onClick={generate}
-				/>
+				<div className="flex items-center gap-3">
+					<ActionButton
+						state={action.state}
+						message={action.message}
+						generating={generating}
+						label={wizard.sul.gerar}
+						disabled={description.trim() === '' || busy}
+						onClick={generate}
+					/>
+					{generating ? (
+						<Button
+							variant="ghost"
+							disabled={cancelling}
+							onClick={() => void cancel()}
+						>
+							{wizard.header.cancelar}
+						</Button>
+					) : null}
+				</div>
 			)}
 
 			{pendingCropImage ? (

@@ -102,7 +102,7 @@ interface SelectedCharacter {
 }
 
 const SelectedCharacterContext = createContext<SelectedCharacter>({
-	characterId: "manequim",
+	characterId: "",
 	setCharacterId: () => undefined,
 });
 
@@ -111,7 +111,7 @@ export function SelectedCharacterProvider({
 }: {
 	readonly children: ReactNode;
 }) {
-	const [characterId, setCharacterId] = useState("manequim");
+	const [characterId, setCharacterId] = useState("");
 	const value = useMemo(() => ({ characterId, setCharacterId }), [characterId]);
 	return (
 		<SelectedCharacterContext.Provider value={value}>

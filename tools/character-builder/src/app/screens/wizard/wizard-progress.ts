@@ -137,7 +137,7 @@ export function deriveWizard(
 		steps,
 		stepErrors,
 		firstRun:
-			character.id === 'manequim' &&
+			character.id === studio.characters[0]?.id &&
 			wizard.southVersions.length === 0 &&
 			!southReady &&
 			southError === undefined &&
@@ -145,22 +145,18 @@ export function deriveWizard(
 	};
 }
 
-/** O manequim fechou as 8 direções — libera derivar novos personagens. */
+/** Algum personagem fechou as 8 direções — libera derivar novos personagens. */
 export function isMannequinReady(studio: Studio): boolean {
-	return (
-		studio.characters.find((c) => c.id === 'manequim')?.wizard?.etapa ===
-		'pronto'
-	);
+	return studio.characters.some((c) => c.wizard?.etapa === 'pronto');
 }
 
-/** Resolve o personagem selecionado, caindo no manequim quando o id some. */
+/** Resolve o personagem selecionado, caindo no primeiro disponível quando o id some. */
 export function resolveCharacter(
 	studio: Studio,
 	characterId: string,
 ): Character | undefined {
 	return (
 		studio.characters.find((c) => c.id === characterId) ??
-		studio.characters.find((c) => c.id === 'manequim') ??
 		studio.characters[0]
 	);
 }
