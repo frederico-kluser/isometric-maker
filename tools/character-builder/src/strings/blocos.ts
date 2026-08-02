@@ -9,9 +9,8 @@
 export const blocos = {
   titulo: 'Blocos do mundo',
   descricao:
-    'Bancada de blocos de terreno: toda geração produz as QUATRO vistas da câmera, ' +
-    'cada uma com arte própria — é o que faz a rotação do mapa mostrar perspectivas ' +
-    'diferentes do mesmo bloco. Escolha a técnica e compare os resultados no catálogo.',
+    'Bancada de blocos de terreno. Três técnicas: textura animada (nova, ADR 0032), ' +
+    'molde encadeado (4 tiles) e rotate v3 (1 tile + 1 v3).',
 
   form: {
     cartaoBloco: 'Bloco',
@@ -43,10 +42,15 @@ export const blocos = {
       'Mesma seed com a mesma configuração produz o mesmo bloco. As chamadas usam ' +
       'seed base + índice.',
 
-    cartaoTecnica: 'Técnica das 4 vistas',
-    tecnicaRotulo: 'Como derivar as quatro vistas',
+    cartaoTecnica: 'Técnica de geração',
+    tecnicaRotulo: 'Como gerar a arte do bloco',
+    tecnicaTextura: 'Textura animada (pixflux + animação)',
     tecnicaEncadeada: 'Molde encadeado (4 tiles)',
     tecnicaRotate: 'Rotate v3 (1 tile + 1 v3)',
+    tecnicaTexturaNota:
+      'Gera UMA imagem plana (pixflux), usa LLM para criar a ação da animação a ' +
+      'partir da descrição, e anima via animate-with-text-v3. A arte NÃO muda com ' +
+      'a rotação da câmera — é uma textura, não um volume. (ADR 0032)',
     tecnicaEncadeadaNota:
       'A face norte nasce do molde do cubo (init_image) e o RESULTADO dela vira o ' +
       'molde das outras três, com sufixo de face no prompt e a paleta travada ' +
@@ -55,6 +59,11 @@ export const blocos = {
       'A mesma norte de tile vai como reference_image do create-character-v3, que a ' +
       'rotaciona para 8 direções; as 4 vistas saem de rotation_urls, que já vêm como ' +
       'imagens separadas — nada é extraído de GIF. Uma geração de tile + uma do v3.',
+
+    frameCountRotulo: 'Frames da animação (frame_count)',
+    frameCountNota: '4, 8 ou 16. Tem que ser par — é o que o animate-with-text-v3 aceita.',
+    fpsRotulo: 'FPS da animação',
+    fpsNota: 'Quadros por segundo no editor. Só pós-processamento — nunca custa nada.',
 
     gerar: 'Gerar bloco',
     gerando: 'Gerando…',
@@ -96,6 +105,10 @@ export const blocos = {
       'molde colorido faria todo bloco nascer da cor dele.',
   },
 
+  animacao: {
+    cartao: 'Animação (textura)',
+  },
+
   catalogo: {
     titulo: 'Catálogo',
     vazio: 'Nenhum bloco completo em disco ainda.',
@@ -103,9 +116,10 @@ export const blocos = {
     tecnica: {
       chained: 'molde encadeado',
       rotated: 'rotate v3',
+      texture: 'textura animada',
     } as const,
     comparacaoNota:
-      'O mesmo prompt pode ser gerado nas duas técnicas — cada uma tem seu próprio ' +
+      'O mesmo prompt pode ser gerado em várias técnicas — cada uma tem seu próprio ' +
       'cache, e a etiqueta diz de qual veio cada bloco.',
   },
 
@@ -119,6 +133,7 @@ export const blocos = {
 
 /** Rótulo do custo estimado — sempre "estimado", como a própria PixelLab rotula. */
 export function custoEstimado(tecnica: string): string {
+  if (tecnica === 'texture') return '1 pixflux + 1 animate-with-text-v3 (preço estimado)';
   return tecnica === 'rotated'
     ? '1 geração de tile + 1 do v3 (preço estimado)'
     : '4 gerações de tile (preço estimado)';

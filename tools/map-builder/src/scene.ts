@@ -327,7 +327,11 @@ export async function createIsoScene(
       // v3: textura animada (ADR 0032)
       if (b.spritesheetUrl) {
         try {
-          const sheet = await Assets.load(b.spritesheetUrl);
+          // O catálogo devolve a URL do PNG. O atlas JSON está no mesmo path
+          // com extensão .json. O Assets.load do PixiJS 8 reconhece o JSON
+          // como Spritesheet e carrega a imagem referenciada em meta.image.
+          const atlasUrl = b.spritesheetUrl.replace(/\.png$/, '.json');
+          const sheet = await Assets.load(atlasUrl);
           // A spritesheet tem animations.anim com os nomes dos frames.
           const animFrames: string[] =
             (sheet as { animations?: { anim?: string[] } }).animations?.anim ?? [];
@@ -352,8 +356,9 @@ export async function createIsoScene(
           } else {
             proceduralFor(b.id, b.hue);
           }
-        } catch {
+        } catch (err) {
           // Arte que não carrega NÃO derruba o editor.
+          console.warn('[scene] spritesheet load failed:', b.id, err);
           proceduralFor(b.id, b.hue);
         }
         continue;

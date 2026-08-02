@@ -26,8 +26,12 @@ export interface WorldBlockBody {
   readonly detail?: string;
   readonly textGuidanceScale?: number;
   readonly seed?: number;
-  /** 'chained' (molde encadeado) ou 'rotated' (rotate via v3). */
+  /** 'chained' | 'rotated' | 'texture' */
   readonly technique?: string;
+  /** Número de frames (técnica 'texture'). 4, 8 ou 16. */
+  readonly frameCount?: number;
+  /** FPS da animação (técnica 'texture'). */
+  readonly fps?: number;
 }
 
 export interface WorldBlockAccepted {
@@ -63,6 +67,10 @@ export interface BlockFormInput {
   readonly guidanceText: string;
   readonly seedText: string;
   readonly technique: string;
+  /** Número de frames (técnica 'texture'). */
+  readonly frameCount?: 4 | 8 | 16;
+  /** FPS da animação (técnica 'texture'). */
+  readonly fps?: number;
 }
 
 export type BuildResult =
@@ -118,6 +126,8 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
       // A técnica entra sempre que informada — ela faz parte do hash: o mesmo
       // prompt nas duas técnicas são dois artefatos, comparáveis lado a lado.
       ...(input.technique !== '' ? { technique: input.technique } : {}),
+      ...(input.frameCount !== undefined ? { frameCount: input.frameCount } : {}),
+      ...(input.fps !== undefined ? { fps: input.fps } : {}),
     },
   };
 }

@@ -81,8 +81,11 @@ interface CatalogEntry {
   readonly hash: string;
   readonly description: string;
   readonly shape: string;
-  readonly technique: 'chained' | 'rotated';
-  readonly faceUrls: Record<BlockFacing, string>;
+  readonly technique: 'chained' | 'rotated' | 'texture';
+  readonly faceUrls?: Record<BlockFacing, string>;
+  readonly spritesheetUrl?: string;
+  readonly frameCount?: number;
+  readonly fps?: number;
 }
 
 export function BlocksPanel() {
@@ -95,6 +98,8 @@ export function BlocksPanel() {
   const [guidanceText, setGuidanceText] = useState('');
   const [seedText, setSeedText] = useState('');
   const [technique, setTechnique] = useState<string>('chained');
+  const [frameCount, setFrameCount] = useState<4 | 8 | 16>(8);
+  const [fps, setFps] = useState(8);
 
   const [buttonState, setButtonState] = useState<ButtonState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +180,8 @@ export function BlocksPanel() {
       guidanceText,
       seedText,
       technique,
+      frameCount: technique === 'texture' ? frameCount : undefined,
+      fps: technique === 'texture' ? fps : undefined,
     });
     if (!built.ok) {
       setError(CLIENT_ERROR_TEXT[built.code]);
@@ -342,14 +349,18 @@ export function BlocksPanel() {
                 >
                   {BLOCK_TECHNIQUES.map((t) => (
                     <SegmentedToggleOption key={t} value={t}>
-                      {t === 'chained' ? SB.form.tecnicaEncadeada : SB.form.tecnicaRotate}
+                      {t === 'chained' ? SB.form.tecnicaEncadeada
+                        : t === 'rotated' ? SB.form.tecnicaRotate
+                        : SB.form.tecnicaTextura}
                     </SegmentedToggleOption>
                   ))}
                 </SegmentedToggle>
                 <p className="text-xs text-muted-foreground">
                   {technique === 'chained'
                     ? SB.form.tecnicaEncadeadaNota
-                    : SB.form.tecnicaRotateNota}
+                    : technique === 'rotated'
+                    ? SB.form.tecnicaRotateNota
+                    : SB.form.tecnicaTexturaNota}
                 </p>
               </div>
 
@@ -359,6 +370,44 @@ export function BlocksPanel() {
             </CardContent>
           </Card>
 
+          {technique === 'texture' && (
+            <Card>
+              <CardHeader>
+                <CardTitle>{SB.animacao.cartao}</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label>{SB.form.frameCountRotulo}</Label>
+                  <SegmentedToggle
+                    value={String(frameCount)}
+                    onChange={(v) => setFrameCount(Number(v) as 4 | 8 | 16)}
+                    ariaLabel={SB.form.frameCountRotulo}
+                  >
+                    {[4, 8, 16].map((n) => (
+                      <SegmentedToggleOption key={n} value={String(n)}>
+                        {n}
+                      </SegmentedToggleOption>
+                    ))}
+                  </SegmentedToggle>
+                  <p className="text-xs text-muted-foreground">{SB.form.frameCountNota}</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>{SB.form.fpsRotulo}</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={fps}
+                    onChange={(e) => setFps(Number(e.target.value) || 8)}
+                    className="w-20 rounded border px-2 py-1 text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">{SB.form.fpsNota}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {technique !== 'texture' && (
           <Card>
             <CardHeader>
               <CardTitle>{SB.form.cartaoQualidade}</CardTitle>
@@ -425,6 +474,7 @@ export function BlocksPanel() {
               </div>
             </CardContent>
           </Card>
+          )}
 
           <div className="flex flex-col items-start gap-3">
             <MultiStateButton
@@ -492,7 +542,7 @@ export function BlocksPanel() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">
-                      {SB.catalogo.tecnica[result.technique as 'chained' | 'rotated'] ??
+                      {SB.catalogo.tecnica[result.technique as 'chained' | 'rotated' | 'texture'] ??
                         result.technique}
                     </Badge>
                     {semGasto && (
@@ -527,16 +577,22 @@ export function BlocksPanel() {
                         className="flex flex-col items-center gap-1 rounded-lg border border-border bg-muted/30 p-2"
                       >
                         <img
-                          src={b.faceUrls.north}
+                          src={b.technique === 'texture'
+                            ? `/world-blocks/${b.hash}/frames/frame_000.png`
+                            : (b.faceUrls?.north ?? '')}
                           alt={b.description}
                           className="h-16 w-16 object-contain [image-rendering:pixelated]"
                         />
                         <span className="line-clamp-2 text-center text-xs leading-tight">
                           {b.description}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">{b.shape}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {b.technique === 'texture'
+                            ? `${b.frameCount ?? '?'}f ${b.fps ?? '?'}fps`
+                            : b.shape}
+                        </span>
                         <Badge variant="outline" className="text-[10px]">
-                          {SB.catalogo.tecnica[b.technique] ?? b.technique}
+                          {SB.catalogo.tecnica[b.technique as 'chained' | 'rotated' | 'texture'] ?? b.technique}
                         </Badge>
                       </div>
                     ))}
