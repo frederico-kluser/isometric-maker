@@ -565,9 +565,15 @@ export async function createIsoScene(
 
   /** Recursos vivos de um giro em andamento — para o destroy não vazar nada. */
   let activeTurn: {
+    /** Container com todas as camadas z. */
     readonly layer: Container;
-    readonly rtA: RenderTexture;
-    readonly rtB: RenderTexture;
+    /** Um par (A=origem, B=destino) por nível z. */
+    readonly pairs: Array<{
+      readonly spriteA: Sprite;
+      readonly spriteB: Sprite;
+      readonly rtA: RenderTexture;
+      readonly rtB: RenderTexture;
+    }>;
     readonly tick: () => void;
   } | null = null;
 
@@ -575,19 +581,95 @@ export async function createIsoScene(
     if (!activeTurn) return;
     app.ticker.remove(activeTurn.tick);
     activeTurn.layer.destroy({ children: true });
-    activeTurn.rtA.destroy(true);
-    activeTurn.rtB.destroy(true);
+    for (const p of activeTurn.pairs) {
+      p.rtA.destroy(true);
+      p.rtB.destroy(true);
+    }
     activeTurn = null;
     world.visible = true;
     rotating = false;
   };
 
-  /** Fotografa o mundo (malha + blocos, sem overlay) numa RenderTexture. */
-  const snapshotTo = (rt: RenderTexture, map: MapData, camera: Camera): void => {
-    render({ map, camera, preview: null, highlight: null });
-    // Fundo TRANSPARENTE: só a arte gira. Um snapshot opaco giraria também o
-    // retângulo do fundo, e as bordas dele varrendo a tela leriam como um
-    // cartão rodando, não como a câmera.
+  /** Maior z com blocos no mapa (0 se vazio). */
+  const maxZ = (map: MapData): number => {
+    let top = 0;
+    for (const runs of Object.values(map.blocks)) {
+      let z = 0;
+      for (const run of runs) {
+        z += run.count;
+      }
+      top = Math.max(top, z - 1);
+    }
+    return top;
+  };
+
+  /**
+   * Fotografa só os blocos do nível z (e a malha só no z = 0).
+   *
+   * A separação por z é o que permite a correção de altura durante o giro:
+   * a matriz afim `L(τ)` é exata para o chão mas achata o offset vertical
+   * `-z·zStep` como se fosse parte do plano — blocos altos "tombam" no meio
+   * da varredura. Com um snapshot por nível, cada um recebe a mesma afim E
+   * uma translação vertical que desfaz o achate: `(d(τ) − 1)·z·zStep·zoom`.
+   */
+  const snapshotZ = (rt: RenderTexture, map: MapData, camera: Camera, z: number): void => {
+    gridPool.reset();
+    blockPool.reset();
+
+    const vista = camera.rotation;
+
+    // --- malha (só no chão) ---
+    if (z === 0) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const key of Object.keys(map.blocks)) {
+        const [xs, ys] = key.split(':');
+        const x = Number(xs);
+        const y = Number(ys);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+      if (!Number.isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
+      for (let x = minX - gridMargin; x <= maxX + gridMargin; x += 1) {
+        for (let y = minY - gridMargin; y <= maxY + gridMargin; y += 1) {
+          const p = cellToScreen({ x, y, z: 0 }, camera, geom);
+          place(gridPool.take(), gridTexture, p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
+        }
+      }
+    }
+
+    // --- blocos deste nível z ---
+    const items: Array<{ cell: Cell3D; block: string; key: number }> = [];
+    for (const [key, runs] of Object.entries(map.blocks)) {
+      const [xs, ys] = key.split(':');
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      let cz = 0;
+      for (const run of runs) {
+        if (run.block !== '') {
+          for (let i = 0; i < run.count; i += 1) {
+            if (cz + i === z) {
+              const cell = { x, y, z: cz + i };
+              items.push({ cell, block: run.block, key: depthAt(cell, camera) });
+            }
+          }
+        }
+        cz += run.count;
+      }
+    }
+    items.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.cell.z - b.cell.z));
+    for (const d of items) {
+      const p = cellToScreen(d.cell, camera, geom);
+      const base = blockPool.take();
+      place(base, textureFor(d.block, vista), p, camera.zoom, cubeGeom.anchorX, cubeGeom.anchorY);
+    }
+
     app.renderer.render({ container: world, target: rt, clearColor: [0, 0, 0, 0] });
   };
 
@@ -623,32 +705,45 @@ export async function createIsoScene(
     const h = opts.viewportHeight;
     const zoom = state.camera.zoom;
 
-    // Os DOIS extremos do giro, fotografados uma vez: a vista atual como está
-    // (pan do usuário incluído) e a de destino já assentada — o quadro final
-    // da transição é, por construção, idêntico ao primeiro desenho parado.
+    // Snapshots POR NÍVEL Z. A matriz `L(τ)` é exata só para o plano do chão
+    // (z = 0): para z > 0 o offset vertical `-z·zStep·zoom` participa da afim
+    // como se fosse parte do plano, e o bloco achata/entorta durante o giro —
+    // é o "sprites altas tombam". A correção: um snapshot por nível z, cada um
+    // recebendo a mesma afim MAIS uma translação vertical `(d(τ) − 1)·z·zStep·zoom`
+    // que desfaz o achate e mantém a altura invariante.
     const camA: Camera = { ...state.camera, turn: de };
     const camB = settle();
-    const rtA = RenderTexture.create({ width: Math.max(1, w), height: Math.max(1, h) });
-    const rtB = RenderTexture.create({ width: Math.max(1, w), height: Math.max(1, h) });
-    rtA.source.scaleMode = SNAPSHOT_SCALE_MODE;
-    rtB.source.scaleMode = SNAPSHOT_SCALE_MODE;
-    snapshotTo(rtA, state.map, camA);
-    snapshotTo(rtB, state.map, camB);
+    const map = state.map;
+    const zTop = maxZ(map);
+    const zStepScreen = geom.zStep * zoom;
 
-    // Pivô de cada quadro: o centro VISUAL do conteúdo na tela. B nasce
-    // enquadrado por settle(), então o dele é o centro do viewport; o de A
-    // desloca pelo pan que o usuário tiver aplicado.
-    //
-    // O termo `visualCenterOffsetY` é o que faltava: `centerOn` compensa só
-    // meia altura do LOSANGO (tileHeight/2), mas o sprite desce tileHeight +
-    // cubeHeight abaixo do vértice-âncora — o centro visual do conteúdo fica
-    // meia altura de cubo ABAIXO do ponto calculado. Sem o termo, o pivô
-    // paira ~cubeHeight/2 acima do centro visual e o mapa ORBITA de leve
-    // durante o giro: o conteúdo deriva ~30 px no meio da varredura (medido
-    // em 2026-08-02, zoom 2) e o giro lê como "o mapa não roda em volta do
-    // próprio centro". Os extremos não mudam: em t=0 A está na identidade e
-    // em t=1 B também, então o último quadro da transição continua pixel a
-    // pixel igual ao primeiro quadro parado.
+    const size = { width: Math.max(1, w), height: Math.max(1, h) };
+    const pairs: Array<{
+      spriteA: Sprite;
+      spriteB: Sprite;
+      rtA: RenderTexture;
+      rtB: RenderTexture;
+    }> = [];
+
+    const layer = new Container();
+    for (let z = 0; z <= zTop; z += 1) {
+      const rtA = RenderTexture.create(size);
+      const rtB = RenderTexture.create(size);
+      rtA.source.scaleMode = SNAPSHOT_SCALE_MODE;
+      rtB.source.scaleMode = SNAPSHOT_SCALE_MODE;
+      snapshotZ(rtA, map, camA, z);
+      snapshotZ(rtB, map, camB, z);
+      const spriteA = new Sprite(rtA);
+      const spriteB = new Sprite(rtB);
+      spriteB.alpha = 0;
+      // Camadas mais altas na frente (ordem de pintor: z↑ → por cima).
+      layer.addChild(spriteA, spriteB);
+      pairs.push({ spriteA, spriteB, rtA, rtB });
+    }
+    app.stage.addChild(layer);
+    world.visible = false;
+
+    // Pivô do chão (z = 0): mesmo cálculo de antes, com visualCenterOffsetY.
     const centeredA = centerOn(opts.cells, de, w, h, zoom, geom);
     const visualCenterOffsetY = (cubeGeom.cubeHeight / 2) * zoom;
     const pivotA = {
@@ -657,40 +752,32 @@ export async function createIsoScene(
     };
     const pivotB = { x: w / 2, y: h / 2 + visualCenterOffsetY };
 
-    const layer = new Container();
-    const spriteA = new Sprite(rtA);
-    const spriteB = new Sprite(rtB);
-    spriteB.alpha = 0;
-    layer.addChild(spriteA, spriteB);
-    app.stage.addChild(layer);
-    world.visible = false;
-
     return new Promise<Camera>((resolve) => {
       const tick = (): void => {
         const sample = sampleTween(tween, performance.now());
-        // Quanto cada snapshot já girou, em quartos de volta, relativo à
-        // PRÓPRIA vista: A parte de 0 e vai a ±1; B parte de ∓1 e chega a 0 —
-        // onde o desenho discreto assume sem costura.
         const turnA = sample.turn - de;
         const turnB = sample.turn - (de + tween.turns);
-        // O pivô caminha do centro de A ao de B com o progresso suavizado —
-        // é o reenquadramento contínuo da ADR 0026, reduzido a uma translação.
         const px = pivotA.x + (pivotB.x - pivotA.x) * sample.t;
         const py = pivotA.y + (pivotB.y - pivotA.y) * sample.t;
 
         const mA = rigidTurnMatrix(turnA, geom, pivotA.x, pivotA.y);
         const mB = rigidTurnMatrix(turnB, geom, pivotB.x, pivotB.y);
-        spriteA.setFromMatrix(
-          new Matrix(mA.a, mA.b, mA.c, mA.d, mA.tx + (px - pivotA.x), mA.ty + (py - pivotA.y)),
-        );
-        spriteB.setFromMatrix(
-          new Matrix(mB.a, mB.b, mB.c, mB.d, mB.tx + (px - pivotB.x), mB.ty + (py - pivotB.y)),
-        );
-        // Cross-fade: origem opaca embaixo, destino por cima com o progresso.
-        // É o fade que carrega a troca de profundidade e o desvio de altura
-        // que a afim do chão não cobre (ADR 0030) — como no corte suavizado
-        // do Mode 7.
-        spriteB.alpha = sample.t;
+
+        for (let z = 0; z <= zTop; z += 1) {
+          const pair = pairs[z]!;
+          // Correção de altura: desfaz o `d(τ)·z·zStep` que a afim aplicou
+          // ao offset vertical fotografado, recompondo o `z·zStep` original.
+          const corrA = (mA.d - 1) * z * zStepScreen;
+          const corrB = (mB.d - 1) * z * zStepScreen;
+
+          pair.spriteA.setFromMatrix(
+            new Matrix(mA.a, mA.b, mA.c, mA.d, mA.tx + (px - pivotA.x), mA.ty + (py - pivotA.y) + corrA),
+          );
+          pair.spriteB.setFromMatrix(
+            new Matrix(mB.a, mB.b, mB.c, mB.d, mB.tx + (px - pivotB.x), mB.ty + (py - pivotB.y) + corrB),
+          );
+          pair.spriteB.alpha = sample.t;
+        }
 
         if (sample.done) {
           disposeTurn();
@@ -699,7 +786,7 @@ export async function createIsoScene(
           resolve(final);
         }
       };
-      activeTurn = { layer, rtA, rtB, tick };
+      activeTurn = { layer, pairs, tick };
       app.ticker.add(tick);
     });
   };
