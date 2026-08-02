@@ -47,7 +47,7 @@ import {
 	type MovementConfig,
 } from "./movement.ts";
 import { canEnter, canCross, type CollisionMap } from "./collision.ts";
-import { resolveStepZ } from "./step-up.ts";
+import { stepZOnCross } from "./step-up.ts";
 import { fallStep, groundZAt, DEFAULT_FALL_SPEED } from "./gravity.ts";
 import {
 	createJump,
@@ -173,34 +173,6 @@ function resolveCollision(
 	return { blocked: false, state: nextState };
 }
 
-// ------------------------------------------------------------------ step up / down
-
-/**
- * Tenta subir ou descer um degrau a partir da célula actual.
- *
- * A regra vive em `step-up.ts` — aqui é só a adaptação da entrada. Ter uma
- * cópia da escolha de direcção aqui e outra em `movement.ts` era como o
- * degrau e a gravidade acabavam a discordar sobre onde é o chão.
- */
-function tryStep(
-	map: CollisionMap,
-	cellX: number,
-	cellY: number,
-	z: number,
-	input: MovementInput,
-): number {
-	return resolveStepZ(
-		map,
-		cellX,
-		cellY,
-		z,
-		input.dir.x,
-		input.dir.y,
-		input.stepUp,
-		input.stepDown,
-	);
-}
-
 // ------------------------------------------------------------------ execução
 
 export function runTrace(
@@ -234,11 +206,7 @@ export function runTrace(
 			const cellX = Math.floor(state.pos.x);
 			const cellY = Math.floor(state.pos.y);
 
-			// Step up/down (só no chão, sem pulo activo)
 			let newZ = z;
-			if (isJumpComplete(jump) && !frame.input.jump) {
-				newZ = tryStep(map, cellX, cellY, z, frame.input);
-			}
 
 			// Inicia pulo — agachado não pula, e um tecto sólido também não deixa.
 			if (
@@ -252,7 +220,9 @@ export function runTrace(
 				}
 			}
 
-			// Gravidade — só no chão. Durante o pulo o z é do pulo.
+			// Gravidade — só no chão, e sobre a célula onde o personagem está.
+			// Como o degrau já não sobe o z antecipadamente, esta avaliação e a
+			// do degrau nunca olham para células diferentes.
 			if (isJumpComplete(jump)) {
 				const fall = fallStep(
 					map,
@@ -279,6 +249,33 @@ export function runTrace(
 			// Movimento horizontal
 			const prevPos = state.pos;
 			state = applyHorizontal({ ...state, z: newZ }, frame.input, config);
+
+			// Degrau — acontece NA travessia da aresta, que é o instante em que
+			// a célula de destino passa a ser a célula do personagem.
+			const nextCellX = Math.floor(state.pos.x);
+			const nextCellY = Math.floor(state.pos.y);
+			const crossing = nextCellX !== cellX || nextCellY !== cellY;
+
+			let steppedZ = newZ;
+			if (crossing && isJumpComplete(jump) && !frame.input.jump) {
+				steppedZ = stepZOnCross(
+					map,
+					{ x: cellX, y: cellY, z: newZ },
+					nextCellX,
+					nextCellY,
+					frame.input.stepUp,
+					frame.input.stepDown,
+				);
+			}
+
+			if (steppedZ !== newZ) {
+				// `canStepUp`/`canStepDown` já validaram o destino e as arestas nos
+				// dois níveis — é por isso que o degrau não passa por `canCross`,
+				// que exigiria o destino entrável ao mesmo z. Ver `step-up.ts`.
+				state = { ...state, z: steppedZ };
+				totalSteps++;
+				continue;
+			}
 
 			// Colisão
 			// Durante o pulo, usa o z de destino para permitir pular sobre obstáculos.

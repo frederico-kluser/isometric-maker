@@ -66,6 +66,13 @@ function noInput(): MovementInput {
   return { dir: { x: 0, y: 0 }, jump: false, stepUp: false, stepDown: false };
 }
 
+const NO_INPUT_LOCAL: MovementInput = {
+  dir: { x: 0, y: 0 },
+  jump: false,
+  stepUp: false,
+  stepDown: false,
+};
+
 function jumpInput(): MovementInput {
   return { dir: { x: 0, y: 0 }, jump: true, stepUp: false, stepDown: false };
 }
@@ -264,36 +271,53 @@ describe('step com mapa — gravidade no motor de movimento', () => {
     assert.strictEqual(fim.z, 1, 'devia ter voltado a z=1, não ficar preso em z=2');
   });
 
-  it('com mapa, o stepUp sem degrau ao lado não sobe — não há levitação', () => {
-    const map = new FakeGravityMap();
-    map.addColumn(0, 0, 1); // topo sólido em z=1, e nenhuma coluna vizinha
-
-    const s0 = createMovementState(0, 0, 1);
-    const subida: MovementInput = {
-      dir: { x: 0, y: 0 },
-      jump: false,
-      stepUp: true,
-      stepDown: false,
-    };
-    const fim = simulate(s0, subida, 60, map);
-    assert.strictEqual(fim.z, 1, 'sem degrau vizinho não há para onde subir');
-  });
-
-  it('com mapa, o stepUp sobe quando existe um degrau vizinho', () => {
+  it('com mapa, o stepUp parado não sobe — o degrau é na travessia', () => {
     const map = new FakeGravityMap();
     map.addColumn(0, 0, 1); // personagem em (0,0,z=1)
     map.addColumn(1, 0, 2); // degrau a leste: topo sólido em z=2
 
-    const s0 = createMovementState(0, 0, 1);
-    const subida: MovementInput = {
+    const s0 = createMovementState(0.5, 0.5, 1);
+    const paradoSubindo: MovementInput = {
       dir: { x: 0, y: 0 },
       jump: false,
       stepUp: true,
       stepDown: false,
     };
-    // Um único passo: sobe para z=2 antes de a gravidade ter algo a dizer.
-    const s1 = step(s0, subida, DEFAULT_CONFIG.fixedDt, DEFAULT_CONFIG, map);
-    assert.strictEqual(s1.z, 2);
+    // Sem atravessar não há degrau: subir aqui seria levitar sobre (0,0).
+    const fim = simulate(s0, paradoSubindo, 120, map);
+    assert.strictEqual(fim.z, 1, 'não se sobe um degrau sem entrar nele');
+    assert.strictEqual(fim.falling, false);
+  });
+
+  it('com mapa, o stepUp sobe ao atravessar para o degrau — e PERSISTE', () => {
+    const map = new FakeGravityMap();
+    map.addColumn(0, 0, 1); // personagem em (0,0,z=1)
+    map.addColumn(1, 0, 2); // degrau a leste: topo sólido em z=2
+
+    const andandoParaLeste: MovementInput = {
+      dir: { x: 1, y: 0 },
+      jump: false,
+      stepUp: true,
+      stepDown: false,
+    };
+
+    // 8 passos a 4 u/s levam x de 0,5 a 1,0333 — atravessa para (1,0).
+    let state = createMovementState(0.5, 0.5, 1);
+    for (let i = 0; i < 7; i++) {
+      state = step(state, andandoParaLeste, DEFAULT_CONFIG.fixedDt, DEFAULT_CONFIG, map);
+      assert.strictEqual(state.z, 1, `passo ${i}: ainda não atravessou, não devia subir`);
+    }
+    state = step(state, andandoParaLeste, DEFAULT_CONFIG.fixedDt, DEFAULT_CONFIG, map);
+    assert.strictEqual(Math.floor(state.pos.x), 1, 'devia ter atravessado');
+    assert.strictEqual(state.z, 2, 'devia ter subido na travessia');
+
+    // O valor tem de sobreviver a muitos intervalos de queda. Este é o passo
+    // que a versão anterior falhava: a gravidade desfazia o degrau a seguir.
+    for (let i = 0; i < 300; i++) {
+      state = step(state, NO_INPUT_LOCAL, DEFAULT_CONFIG.fixedDt, DEFAULT_CONFIG, map);
+      assert.strictEqual(state.z, 2, `passo parado ${i}: o degrau foi desfeito`);
+      assert.strictEqual(state.falling, false, `passo parado ${i}: não devia cair`);
+    }
   });
 });
 

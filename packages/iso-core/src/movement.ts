@@ -39,7 +39,7 @@
 
 import type { CollisionMap } from './collision.ts';
 import { fallStep, DEFAULT_FALL_SPEED } from './gravity.ts';
-import { resolveStepZ } from './step-up.ts';
+import { stepZOnCross } from './step-up.ts';
 
 // ------------------------------------------------------------------ tipos
 
@@ -276,6 +276,8 @@ function fixedStep(
   }
 
   // --- movimento horizontal (contínuo) ---
+  const prevCellX = Math.floor(pos.x);
+  const prevCellY = Math.floor(pos.y);
   pos = {
     x: pos.x + vel.x * config.fixedDt,
     y: pos.y + vel.y * config.fixedDt,
@@ -283,6 +285,7 @@ function fixedStep(
 
   const cellX = Math.floor(pos.x);
   const cellY = Math.floor(pos.y);
+  const crossing = cellX !== prevCellX || cellY !== prevCellY;
 
   // --- pulo (balístico, discreto em z) ---
   if (airborne) {
@@ -314,22 +317,23 @@ function fixedStep(
 
   // --- degrau (discreto em z) ---
   //
-  // Com mapa, o degrau usa a mesma regra que `runTrace`: precisa de uma
-  // célula vizinha que o aceite. Sem mapa não há vizinha a consultar e o
-  // degrau continua a ser o incremento cego que sempre foi — é o único
-  // comportamento possível quando não se sabe o que há à volta.
+  // Com mapa, o degrau usa a mesma regra que `runTrace`: acontece na travessia
+  // da aresta, contra a célula de destino. É isso que impede a gravidade de o
+  // desfazer — as duas regras passam a avaliar a mesma célula. Sem mapa não há
+  // destino a consultar e o degrau continua a ser o incremento cego que sempre
+  // foi, que é o único comportamento possível sem saber o que há à volta.
   if (!airborne) {
     if (map !== undefined) {
-      z = resolveStepZ(
-        map,
-        cellX,
-        cellY,
-        z,
-        input.dir.x,
-        input.dir.y,
-        input.stepUp,
-        input.stepDown,
-      );
+      if (crossing) {
+        z = stepZOnCross(
+          map,
+          { x: prevCellX, y: prevCellY, z },
+          cellX,
+          cellY,
+          input.stepUp,
+          input.stepDown,
+        );
+      }
     } else if (input.stepUp) {
       z = z + 1;
     } else if (input.stepDown) {
@@ -339,9 +343,10 @@ function fixedStep(
 
   // --- gravidade (só com mapa, e só fora do pulo) ---
   //
-  // A gravidade é a única autoridade sobre "onde é o chão". Um `stepUp` para
-  // uma célula sem suporte é desfeito aqui, o que evita ter de repetir a
-  // regra de suporte no degrau.
+  // Avalia a célula onde o personagem está, com o z que ele tem depois do
+  // degrau. Como o degrau só acontece na travessia, esse z já corresponde a
+  // esta célula — as duas regras nunca julgam células diferentes. Deixar o
+  // degrau subir antes da travessia era o que punha a gravidade a desfazê-lo.
   let falling = false;
   if (map !== undefined && !airborne) {
     const fall = fallStep(

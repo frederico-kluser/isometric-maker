@@ -104,79 +104,57 @@ export function canStepUp(
   return true;
 }
 
-// ------------------------------------------------------------------ resolveStepZ
+// ------------------------------------------------------------------ stepZOnCross
 
 /**
- * Resolve o `z` depois de um pedido de degrau a partir da célula actual.
+ * Resolve o `z` no instante em que o personagem **atravessa** para outra célula.
  *
- * Um degrau precisa de uma célula **vizinha** para onde subir ou descer.
- * Esta função escolhe a candidata, dando prioridade à direcção do movimento
- * e caindo nas outras três cardinais a seguir; sem direcção, tenta as quatro
- * por uma ordem fixa (determinismo).
+ * ## Por que o degrau acontece na travessia, e não antes
  *
- * Se nenhuma vizinha aceitar o degrau, devolve o `z` de entrada. É por isso
- * que segurar a tecla de subir no meio do nada não faz o personagem levitar:
- * a regra é a mesma que valida o degrau, não um incremento cego.
+ * A versão anterior deste motor subia o `z` mal existisse um degrau numa
+ * vizinha, com o personagem ainda em cima da célula baixa — uma aposta de que
+ * ele ia atravessar a seguir. Enquanto não houve gravidade, ninguém contestou
+ * a aposta. A gravidade é uma segunda opinião sobre o mesmo instante, e avalia
+ * a célula onde o personagem **está**: ali, o `z` subido não tem suporte, e a
+ * queda desfazia o degrau antes da travessia acontecer.
  *
- * @param dirX - Componente x da direcção do movimento (0 se parado).
- * @param dirY - Componente y da direcção do movimento (0 se parado).
+ * As duas regras olhavam para células diferentes e a mais recente ganhava, o
+ * que fazia depender "este degrau é escalável?" da fase do acumulador de queda
+ * em vez da geometria. A correcção não é ensinar a gravidade a ignorar a
+ * posição real — é tirar a especulação: o degrau passa a acontecer no único
+ * instante em que as duas regras concordam sobre qual é a célula do chão, que
+ * é a travessia da aresta.
+ *
+ * ## Regra
+ *
+ * - Sobe para `from.z + 1` se `canStepUp(from, destino)`.
+ * - Desce para `from.z − 1` se `canStepDown(from, destino)`.
+ * - Caso contrário devolve `from.z`, e a travessia é julgada pela colisão normal.
+ *
+ * Diagonais **não** sobem: `canStepUp` exige adjacência cardinal. Isto é
+ * limitação herdada, não decisão nova — ver a nota em `trace.ts`.
+ *
+ * @param from - Célula de origem, com o `z` actual do personagem.
+ * @param toX - Coluna x da célula para onde está a atravessar.
+ * @param toY - Coluna y da célula para onde está a atravessar.
  * @param wantsUp - Botão de subir degrau pressionado.
  * @param wantsDown - Botão de descer degrau pressionado.
  */
-export function resolveStepZ(
+export function stepZOnCross(
   map: CollisionMap,
-  cellX: number,
-  cellY: number,
-  z: number,
-  dirX: number,
-  dirY: number,
+  from: CollisionCell,
+  toX: number,
+  toY: number,
   wantsUp: boolean,
   wantsDown: boolean,
 ): number {
-  if (!wantsUp && !wantsDown) return z;
-
-  const dirs: [number, number][] = [];
-  const cardinalDirs: [number, number][] = [
-    [1, 0], // leste (0°)
-    [0, 1], // norte (90°)
-    [-1, 0], // oeste (180°)
-    [0, -1], // sul (270°)
-  ];
-
-  if (dirX !== 0 || dirY !== 0) {
-    // Prioriza a direcção do input e as direcções próximas.
-    const angle = Math.atan2(dirY, dirX);
-    const octant = Math.round(angle / (Math.PI / 4));
-    const idx = ((octant % 4) + 4) % 4;
-    dirs.push(cardinalDirs[idx]!);
-    for (let i = 1; i < 4; i++) {
-      dirs.push(cardinalDirs[(idx + i) % 4]!);
-    }
-  } else {
-    dirs.push([0, 1], [0, -1], [1, 0], [-1, 0]);
+  if (wantsUp && canStepUp(map, from, { x: toX, y: toY, z: from.z + 1 })) {
+    return from.z + 1;
   }
-
-  if (wantsUp) {
-    for (const [dx, dy] of dirs) {
-      const from = { x: cellX, y: cellY, z };
-      const to = { x: cellX + dx!, y: cellY + dy!, z: z + 1 };
-      if (canStepUp(map, from, to)) {
-        return z + 1;
-      }
-    }
+  if (wantsDown && canStepDown(map, from, { x: toX, y: toY, z: from.z - 1 })) {
+    return from.z - 1;
   }
-
-  if (wantsDown) {
-    for (const [dx, dy] of dirs) {
-      const from = { x: cellX, y: cellY, z };
-      const to = { x: cellX + dx!, y: cellY + dy!, z: z - 1 };
-      if (canStepDown(map, from, to)) {
-        return z - 1;
-      }
-    }
-  }
-
-  return z;
+  return from.z;
 }
 
 // ------------------------------------------------------------------ canStepDown
