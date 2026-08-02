@@ -20,6 +20,7 @@ import * as THREE from 'three';
  */
 export function createGrid(size: number, divisions: number): THREE.GridHelper {
   const grid = new THREE.GridHelper(size, divisions, 0x94a3b8, 0x334155);
+  grid.position.set(0.5, 0.001, 0.5); // meio-cubo: linhas nas arestas, não nos centros
   grid.material.transparent = true;
   grid.material.opacity = 0.35;
   grid.material.depthTest = true;
@@ -51,8 +52,8 @@ export function resizeGrid(
   const centerZ = (minZ + maxZ) / 2;
 
   if (
-    Math.abs(grid.position.x - centerX) < 0.1 &&
-    Math.abs(grid.position.z - centerZ) < 0.1 &&
+    Math.abs(grid.position.x - (centerX + 0.5)) < 0.1 &&
+    Math.abs(grid.position.z - (centerZ + 0.5)) < 0.1 &&
     Math.abs(grid.scale.x - size / 10) < 0.1
   ) {
     return grid; // não mudou
@@ -68,7 +69,7 @@ export function resizeGrid(
   newGrid.material.depthTest = true;
   newGrid.material.depthWrite = false;
   newGrid.renderOrder = 0;
-  newGrid.position.set(centerX, 0.001, centerZ); // leve offset para evitar z-fight
+  newGrid.position.set(centerX + 0.5, 0.001, centerZ + 0.5); // leve offset para evitar z-fight; +0.5 põe linhas nas arestas
   scene.add(newGrid);
   return newGrid;
 }

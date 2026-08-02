@@ -270,7 +270,9 @@ export function MapEditor3D() {
         // NÃO força o topo da coluna — o bloco vai para a face onde o mouse bateu
         next = placeBlock(current, result.placement, block);
       } else {
-        // Empilhar: o pickColumnTopRaycaster já ajustou o placement para o topo da coluna
+        // Empilhar: o pickColumnTopRaycaster já resolveu o placement pela face
+        // atingida — face de cima → topo da coluna; face lateral → célula
+        // adjacente no mesmo nível (Minecraft-style). Aqui só aplicamos.
         next = placeBlock(current, result.placement, block);
       }
       return pushHistory(h, next);

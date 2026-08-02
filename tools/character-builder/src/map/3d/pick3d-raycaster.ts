@@ -33,6 +33,13 @@ export interface Pick3DResult {
   readonly hit: (Pick3DCell & { readonly block: string }) | null;
   /** Célula vazia onde uma peça nova assenta. Nunca é null. */
   readonly placement: Pick3DCell;
+  /**
+   * O que o raio atingiu: a face de cima de um cubo ('top'), uma face
+   * lateral ('side'), o chão ('ground') ou nada (null). O 'empilhar'
+   * usa isso para decidir entre assentar no topo da coluna (top) e
+   * assentar na célula adjacente no mesmo nível (side).
+   */
+  readonly hitFace: 'top' | 'side' | 'ground' | null;
 }
 
 // ------------------------------------------------------------------ raycaster
@@ -136,6 +143,10 @@ export function pick3d(
       block: (blockMesh.userData as { blockId?: string }).blockId ?? '',
     };
 
+    // Face atingida: 'top' quando a normal aponta para cima (dir.y === 1),
+    // 'side' caso contrário. A face inferior é inatingível em vista isométrica.
+    const hitFace: 'top' | 'side' = dir.y === 1 ? 'top' : 'side';
+
     // Célula adjacente: hitCell + normal (mapeada para o sistema do mapa)
     const placement: Pick3DCell = {
       x: Math.round(blockPos.x + dir.x),
@@ -143,7 +154,7 @@ export function pick3d(
       z: Math.round(blockPos.y - 0.5 + dir.y), // Y do Three.js → Z do mapa (desconta offset) → Z do mapa
     };
 
-    return { hit: hitCell, placement };
+    return { hit: hitCell, placement, hitFace };
   }
 
   // 2. Não acertou bloco — tenta o ground plane
@@ -157,19 +168,22 @@ export function pick3d(
         y: Math.round(point.z),
         z: 0,
       };
-      return { hit: null, placement: cell };
+      return { hit: null, placement: cell, hitFace: 'ground' };
     }
   }
 
   // 3. Fallback: origem (não deveria chegar aqui com ground plane)
-  return { hit: null, placement: { x: 0, y: 0, z: 0 } };
+  return { hit: null, placement: { x: 0, y: 0, z: 0 }, hitFace: null };
 }
 
 /**
- * Versão para ferramenta de empilhar: o placement é sempre no topo da coluna.
+ * Versão para ferramenta de empilhar: o placement depende da face atingida.
  *
- * Diferente de `pick3d`, o placement é no topo da coluna sob o cursor,
- * não na face adjacente. Útil para empilhar blocos sem mirar a face de cima.
+ * - Face de cima ('top'): placement no topo da coluna sob o cursor —
+ *   empilha sem precisar mirar exatamente a face de cima.
+ * - Face lateral ('side'): placement na célula adjacente, no mesmo nível
+ *   (comportamento Minecraft-style — clique na lateral assenta ao lado).
+ * - Sem cubo atingido (chão/vazio): comporta-se como `pick3d`.
  */
 export function pickColumnTop(
   clientX: number,
@@ -181,11 +195,12 @@ export function pickColumnTop(
   columnHeight: (x: number, y: number) => number,
 ): Pick3DResult {
   const base = pick3d(clientX, clientY, canvas, camera, scene, blockMeshes);
-  if (base.hit === null) return base;
+  if (base.hit === null || base.hitFace !== 'top') return base;
 
   const height = columnHeight(base.hit.x, base.hit.y);
   return {
     hit: base.hit,
     placement: { x: base.hit.x, y: base.hit.y, z: height },
+    hitFace: base.hitFace,
   };
 }
