@@ -1781,7 +1781,7 @@ export async function runWorldBlock(
 
       await packSpritesheet(opts.assetsDir, hash, frames, {
         fps,
-        frameCount,
+        frameCount: frames.length,
         action: actionText,
         llmGenerated,
       }, opts.onLog);
