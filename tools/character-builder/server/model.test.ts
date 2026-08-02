@@ -48,8 +48,6 @@ test('seedStudio — v2: manequim com wizard na etapa sul', () => {
   assert.equal(m.wizard.etapa, 'sul');
   assert.deepEqual(m.wizard.southVersions, []);
   assert.equal(m.wizard.activeSouth, 0);
-
-  console.log('✓ seedStudio v2: manequim com wizard.etapa === "sul"');
 });
 
 test('seedStudio — 5 poses builtin e coleções vazias', () => {
@@ -64,8 +62,6 @@ test('seedStudio — 5 poses builtin e coleções vazias', () => {
   assert.ok(s.palette.length > 0, 'paleta preservada');
   assert.deepEqual(s.wardrobe, [], 'wardrobe vazio');
   assert.deepEqual(s.cells, {}, 'cells vazio');
-
-  console.log('✓ seedStudio v2: 5 poses builtin, wardrobe/cells vazios');
 });
 
 // ------------------------------------------------------------------ chaves do wizard
@@ -87,8 +83,6 @@ test('helpers do wizard — formato das chaves', () => {
   ]) {
     assert.ok(k.startsWith('manequim::'), `namespace de cellKey: ${k}`);
   }
-
-  console.log('✓ chaves do wizard no formato ${charId}::__etapa__');
 });
 
 test('helpers do wizard — unicidade entre si e vs cellKey/wardrobeKey', () => {
@@ -107,8 +101,6 @@ test('helpers do wizard — unicidade entre si e vs cellKey/wardrobeKey', () => 
 
   // E com outro personagem o prefixo isola as células.
   assert.notEqual(southKey('manequim'), southKey('guarda'));
-
-  console.log('✓ 8 chaves distintas, sem colisão com cellKey/wardrobeKey');
 });
 
 // ------------------------------------------------------------------ compatibilidade
@@ -129,8 +121,6 @@ test('Character sem wizard continua válido (v2 é aditivo)', () => {
   assert.equal(legacy.wizard, undefined);
   assert.equal(cellKey(legacy.id, '__base__'), 'base-humano::__base__');
   assert.equal(southKey(legacy.id), 'base-humano::__south__');
-
-  console.log('✓ Character sem wizard: válido e chaveável');
 });
 
 // ------------------------------------------------------------------ qualidade no lock
@@ -162,8 +152,6 @@ test('enums de qualidade batem com o spec vendorizado', () => {
       'lineless',
     ],
   );
-
-  console.log('✓ DETAIL/SHADING/OUTLINE_OPTIONS conferem com o spec');
 });
 
 test('MannequinLock com qualidade: round-trip JSON preserva os campos', () => {
@@ -185,8 +173,6 @@ test('MannequinLock com qualidade: round-trip JSON preserva os campos', () => {
     lock,
     'detail/outline/view/templateId sobrevivem ao studio.json',
   );
-
-  console.log('✓ lock com qualidade persiste (round-trip JSON)');
 });
 
 test('MannequinLock sem qualidade continua válido (v2 é aditivo)', () => {
@@ -195,6 +181,4 @@ test('MannequinLock sem qualidade continua válido (v2 é aditivo)', () => {
   assert.equal(minimal.outline, undefined);
   assert.equal(minimal.view, undefined);
   assert.equal(minimal.templateId, undefined);
-
-  console.log('✓ lock mínimo sem qualidade: válido');
 });

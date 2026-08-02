@@ -97,7 +97,7 @@ test('primeira execução — 3 chamadas ao /rotate', async () => {
   }
 });
 
-test('segunda execução com mesmos parâmetros — ZERO requisições (idempotência)', async () => {
+test('segunda execução com mesmos parâmetros — ZERO requisições (idempotência)', async (t) => {
   const dir = tmpDir();
   try {
     const input = fakeInput(dir);
@@ -112,8 +112,10 @@ test('segunda execução com mesmos parâmetros — ZERO requisições (idempot�
     await rotateCardinals(client2, input);
     assert.equal(client2.callCount, 0, 'segunda execução deveria fazer 0 chamadas');
 
-    // Verificação explícita para o grep do critério de aceitação.
-    console.log('✓ idempotência: 0 requisições na segunda execução');
+    // Verificação explícita para o grep do critério de aceitação. Vai por
+    // `t.diagnostic` e não por `console.log`: escrever cru no stdout corrompe o
+    // protocolo serializado que o `node --test` usa entre pai e filho.
+    t.diagnostic('idempotência: 0 requisições na segunda execução');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -148,8 +150,6 @@ test('com isometric=true e false geram artefatos diferentes (hashes diferentes)'
     const c2 = new FakeClient();
     await rotateCardinals(c2, inputTrue);
     assert.equal(c2.callCount, 3, 'isometric=true deveria gerar hashes diferentes → novas chamadas');
-
-    console.log('✓ isometric=true e false produzem artefatos distintos');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

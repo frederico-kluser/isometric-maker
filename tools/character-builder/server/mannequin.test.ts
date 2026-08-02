@@ -376,7 +376,7 @@ test('cardeais: E e N em paralelo, W só depois', async () => {
   }
 });
 
-test('idempotência: mesma sul e mesma edição não chamam a API de novo', async () => {
+test('idempotência: mesma sul e mesma edição não chamam a API de novo', async (t) => {
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
@@ -395,7 +395,10 @@ test('idempotência: mesma sul e mesma edição não chamam a API de novo', asyn
     assert.equal(client.count('/edit-image'), 1, 'redo não chama a API');
     assert.equal(wizardOf(store).activeSouth, 1);
 
-    console.log('✓ idempotência: 0 requisições na segunda execução (sul e edição)');
+    // Sinal do critério de aceitação, pelo canal do runner: `console.log`
+    // escreveria cru no stdout e corromperia o protocolo serializado do
+    // `node --test`.
+    t.diagnostic('idempotência: 0 requisições na segunda execução (sul e edição)');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

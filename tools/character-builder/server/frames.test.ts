@@ -69,8 +69,6 @@ test('payload com ordem canónica — todas as 8 direcções', async () => {
         assert.ok(existsSync(full), `ficheiro deve existir: ${full}`);
       }
     }
-
-    console.log('✓ payload canónico: 8 direcções × 2 frames cada');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -101,8 +99,6 @@ test('payload com ordem INVERTIDA produz EXATAMENTE o mesmo resultado', async ()
     // 'south-east' é a primeira no payload invertido mas deve continuar a existir
     assert.ok(result.frames['south-east'], 'south-east deve existir');
     assert.equal(result.frames['south-east']!.length, 2, 'south-east: 2 frames');
-
-    console.log('✓ ordem invertida: resultado idêntico ao canónico');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -126,8 +122,6 @@ test('payload faltando "west" → MissingDirectionError', async () => {
         return err.direction === 'west' && err.message.includes('west');
       },
     );
-
-    console.log('✓ ausência de west → MissingDirectionError');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -147,8 +141,6 @@ test('chave desconhecida → UnknownDirectionError', async () => {
         return err.direction === 'north-north-west';
       },
     );
-
-    console.log('✓ chave desconhecida → UnknownDirectionError');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -165,8 +157,6 @@ test('skeletons populado → hasSkeletons: true', async () => {
 
     const result = await parseAndWriteFrames(payload, 'test', 'with-skel', dir);
     assert.equal(result.hasSkeletons, true, 'hasSkeletons deve ser true');
-
-    console.log('✓ skeletons populado → hasSkeletons: true');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -180,8 +170,6 @@ test('skeletons vazio → hasSkeletons: false', async () => {
 
     const result = await parseAndWriteFrames(payload, 'test', 'empty-skel', dir);
     assert.equal(result.hasSkeletons, false, 'hasSkeletons deve ser false com array vazio');
-
-    console.log('✓ skeletons vazio → hasSkeletons: false');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -195,7 +183,6 @@ test('payload sem rotation_urls → erro', async () => {
       (err: unknown) =>
         err instanceof Error && err.message.includes('rotation_urls'),
     );
-    console.log('✓ sem rotation_urls → erro');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

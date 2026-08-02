@@ -209,9 +209,11 @@ test('aceita PNG 32×32 com altura zero (base no chão)', () => {
 // relatório
 // =====================================================================
 
+// Sucesso é silencioso: o `node --test` já reporta o arquivo como `✔`. Escrever
+// no stdout daqui corromperia o protocolo serializado que o runner usa entre pai
+// e filho. O relatório de falha vai por stderr, que é canal separado e seguro.
 const total = passed + failed;
-console.log(`${passed}/${total} passou`);
 if (failed > 0) {
-  console.error(`${failed} falha(s)`);
+  console.error(`${failed} falha(s) em ${total} testes`);
   process.exit(1);
 }

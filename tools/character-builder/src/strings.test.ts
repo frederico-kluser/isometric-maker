@@ -25,10 +25,11 @@ function check(obj: unknown, path: string): string[] {
 
 const errors = check(S, 'S');
 
+// Sucesso é silencioso: o `node --test` já reporta o arquivo como `✔`. Escrever
+// no stdout daqui corromperia o protocolo serializado que o runner usa entre pai
+// e filho. O relatório de falha vai por stderr, que é canal separado e seguro.
 if (errors.length > 0) {
   console.error('Strings vazias encontradas:');
   for (const e of errors) console.error('  ✕', e);
   process.exit(1);
 }
-
-console.log('✓ Nenhuma string vazia em S.');
