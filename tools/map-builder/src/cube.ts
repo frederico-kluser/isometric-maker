@@ -36,13 +36,6 @@ import {
 export type { IsoCubeGeometry } from '@isometric-maker/iso-core/iso-cube';
 export { CANONICAL_CUBE } from '@isometric-maker/iso-core/iso-cube';
 
-/** Matiz estável derivado de um identificador — a mesma peça tem sempre a mesma cor. */
-export function hueFromId(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return h;
-}
-
 /** Buffer RGBA → canvas, com suavização desligada. */
 function toCanvas(img: RgbaImage): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
