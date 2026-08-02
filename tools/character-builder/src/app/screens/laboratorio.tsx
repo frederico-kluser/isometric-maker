@@ -5,14 +5,11 @@
  *   - "Sprite sul (v3)" (default): bancada do create-character-v3, gera N
  *     candidatos da pose sul em paralelo e exporta o bundle JSON que o
  *     Wizard importa (laboratorio/studio-panel.tsx);
- *   - "Blocos do mundo": bancada do /create-isometric-tile, gera as quatro
- *     vistas de uma peça de terreno para o editor de mapa
- *     (laboratorio/blocks-panel.tsx);
- *   - "Rotação livre (/rotate)": o playground original do /rotate, movido
- *     para cá sem mudança de comportamento (laboratorio/rotate-panel.tsx).
+ *   - "Blocos do mundo": criação de cubos pixel art — textura animada única
+ *     (pixflux + animate-with-text-v3, ADR 0032) para o editor de mapa
+ *     (laboratorio/blocks-panel.tsx).
  *
- * Os dois painéis ficam MONTADOS (o inativo recebe `hidden`): o formulário
- * do /rotate não perde as imagens carregadas ao alternar, e o painel v3 não
+ * Os dois painéis ficam MONTADOS (o inativo recebe `hidden`): o painel v3 não
  * perde o hash do job em andamento — é ele que destrava o resultado em
  * GET /api/sprite-lab/{hash}.
  */
@@ -23,11 +20,10 @@ import {
 	SegmentedToggle,
 	SegmentedToggleOption,
 } from '@/components/motion-ui/segmented-toggle';
-import { RotatePanel } from './laboratorio/rotate-panel.tsx';
 import { StudioPanel } from './laboratorio/studio-panel.tsx';
 import { BlocksPanel } from './laboratorio/blocks-panel.tsx';
 
-type LabSection = 'studio' | 'blocos' | 'rotate';
+type LabSection = 'studio' | 'blocos';
 
 export function LaboratorioScreen() {
 	const [section, setSection] = useState<LabSection>('studio');
@@ -46,9 +42,6 @@ export function LaboratorioScreen() {
 					<SegmentedToggleOption value="blocos">
 						{SB.titulo}
 					</SegmentedToggleOption>
-					<SegmentedToggleOption value="rotate">
-						{SL.studio.secoes.rotacaoLivre}
-					</SegmentedToggleOption>
 				</SegmentedToggle>
 			</div>
 			<div className={section === 'studio' ? undefined : 'hidden'}>
@@ -56,9 +49,6 @@ export function LaboratorioScreen() {
 			</div>
 			<div className={section === 'blocos' ? undefined : 'hidden'}>
 				<BlocksPanel />
-			</div>
-			<div className={section === 'rotate' ? undefined : 'hidden'}>
-				<RotatePanel />
 			</div>
 		</div>
 	);

@@ -578,9 +578,10 @@ export type TileUnitSize = (typeof TILE_UNIT_SIZES)[number];
  * 'rotated': a norte de tile vira reference_image do create-character-v3, que
  * rotaciona para 8 direções; as 4 vistas saem de rotation_urls. 1 tile + 1 v3.
  * **(ADR 0029, substituída)**
- * 'texture': UMA textura animada, gerada por create-image-pixflux +
- * animate-with-text-v3 com ação gerada por LLM. A arte não muda com a
- * perspectiva da câmera — é um decalque, não um volume. **(ADR 0032)**
+ * 'texture': UM cubo pixel-art, gerado por create-isometric-tile com o molde
+ * como referência (init_image), e animado por animate-with-text-v3 com ação
+ * gerada por LLM. A arte não muda com a perspectiva — é um decalque, não um
+ * volume. **(ADR 0032)**
  */
 export const BLOCK_TECHNIQUES = ['chained', 'rotated', 'texture'] as const;
 export type BlockTechnique = (typeof BLOCK_TECHNIQUES)[number];

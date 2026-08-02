@@ -181,8 +181,6 @@ export const laboratorio = {
 			ariaLabel: 'Seção do laboratório',
 			/** Opção: bancada v3 (default) */
 			spriteSul: 'Sprite sul (v3)',
-			/** Opção: playground do /rotate */
-			rotacaoLivre: 'Rotação livre (/rotate)',
 		},
 
 		// formulário da bancada

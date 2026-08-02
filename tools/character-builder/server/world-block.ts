@@ -1,5 +1,6 @@
 /**
- * Blocos do mundo — bancada do /create-isometric-tile (+ /create-character-v3).
+ * Blocos do mundo — bancada do /create-isometric-tile (+ /create-character-v3,
+ * + /animate-with-text-v3).
  *
  * Gera as peças de terreno do editor: cubos isométricos já desenhados na
  * projeção do gênero, prontos para assentar no grid do map-builder.
@@ -10,7 +11,7 @@
  * com `(facing + rotation) mod 4`, e quatro artes iguais fariam o giro parecer
  * a mesma figura deslizando.
  *
- * ## As duas técnicas (`technique`)
+ * ## As três técnicas (`technique`)
  *
  * - **`chained` — molde encadeado.** A norte nasce do molde do cubo
  *   (`cube-mould.ts`) como `init_image`; o RESULTADO dela vira o molde
@@ -23,8 +24,15 @@
  *   de GIF). As 8 ficam em `v3/`; as 4 vistas saem de `FACING_TO_V3_DIRECTION`
  *   e são reamostradas JUNTAS para o quadro canônico 48×53 (o v3 infla o
  *   canvas ~2× "for animation room", ADR 0028). 1 tile + 1 v3.
+ * - **`texture` — cubo animado (ADR 0032).** UM cubo pixel-art nasce do molde
+ *   (`cube-mould.ts` como `init_image` forte 480) via `/create-isometric-tile`,
+ *   com o prompt pedindo para respeitar a forma e o tamanho exatos da
+ *   referência; a ação da animação vem de LLM (ou fallback determinístico); o
+ *   cubo vira o `first_frame` do `/animate-with-text-v3`, que anima todos os
+ *   frames num job só (não por direção). A spritesheet empacota os frames e o
+ *   manifesto é v3. 1 tile + 1 animate-with-text-v3.
  *
- * As duas existem para o mesmo bloco poder ser comprado nas duas técnicas e
+ * As três existem para o mesmo bloco poder ser comprado nas três técnicas e
  * comparado lado a lado no catálogo.
  *
  * Decisões de API confirmadas no spec vendorizado
@@ -43,6 +51,10 @@
  *     enum [low top-down|high top-down|side]. ASSÍNCRONO: o job devolve só
  *     metadado — os pixels moram em GET /characters/{character_id}
  *     .rotation_urls, que é null até status 'completed' (character-detail.ts).
+ *   - POST /animate-with-text-v3. required = first_frame + action; frame_count
+ *     4–16 par, budget de pixels width×height×frame_count ≤ 524288; todos os
+ *     frames num job só (não por direção). ASSÍNCRONO mas responde 200 com
+ *     {background_job_id}; os frames moram em `last_response.images[]`.
  *
  * ## O que a API NÃO oferece, e como isto contorna
  *
@@ -412,6 +424,19 @@ export function facingPrompt(description: string, facing: BlockFacing): string {
   return `${description}, ${hint[facing]}`;
 }
 
+/**
+ * Prompt do cubo base da técnica 'texture'.
+ *
+ * O `/create-isometric-tile` não tem parâmetro de orientação nem de vista (ver
+ * o header do módulo) — o que descreve a forma são as palavras. O molde entra
+ * como `init_image`, a referência de forma e tamanho, e o prompt pede
+ * explicitamente para respeitá-la, na vista do projeto ('low top-down',
+ * ADR 0005/0015) — nunca a 'high top-down' do default do endpoint.
+ */
+export function cubePrompt(description: string): string {
+  return `${description}, pixel art cube, isometric block, matching the exact shape and proportions of the reference image, low top-down view`;
+}
+
 // ---- idempotência
 
 /**
@@ -438,8 +463,9 @@ function inputHash(config: WorldBlockConfig): string {
 
   if (technique === 'texture') {
     // A técnica 'texture' inclui frameCount, fps e action — o que define a
-    // animação. shape/outline/shading/detail/guidance/initStrength são do
-    // /create-isometric-tile e não se aplicam aqui.
+    // animação. O cubo base também vem do /create-isometric-tile, mas com
+    // shape 'block' FIXO e nenhum campo de estilo: mandar outline/shading/
+    // detail/guidance variaria o artefato sem mudar o hash — proibido.
     h.update(`|frameCount=${config.frameCount ?? 8}`);
     h.update(`|fps=${config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS}`);
     h.update(`|action=${config.action ?? ''}`);
@@ -502,7 +528,7 @@ function tileStubPath(pngPath: string): string {
 
 // ---- paths da técnica 'texture' (ADR 0032)
 
-/** A imagem base (flat, top-down) que vai ser animada. */
+/** O cubo base (pixel-art, 48×53 canônico) que vai ser animado. */
 function baseImagePath(assetsDir: string, hash: string): string {
   return join(blockDir(assetsDir, hash), 'base.png');
 }
@@ -651,7 +677,7 @@ interface WorldBlockManifestV3 {
   readonly frameCount: number;
   /** Frames por segundo. */
   readonly fps: number;
-  /** A imagem base (flat, top-down) que serviu de first_frame. */
+  /** O cubo base (pixel-art) que serviu de first_frame. */
   readonly base?: {
     readonly seed: number;
     readonly usage?: ManifestUsage;
@@ -775,7 +801,7 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
       out.push({
         hash,
         description: manifest.description,
-        shape: 'block', // textura plana, não tem shape 3D
+        shape: 'block', // o cubo base da textura animada é sempre 'block'
         technique: 'texture',
         geometry: MANIFEST_GEOMETRY,
         spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
@@ -1130,43 +1156,139 @@ async function generateActionViaLlm(
   }
 }
 
-// ---- geração de imagem base (pixflux, técnica 'texture')
-
-interface PixfluxResponse {
-  readonly image?: { readonly base64?: string };
-  readonly usage?: Usage | null;
-}
+// ---- geração do cubo base (tile, técnica 'texture')
 
 /**
- * Gera uma imagem plana do material via create-image-pixflux.
+ * Gera o cubo pixel-art do material via /create-isometric-tile.
  *
- * Síncrono, sem job — o pixflux é o modelo mais direto da PixelLab. A imagem
- * volta em 48×48, top-down, e serve como `first_frame` do animate-with-text-v3.
+ * O molde do cubo (cube-mould.ts) entra como `init_image` com força alta
+ * (DEFAULT_INIT_IMAGE_STRENGTH): o endpoint não tem parâmetro de proporção,
+ * então a referência é a única alavanca de forma. O prompt (cubePrompt) pede
+ * para respeitar a forma e o tamanho exatos do molde, na vista 'low top-down'
+ * do projeto (ADR 0005).
+ *
+ * O endpoint devolve PIXELS RGBA CRUS no canvas da API (48×56, múltiplo de 4)
+ * — apiBytesToCanonicalPng() recorta para o quadro canônico 48×53 antes de
+ * tocar o disco.
+ *
+ * O `init_image` do /create-isometric-tile está QUEBRADO no fornecedor
+ * (verificado 2026-08-01, spec "dev"): a validação Pydantic exige PNG e o
+ * worker exige RGBA cru — nenhum payload satisfaz os dois estágios. O 422 é
+ * SÍNCRONO e custa $0: quando recusada, resubmete SEM o molde, e a forma fica
+ * por conta do prompt. Quando o fornecedor consertar, a primeira tentativa
+ * volta a valer e o fallback nunca dispara.
+ *
+ * Só entram no request os campos que participam do hash da técnica: o shape
+ * é 'block' FIXO e nenhum campo de estilo (outline/shading/detail) é mandado —
+ * mandá-los variaria o artefato sem mudar o hash.
  */
 async function generateBaseImage(
   client: PixelLabClient,
   description: string,
   seed: number,
+  basePath: string,
+  apiSize: ImageSize,
+  frameSize: ImageSize,
   onLog?: (m: string) => void,
-): Promise<{ b64: string; usage?: Usage | null }> {
-  const size = 48; // Múltiplo de 4, compatível com o pixel budget da animação
+): Promise<{
+  readonly b64: string;
+  readonly tileId?: string;
+  readonly jobId?: string;
+  readonly usage?: Usage | null;
+  /** true quando o cubo veio do stub (retomada) — nenhuma submissão, nenhum gasto. */
+  readonly resumed: boolean;
+}> {
+  const stubPath = tileStubPath(basePath);
+
+  // Retomada: cubo já pago, PNG nunca gravado. GET por id não custa nada.
+  if (existsSync(stubPath)) {
+    let stub: TileStub | null = null;
+    try {
+      stub = JSON.parse(await readFile(stubPath, 'utf8')) as TileStub;
+    } catch {
+      stub = null;
+    }
+    if (stub?.tileId) {
+      onLog?.(
+        `[world-block] retomando cubo base já pago ${stub.tileId} — nenhuma submissão nova.`,
+      );
+      try {
+        const b64 = await fetchTilePngById(client, stub.tileId, onLog, stub.jobId);
+        const bruto = Buffer.from(b64, 'base64');
+        const png = apiBytesToCanonicalPng(bruto, apiSize, frameSize);
+        await writeFile(basePath, png);
+        await unlink(stubPath);
+        return { b64: png.toString('base64'), tileId: stub.tileId, resumed: true };
+      } catch (err) {
+        onLog?.(
+          `[world-block] o cubo pendente ${stub.tileId} não pôde ser recuperado ` +
+            `(${err instanceof Error ? err.message : String(err)}). Submetendo de novo.`,
+        );
+      }
+    }
+    await unlink(stubPath).catch(() => {});
+  }
+
   const params: Record<string, unknown> = {
-    description: `${description}, top-down view, flat surface texture, pixel art`,
-    image_size: { width: size, height: size },
-    view: 'high top-down',
-    no_background: false,
+    description: cubePrompt(description),
+    image_size: apiSize,
+    isometric_tile_shape: 'block',
+    init_image: asBase64Image(padPngToApiCanvas(mouldBase64(), apiSize)),
+    init_image_strength: DEFAULT_INIT_IMAGE_STRENGTH,
     seed,
   };
 
-  const res = await client.submit<PixfluxResponse>('create-image-pixflux', params);
+  /**
+   * Mesmo aviso de generateTile: o init_image está quebrado no fornecedor, e
+   * a primeira tentativa é barata porque o 422 é síncrono e custa $0.
+   */
+  let res: Awaited<ReturnType<typeof client.submit<IsometricTileResponse>>>;
+  try {
+    res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
+  } catch (err) {
+    const rejectedImages =
+      err instanceof PixelLabError &&
+      err.status === 422 &&
+      /init_image|color_image/.test(err.body) &&
+      'init_image' in params;
+    if (!rejectedImages) throw err;
+    onLog?.(
+      '[world-block] AVISO: o fornecedor recusou o molde como init_image (validação pede ' +
+        'PNG, worker exige RGBA cru — incompatíveis hoje). Gerando o cubo SEM a ' +
+        'referência: a forma fica por conta do prompt.',
+    );
+    delete params['init_image'];
+    delete params['init_image_strength'];
+    res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
+  }
 
+  // O dinheiro sai na submissão: tracking e stub ANTES de resolver o PNG.
   if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
-  const b64 = res.data?.image?.base64;
-  if (!b64) throw new Error('create-image-pixflux não devolveu imagem');
+  const usage = res.usage;
+  const stub: TileStub = {
+    tileId: res.data?.tile_id ?? null,
+    jobId: res.data?.background_job_id ?? null,
+    seed,
+  };
+  await writeFile(stubPath, `${JSON.stringify(stub)}\n`);
 
-  const png = Buffer.from(b64, 'base64');
-  onLog?.(`[world-block] imagem base gerada via pixflux (${size}×${size}, ${png.length} bytes)`);
-  return { b64, usage: res.usage ?? null };
+  const { b64, tileId } = await resolveTilePng(client, res, onLog);
+  const bruto = Buffer.from(b64, 'base64');
+  const png = apiBytesToCanonicalPng(bruto, apiSize, frameSize);
+  await writeFile(basePath, png);
+  await unlink(stubPath).catch(() => {});
+  onLog?.(
+    `[world-block] cubo base → ${basePath} (seed ${seed}, ${png.length} bytes PNG, ` +
+      `${frameSize.width}×${frameSize.height} canônico)`,
+  );
+
+  return {
+    b64: png.toString('base64'),
+    ...(tileId ? { tileId } : {}),
+    ...(res.data?.background_job_id ? { jobId: res.data.background_job_id } : {}),
+    ...(usage ? { usage } : {}),
+    resumed: false,
+  };
 }
 
 // ---- empacotamento de spritesheet (técnica 'texture')
@@ -1611,7 +1733,7 @@ export async function runWorldBlock(
     );
     faces = [north, ...rest];
   } else if (technique === 'texture') {
-    // ---- textura animada: 1 pixflux + LLM + 1 animate-with-text-v3 (ADR 0032).
+    // ---- textura animada: 1 cubo (tile) + LLM + 1 animate-with-text-v3 (ADR 0032).
     const frameCount = config.frameCount ?? 8;
     const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
     const basePath = baseImagePath(opts.assetsDir, hash);
@@ -1628,15 +1750,11 @@ export async function runWorldBlock(
     let actionText: string;
     let llmGenerated = false;
 
-    // 1. Imagem base (pixflux) — ou cache.
+    // 1. Cubo base (create-isometric-tile, molde como init_image) — ou cache.
     if (!existsSync(basePath)) {
-      const pixfluxEstimate = estimateByArea(
-        COST_TABLE['create-image-pixflux'],
-        48 * 48,
-      );
       logGuard(
-        'create-image-pixflux (1× imagem base plana; preço estimado)',
-        guardFor(pixfluxEstimate, pixfluxEstimate.point),
+        'create-isometric-tile (1× cubo base pixel-art, molde como referência; preço estimado)',
+        guardFor(tileEstimate, tileEstimate.point),
         opts.onLog,
       );
 
@@ -1644,25 +1762,33 @@ export async function runWorldBlock(
         client,
         config.description,
         baseSeedNum,
+        basePath,
+        apiSize,
+        imageSize,
         opts.onLog,
       );
-      await writeFile(basePath, Buffer.from(baseImg.b64, 'base64'));
-      textureBaseUsage = baseImg.usage;
-      generated += 1;
-      manifestDirty = true;
+      if (baseImg.resumed) {
+        opts.onLog?.('[world-block] cubo base retomado do tile pago — nenhum gasto novo.');
+      } else {
+        textureBaseUsage = baseImg.usage;
+        generated += 1;
+        manifestDirty = true;
 
-      appendLedger(opts.ledgerPath, {
-        at: new Date().toISOString(),
-        endpoint: 'create-image-pixflux',
-        lab: true,
-        kind: 'world-block',
-        hash,
-        technique,
-        seed: baseSeedNum,
-        usd: baseImg.usage?.usd ?? null,
-        generations: baseImg.usage?.generations ?? null,
-        unit: baseImg.usage?.type ?? 'unknown',
-      });
+        appendLedger(opts.ledgerPath, {
+          at: new Date().toISOString(),
+          endpoint: 'create-isometric-tile',
+          lab: true,
+          kind: 'world-block',
+          hash,
+          technique,
+          seed: baseSeedNum,
+          tileId: baseImg.tileId ?? null,
+          jobId: baseImg.jobId ?? null,
+          usd: baseImg.usage?.usd ?? null,
+          generations: baseImg.usage?.generations ?? null,
+          unit: baseImg.usage?.type ?? 'unknown',
+        });
+      }
     } else {
       opts.onLog?.('[world-block] imagem base já existe. Sem chamada.');
     }

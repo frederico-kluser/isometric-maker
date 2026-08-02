@@ -9,28 +9,22 @@
  * A validação aqui NÃO substitui a do servidor. Ela existe para não gastar uma
  * ida ao servidor com um formulário obviamente inválido; quem recusa de
  * verdade, antes de gastar dinheiro, é `validateWorldBlockConfig`.
+ *
+ * O laboratório só gera cubos por textura animada (ADR 0032): a técnica é
+ * FIXA em `texture` e os campos de tile (shape, outline, shading, detail,
+ * guidance, seed) não se aplicam — o servidor os ignora nessa técnica.
  */
 
 /** Erros que a tela detecta sozinha. O resto vem em pt-BR do servidor. */
-export type BlockErrorCode =
-  | 'description-missing'
-  | 'seed-invalid'
-  | 'guidance-invalid';
+export type BlockErrorCode = 'description-missing';
 
 export interface WorldBlockBody {
   readonly description: string;
-  readonly shape?: string;
-  readonly tileUnitSize?: number;
-  readonly outline?: string;
-  readonly shading?: string;
-  readonly detail?: string;
-  readonly textGuidanceScale?: number;
-  readonly seed?: number;
-  /** 'chained' | 'rotated' | 'texture' */
-  readonly technique?: string;
-  /** Número de frames (técnica 'texture'). 4, 8 ou 16. */
+  /** Técnica fixa: única forma de gerar bloco no laboratório hoje (ADR 0032). */
+  readonly technique: 'texture';
+  /** Número de frames da animação. 4, 8 ou 16 (padrão do servidor: 8). */
   readonly frameCount?: number;
-  /** FPS da animação (técnica 'texture'). */
+  /** FPS da animação (1–60; padrão do servidor: 8). */
   readonly fps?: number;
 }
 
@@ -58,16 +52,7 @@ export interface WorldBlockResult {
 
 export interface BlockFormInput {
   readonly description: string;
-  /** '' = não enviar (usa o default do endpoint). */
-  readonly shape: string;
-  readonly tileUnitSize: string;
-  readonly outline: string;
-  readonly shading: string;
-  readonly detail: string;
-  readonly guidanceText: string;
-  readonly seedText: string;
-  readonly technique: string;
-  /** Número de frames (técnica 'texture'). */
+  /** Número de frames da animação (técnica 'texture'). */
   readonly frameCount?: 4 | 8 | 16;
   /** FPS da animação (técnica 'texture'). */
   readonly fps?: number;
@@ -88,44 +73,11 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
   const description = input.description.trim();
   if (description === '') return { ok: false, code: 'description-missing' };
 
-  let seed: number | undefined;
-  const seedText = input.seedText.trim();
-  if (seedText !== '') {
-    const parsed = Number(seedText);
-    if (!Number.isInteger(parsed) || parsed < 0) return { ok: false, code: 'seed-invalid' };
-    seed = parsed;
-  }
-
-  let guidance: number | undefined;
-  const guidanceText = input.guidanceText.trim();
-  if (guidanceText !== '') {
-    const parsed = Number(guidanceText);
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 20) {
-      return { ok: false, code: 'guidance-invalid' };
-    }
-    guidance = parsed;
-  }
-
-  let tileUnitSize: number | undefined;
-  if (input.tileUnitSize !== '') {
-    const parsed = Number(input.tileUnitSize);
-    if (parsed === 16 || parsed === 32) tileUnitSize = parsed;
-  }
-
   return {
     ok: true,
     body: {
       description,
-      ...(input.shape !== '' ? { shape: input.shape } : {}),
-      ...(tileUnitSize !== undefined ? { tileUnitSize } : {}),
-      ...(input.outline !== '' ? { outline: input.outline } : {}),
-      ...(input.shading !== '' ? { shading: input.shading } : {}),
-      ...(input.detail !== '' ? { detail: input.detail } : {}),
-      ...(guidance !== undefined ? { textGuidanceScale: guidance } : {}),
-      ...(seed !== undefined ? { seed } : {}),
-      // A técnica entra sempre que informada — ela faz parte do hash: o mesmo
-      // prompt nas duas técnicas são dois artefatos, comparáveis lado a lado.
-      ...(input.technique !== '' ? { technique: input.technique } : {}),
+      technique: 'texture',
       ...(input.frameCount !== undefined ? { frameCount: input.frameCount } : {}),
       ...(input.fps !== undefined ? { fps: input.fps } : {}),
     },

@@ -17,6 +17,9 @@
  *      perde provenance numa retomada parcial (ADR 0023).
  *   7. listWorldBlocks só publica bloco COMPLETO do formato v2; trocar o
  *      mapeamento facing→direção rederiva de graça.
+ *   8. `texture`: 1 cubo via create-isometric-tile (molde como init_image,
+ *      shape 'block', canvas da API → recorte 48×53) + ação de LLM/fallback +
+ *      1 animate-with-text-v3; o stub do cubo pago nunca é re-submetido.
  *
  * Execute com: node --test server/world-block.test.ts
  */
@@ -36,6 +39,7 @@ import {
   readWorldBlockResult,
   listWorldBlocks,
   facingPrompt,
+  cubePrompt,
   worldBlockHash,
   padPngToApiCanvas,
   apiBytesToCanonicalPng,
@@ -116,6 +120,8 @@ type ResponseMode = 'sync' | 'async-job' | 'async-tile';
 class FakeClient extends PixelLabClient {
   readonly tileBodies: Array<Record<string, unknown>> = [];
   readonly v3Bodies: Array<Record<string, unknown>> = [];
+  /** Corpos dos POSTs de /animate-with-text-v3 (técnica 'texture'). */
+  readonly animBodies: Array<Record<string, unknown>> = [];
   /** GETs de /isometric-tiles — prova a recuperação por tile_id sem POST. */
   readonly tileGets: string[] = [];
   /** Ordem de chegada dos POSTs de tile — prova que a norte vem primeiro. */
@@ -161,6 +167,18 @@ class FakeClient extends PixelLabClient {
       this.order.push(String(b['description']));
       const seed = Number(b['seed']);
       if (this.mode === 'sync') {
+        // A técnica 'texture' pede o cubo via create-isometric-tile: o endpoint
+        // devolve PIXELS RGBA CRUS no canvas da API (48×56), nunca um PNG — o
+        // recorte canônico (48×53) é o que o world-block faz com a resposta.
+        if (/pixel art cube/.test(String(b['description']))) {
+          const api = apiImageSize();
+          const rgba = Buffer.alloc(api.width * api.height * 4);
+          for (let i = 0; i < rgba.length; i += 1) rgba[i] = (seed * 7 + i) & 0xff;
+          return this.ok<T>({
+            image: { type: 'base64', base64: rgba.toString('base64') },
+            usage: { type: 'usd', usd: 0.02 },
+          });
+        }
         return this.ok<T>({
           image: { type: 'base64', base64: pngForSeed(seed) },
           usage: { type: 'usd', usd: 0.0156 },
@@ -185,8 +203,32 @@ class FakeClient extends PixelLabClient {
       });
     }
 
+    if (method === 'POST' && path === '/animate-with-text-v3') {
+      const b = (body ?? {}) as Record<string, unknown>;
+      this.animBodies.push(b);
+      const seed = Number(b['seed']);
+      return this.ok<T>({
+        background_job_id: `animjob-${seed}`,
+        usage: { type: 'usd', usd: 0.03 },
+      });
+    }
+
     if (method === 'GET' && path.startsWith('/background-jobs/')) {
       const id = path.slice('/background-jobs/'.length);
+      if (id.startsWith('animjob-')) {
+        // O job da animação de textura traz os frames prontos em
+        // last_response.images[] — 4 frames 48×48.
+        return this.ok<T>({
+          id,
+          status: 'completed',
+          created_at: '2026-08-01T00:00:00Z',
+          last_response: {
+            images: [1, 2, 3, 4].map((fill) => ({
+              base64: makePNG(48, fill).toString('base64'),
+            })),
+          },
+        });
+      }
       if (id.startsWith('v3job-')) {
         // O job do v3 traz SÓ metadado — os pixels moram no CharacterDetail.
         return this.ok<T>({
@@ -247,7 +289,7 @@ class FakeClient extends PixelLabClient {
   }
 
   get calls(): number {
-    return this.tileBodies.length + this.v3Bodies.length;
+    return this.tileBodies.length + this.v3Bodies.length + this.animBodies.length;
   }
 
   private ok<T>(data: unknown): ApiResult<T> {
@@ -298,6 +340,24 @@ function baseConfig(): WorldBlockConfig {
 
 function rotatedConfig(): WorldBlockConfig {
   return { ...baseConfig(), technique: 'rotated' };
+}
+
+function textureConfig(): WorldBlockConfig {
+  return { ...baseConfig(), technique: 'texture' };
+}
+
+/**
+ * Sem ANTHROPIC_API_KEY, a ação da animação usa o fallback determinístico —
+ * nenhuma rede nos testes. Restaura a chave original (finally).
+ */
+async function withFallbackAction<T>(run: () => Promise<T>): Promise<T> {
+  const prev = process.env['ANTHROPIC_API_KEY'];
+  delete process.env['ANTHROPIC_API_KEY'];
+  try {
+    return await run();
+  } finally {
+    if (prev !== undefined) process.env['ANTHROPIC_API_KEY'] = prev;
+  }
 }
 
 function opts(dir: string, logs?: string[]) {
@@ -374,14 +434,29 @@ test('enums e faixas do spec fora → erros nomeados, sem chamada', async () => 
   await assertValidation({ ...baseConfig(), technique: 'girado' as never }, 'technique-enum');
   await assertValidation({ ...baseConfig(), initImageStrength: 0 }, 'init-strength-range');
   await assertValidation({ ...baseConfig(), initImageStrength: 1000 }, 'init-strength-range');
+  await assertValidation({ ...baseConfig(), frameCount: 6 as never }, 'frame-count-enum');
+  await assertValidation({ ...baseConfig(), fps: 0 }, 'fps-range');
+  await assertValidation({ ...baseConfig(), fps: 61 }, 'fps-range');
 });
 
 // ------------------------------------------------------------------ hash
 
-test('a técnica entra no hash — chained e rotated não compartilham cache', () => {
+test('a técnica entra no hash — chained, rotated e texture não compartilham cache', () => {
   const chained = worldBlockHash(baseConfig());
   const rotated = worldBlockHash(rotatedConfig());
+  const texture = worldBlockHash(textureConfig());
   assert.notEqual(chained, rotated, 'são dois artefatos do mesmo prompt, comparáveis');
+  assert.notEqual(chained, texture, 'texture é outro artefato do mesmo prompt');
+  assert.notEqual(rotated, texture);
+});
+
+test('texture: frameCount, fps e action entram no hash; defaults explícitos não', () => {
+  const t = textureConfig();
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, frameCount: 8 }));
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, fps: 8 }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, frameCount: 4 }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, fps: 4 }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, action: 'flowing' }));
 });
 
 test('default explícito e omitido têm o MESMO hash (não se paga duas vezes o mesmo request)', () => {
@@ -863,6 +938,155 @@ test('rotated: mapeamento diferente no manifesto invalida a leitura e rederiva d
   }
 });
 
+// ------------------------------------------------------------------ técnica texture
+
+test('texture: 1 cubo via create-isometric-tile com o molde + 1 animate-with-text-v3', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir)),
+    );
+
+    assert.equal(client.tileBodies.length, 1, 'o cubo base é o único tile');
+    assert.equal(client.animBodies.length, 1, 'uma animação só');
+    assert.equal(result.generated, 2);
+    assert.equal(result.technique, 'texture');
+    assert.equal(result.faces.length, 0, 'texture não tem faces por vista');
+
+    // O cubo nasce do MOLDE, no canvas da API, com força alta e shape 'block'.
+    const tile = client.tileBodies[0]!;
+    assert.equal(tile['description'], cubePrompt('grass on top of dirt'));
+    assert.match(String(tile['description']), /pixel art cube/);
+    assert.match(String(tile['description']), /low top-down view/);
+    assert.deepEqual(tile['image_size'], apiImageSize());
+    assert.equal(tile['isometric_tile_shape'], 'block');
+    assert.deepEqual(tile['init_image'], {
+      type: 'base64',
+      base64: padPngToApiCanvas(mouldBase64(), apiImageSize()),
+    });
+    assert.equal(tile['init_image_strength'], 480);
+    assert.equal(tile['seed'], 6, 'base + 1');
+    assert.equal(tile['color_image'], undefined, 'sem paleta a travar');
+
+    // O RGBA cru do endpoint recorta para o quadro canônico 48×53.
+    const base = readPngHeader(readFileSync(blockFile(dir, result.hash, 'base.png')));
+    assert.equal(base.width, BLOCK_GEOMETRY.spriteWidth, 'base.png largura canônica');
+    assert.equal(base.height, BLOCK_GEOMETRY.spriteHeight, 'base.png altura canônica');
+
+    // A animação recebe o cubo como first_frame.
+    const anim = client.animBodies[0]!;
+    assert.deepEqual(anim['first_frame'], {
+      type: 'base64',
+      base64: readFileSync(blockFile(dir, result.hash, 'base.png')).toString('base64'),
+    });
+    assert.equal(anim['frame_count'], 8, 'default 8');
+    assert.equal(anim['seed'], 7, 'base + 2');
+
+    // Spritesheet 48×192 (4 frames) + sidecar + manifesto v3.
+    const sheet = readPngHeader(readFileSync(blockFile(dir, result.hash, 'spritesheet.png')));
+    assert.equal(sheet.width, 48 * 4, 'tira horizontal de 4 frames');
+    assert.equal(sheet.height, 48);
+    const sidecar = JSON.parse(
+      readFileSync(blockFile(dir, result.hash, 'animation.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    assert.equal(sidecar['frameCount'], 4, 'frameCount real vem dos frames');
+    assert.equal(sidecar['fps'], 8);
+    assert.match(String(sidecar['action']), /grass swaying/, 'ação do fallback sem LLM');
+
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['version'], 3);
+    assert.equal(manifest['technique'], 'texture');
+    assert.equal((manifest['base'] as Record<string, unknown>)['seed'], 6);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: fornecedor recusando o molde (estado 2026-08-01) → cubo sem referência, e completa', async () => {
+  const dir = tmpDir();
+  const logs: string[] = [];
+  try {
+    const client = new FakeClient();
+    client.rejectImageInputs = true;
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir, logs)),
+    );
+
+    assert.equal(result.generated, 2, 'cubo + animação saem mesmo sem o molde');
+    assert.equal(client.tileBodies.length, 1, 'o 422 síncrono não conta como submissão');
+    assert.ok(!('init_image' in client.tileBodies[0]!), 'o fallback remove o init_image');
+    assert.ok(!('init_image_strength' in client.tileBodies[0]!));
+    assert.ok(logs.some((l) => l.includes('recusou o molde')), 'o aviso é gritante no log');
+
+    // O prompt ainda pede o cubo, e o RGBA cru ainda recorta para 48×53.
+    assert.match(String(client.tileBodies[0]!['description']), /pixel art cube/);
+    const base = readPngHeader(readFileSync(blockFile(dir, result.hash, 'base.png')));
+    assert.equal(base.width, BLOCK_GEOMETRY.spriteWidth);
+    assert.equal(base.height, BLOCK_GEOMETRY.spriteHeight);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: segunda execução com a mesma config — ZERO submissões e fromCache', async () => {
+  const dir = tmpDir();
+  try {
+    const first = await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir)),
+    );
+    const client = new FakeClient();
+    const second = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir)),
+    );
+
+    assert.equal(client.calls, 0, 'gerar de novo com o mesmo spec não gasta nada');
+    assert.equal(second.fromCache, true);
+    assert.equal(second.generated, 0);
+    assert.equal(second.hash, first.hash);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: falha DEPOIS da cobrança do cubo deixa stub, e a retomada não re-submete o tile', async () => {
+  const dir = tmpDir();
+  try {
+    const client1 = new FakeClient();
+    client1.mode = 'async-tile';
+    client1.failTileJobs = 1;
+    await assert.rejects(
+      withFallbackAction(() => runWorldBlock(client1, textureConfig(), opts(dir))),
+      'o job do cubo falhou depois da cobrança e derruba a execução',
+    );
+    assert.equal(client1.tileBodies.length, 1, 'o cubo foi submetido (e cobrado) uma vez');
+    assert.equal(client1.animBodies.length, 0, 'a animação nem chegou a ser submetida');
+
+    const hash = worldBlockHash(textureConfig());
+    const stub = JSON.parse(
+      readFileSync(blockFile(dir, hash, 'base.png.pending.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    assert.equal(stub['tileId'], 'tile-6', 'o caminho de volta fica em disco na hora da submissão');
+
+    const client2 = new FakeClient();
+    client2.mode = 'async-tile';
+    const second = await withFallbackAction(() =>
+      runWorldBlock(client2, textureConfig(), opts(dir)),
+    );
+    assert.ok(client2.tileGets.includes('tile-6'), 'a retomada busca o cubo pago por id');
+    assert.equal(client2.tileBodies.length, 0, 'o cubo NÃO é re-submetido — re-pagar o pago é o pior bug');
+    assert.equal(client2.animBodies.length, 1, 'só a animação é nova');
+    assert.equal(second.generated, 1, 'o cubo retomado não conta como gasto');
+    assert.ok(existsSync(blockFile(dir, hash, 'base.png')), 'o cubo recuperado chega ao disco');
+    assert.ok(
+      !existsSync(blockFile(dir, hash, 'base.png.pending.json')),
+      'stub some após o resgate',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ------------------------------------------------------------------ guard e ledger
 
 test('o guard informa o custo das 4 gerações e nunca recusa (ADR 0012)', async () => {
@@ -889,6 +1113,34 @@ test('rotated: o guard informa os DOIS endpoints antes de gastar', async () => {
     assert.ok(logs.some((l) => l.includes('create-character-v3 (8 direções')));
   } finally {
     restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: o guard informa os DOIS endpoints e o ledger registra o job da animação', async () => {
+  const dir = tmpDir();
+  const logs: string[] = [];
+  try {
+    await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir, logs)),
+    );
+
+    assert.ok(
+      logs.some((l) => l.includes('create-isometric-tile (1× cubo base')),
+      'guard do cubo (preço estimado do create-isometric-tile, não do pixflux)',
+    );
+    assert.ok(
+      logs.some((l) => l.includes('animate-with-text-v3 (8 frames')),
+      'guard da animação',
+    );
+
+    const lines = readLedger(dir);
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0]?.['endpoint'], 'create-isometric-tile');
+    assert.equal(lines[0]?.['kind'], 'world-block');
+    assert.equal(lines[1]?.['endpoint'], 'animate-with-text-v3');
+    assert.equal(lines[1]?.['jobId'], 'animjob-7', 'job da animação no ledger');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -972,6 +1224,27 @@ test('listWorldBlocks só publica bloco COMPLETO do formato v2, em ordem estáve
     for (const f of BLOCK_FACINGS) writeFileSync(join(oldDir, `${f}.png`), 'nada');
     list = await listWorldBlocks(join(dir, 'assets'));
     assert.deepEqual(list.map((x) => x.hash), [a.hash]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listWorldBlocks publica textura animada (v3) com spritesheet e sidecar', async () => {
+  const dir = tmpDir();
+  try {
+    const result = await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir)),
+    );
+
+    const list = await listWorldBlocks(join(dir, 'assets'));
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.technique, 'texture');
+    assert.equal(list[0]?.shape, 'block');
+    assert.equal(list[0]?.spritesheetUrl, `/world-blocks/${result.hash}/spritesheet.png`);
+    assert.equal(list[0]?.animationUrl, `/world-blocks/${result.hash}/animation.json`);
+    assert.equal(list[0]?.frameCount, 4, 'frameCount real vem do sidecar');
+    assert.equal(list[0]?.fps, 8);
+    assert.equal(list[0]?.faceUrls, undefined, 'texture não tem faces por vista');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

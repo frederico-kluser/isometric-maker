@@ -1,7 +1,9 @@
 /**
- * Painel "Blocos do mundo" — bancada das duas técnicas de bloco (ADR 0029).
+ * Painel "Blocos do mundo" — bancada do cubo pixel art (ADR 0032).
  *
- * Mesma forma do painel de sprite sul: POST devolve 202 {key, hash} e o
+ * Uma única técnica: pixflux gera a textura plana da face do cubo (o molde é
+ * a referência de forma e tamanho) e animate-with-text-v3 anima a partir de
+ * uma ação gerada por LLM da descrição. POST devolve 202 {key, hash} e o
  * resultado chega por GET /api/world-block/{hash}, que responde 200 com um
  * status NOMEADO ('gerando' | 'pronto' | 'falhou' | 'desconhecido'). Andamento
  * nunca é 404 — foi essa confusão que fez o Sprite Studio parecer quebrado
@@ -15,31 +17,14 @@ import { CheckIcon, LoaderCircleIcon, RefreshCwIcon, XIcon } from 'lucide-react'
 import { api } from '../../studio-store.tsx';
 // Do módulo PURO server/model.ts, nunca de server/world-block.ts: aquele
 // importa node:crypto e node:fs, e o navegador não tem nenhum dos dois.
-import {
-  BLOCK_FACINGS,
-  BLOCK_TECHNIQUES,
-  TILE_DETAILS,
-  TILE_OUTLINES,
-  TILE_SHADINGS,
-  TILE_SHAPES,
-  TILE_UNIT_SIZES,
-  type BlockFacing,
-} from '../../../../server/model.ts';
+import type { BlockFacing } from '../../../../server/model.ts';
 // Módulo PURO do iso-core: só a geometria, para mostrar o molde em escala.
 import { CANONICAL_CUBE } from '../../../../../../packages/iso-core/src/iso-cube.ts';
-import { blocos as SB, custoEstimado } from '../../../strings/blocos.ts';
+import { blocos as SB } from '../../../strings/blocos.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiStateButton } from '@/components/motion-ui/multi-state-button';
 import {
@@ -57,23 +42,7 @@ import {
 
 const CLIENT_ERROR_TEXT: Record<BlockErrorCode, string> = {
   'description-missing': SB.erros.descricaoObrigatoria,
-  'seed-invalid': SB.erros.seedInvalida,
-  'guidance-invalid': SB.erros.guidanceInvalida,
 };
-
-/** Base UI Select não aceita item com value "" — 'default' vira "não enviar". */
-const API_DEFAULT = 'default';
-
-/**
- * O gatilho do Select mostra o VALOR selecionado, não o rótulo do item — então
- * sem isto a tela exibia `default` cru, em inglês, apesar de a lista mostrar
- * "padrão da API". Todo texto que o usuário lê é pt-BR (ADR 0016), e o gatilho
- * é texto que o usuário lê.
- */
-const rotulo = (v: unknown, sufixo = ''): string =>
-  v === API_DEFAULT || v === null || v === undefined
-    ? SB.form.padraoApi
-    : `${String(v)}${sufixo}`;
 
 type ButtonState = 'idle' | 'running' | 'done' | 'error';
 
@@ -90,14 +59,6 @@ interface CatalogEntry {
 
 export function BlocksPanel() {
   const [description, setDescription] = useState('');
-  const [shape, setShape] = useState<string>('block');
-  const [tileUnit, setTileUnit] = useState(API_DEFAULT);
-  const [outline, setOutline] = useState(API_DEFAULT);
-  const [shading, setShading] = useState(API_DEFAULT);
-  const [detail, setDetail] = useState(API_DEFAULT);
-  const [guidanceText, setGuidanceText] = useState('');
-  const [seedText, setSeedText] = useState('');
-  const [technique, setTechnique] = useState<string>('chained');
   const [frameCount, setFrameCount] = useState<4 | 8 | 16>(8);
   const [fps, setFps] = useState(8);
 
@@ -170,19 +131,7 @@ export function BlocksPanel() {
   }, [pendingHash]);
 
   const handleGenerate = async (): Promise<void> => {
-    const built = buildWorldBlockBody({
-      description,
-      shape,
-      tileUnitSize: tileUnit === API_DEFAULT ? '' : tileUnit,
-      outline: outline === API_DEFAULT ? '' : outline,
-      shading: shading === API_DEFAULT ? '' : shading,
-      detail: detail === API_DEFAULT ? '' : detail,
-      guidanceText,
-      seedText,
-      technique,
-      frameCount: technique === 'texture' ? frameCount : undefined,
-      fps: technique === 'texture' ? fps : undefined,
-    });
+    const built = buildWorldBlockBody({ description, frameCount, fps });
     if (!built.ok) {
       setError(CLIENT_ERROR_TEXT[built.code]);
       setButtonState('error');
@@ -285,196 +234,46 @@ export function BlocksPanel() {
                 />
                 <p className="text-xs text-muted-foreground">{SB.form.descricaoNota}</p>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="bloco-shape">{SB.form.formaRotulo}</Label>
-                  <Select
-                    value={shape}
-                    onValueChange={(v) => {
-                      if (v !== null) setShape(v);
-                    }}
-                  >
-                    <SelectTrigger id="bloco-shape" className="w-full">
-                      <SelectValue>{(v) => rotulo(v)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TILE_SHAPES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="bloco-unit">{SB.form.unidadeRotulo}</Label>
-                  <Select
-                    value={tileUnit}
-                    onValueChange={(v) => {
-                      if (v !== null) setTileUnit(v);
-                    }}
-                  >
-                    <SelectTrigger id="bloco-unit" className="w-full">
-                      <SelectValue>{(v) => rotulo(v)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={API_DEFAULT}>{SB.form.padraoApi}</SelectItem>
-                      {TILE_UNIT_SIZES.map((s) => (
-                        <SelectItem key={s} value={String(s)}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {SB.form.formaNota} {SB.form.unidadeNota}
-              </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>{SB.form.cartaoTecnica}</CardTitle>
+              <CardTitle>{SB.animacao.cartao}</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-3">
+              <Badge variant="secondary" className="w-fit">
+                {SB.form.custo}
+              </Badge>
               <div className="flex flex-col gap-1.5">
-                <Label>{SB.form.tecnicaRotulo}</Label>
+                <Label>{SB.form.frameCountRotulo}</Label>
                 <SegmentedToggle
-                  value={technique}
-                  onChange={(v) => setTechnique(v)}
-                  ariaLabel={SB.form.tecnicaRotulo}
+                  value={String(frameCount)}
+                  onChange={(v) => setFrameCount(Number(v) as 4 | 8 | 16)}
+                  ariaLabel={SB.form.frameCountRotulo}
                 >
-                  {BLOCK_TECHNIQUES.map((t) => (
-                    <SegmentedToggleOption key={t} value={t}>
-                      {t === 'chained' ? SB.form.tecnicaEncadeada
-                        : t === 'rotated' ? SB.form.tecnicaRotate
-                        : SB.form.tecnicaTextura}
+                  {[4, 8, 16].map((n) => (
+                    <SegmentedToggleOption key={n} value={String(n)}>
+                      {n}
                     </SegmentedToggleOption>
                   ))}
                 </SegmentedToggle>
-                <p className="text-xs text-muted-foreground">
-                  {technique === 'chained'
-                    ? SB.form.tecnicaEncadeadaNota
-                    : technique === 'rotated'
-                    ? SB.form.tecnicaRotateNota
-                    : SB.form.tecnicaTexturaNota}
-                </p>
+                <p className="text-xs text-muted-foreground">{SB.form.frameCountNota}</p>
               </div>
-
-              <Badge variant="secondary" className="w-fit">
-                {custoEstimado(technique)}
-              </Badge>
-            </CardContent>
-          </Card>
-
-          {technique === 'texture' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{SB.animacao.cartao}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label>{SB.form.frameCountRotulo}</Label>
-                  <SegmentedToggle
-                    value={String(frameCount)}
-                    onChange={(v) => setFrameCount(Number(v) as 4 | 8 | 16)}
-                    ariaLabel={SB.form.frameCountRotulo}
-                  >
-                    {[4, 8, 16].map((n) => (
-                      <SegmentedToggleOption key={n} value={String(n)}>
-                        {n}
-                      </SegmentedToggleOption>
-                    ))}
-                  </SegmentedToggle>
-                  <p className="text-xs text-muted-foreground">{SB.form.frameCountNota}</p>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>{SB.form.fpsRotulo}</Label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={fps}
-                    onChange={(e) => setFps(Number(e.target.value) || 8)}
-                    className="w-20 rounded border px-2 py-1 text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">{SB.form.fpsNota}</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {technique !== 'texture' && (
-          <Card>
-            <CardHeader>
-              <CardTitle>{SB.form.cartaoQualidade}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="grid grid-cols-3 gap-3">
-                {(
-                  [
-                    ['bloco-outline', SB.form.outlineRotulo, outline, setOutline, TILE_OUTLINES],
-                    ['bloco-shading', SB.form.shadingRotulo, shading, setShading, TILE_SHADINGS],
-                    ['bloco-detail', SB.form.detailRotulo, detail, setDetail, TILE_DETAILS],
-                  ] as const
-                ).map(([id, label, value, setter, options]) => (
-                  <div key={id} className="flex flex-col gap-1.5">
-                    <Label htmlFor={id}>{label}</Label>
-                    <Select
-                      value={value}
-                      onValueChange={(v) => {
-                        if (v !== null) (setter as (s: string) => void)(v);
-                      }}
-                    >
-                      <SelectTrigger id={id} className="w-full">
-                        <SelectValue>{(v) => rotulo(v)}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={API_DEFAULT}>{SB.form.padraoApi}</SelectItem>
-                        {options.map((o) => (
-                          <SelectItem key={o} value={o}>
-                            {o}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="bloco-guidance">{SB.form.guidanceRotulo}</Label>
-                  <Input
-                    id="bloco-guidance"
-                    type="number"
-                    step={0.5}
-                    min={1}
-                    max={20}
-                    value={guidanceText}
-                    onChange={(e) => setGuidanceText(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">{SB.form.guidanceNota}</p>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="bloco-seed">{SB.form.seedRotulo}</Label>
-                  <Input
-                    id="bloco-seed"
-                    type="number"
-                    step={1}
-                    placeholder={SB.form.seedPlaceholder}
-                    value={seedText}
-                    onChange={(e) => setSeedText(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">{SB.form.seedNota}</p>
-                </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>{SB.form.fpsRotulo}</Label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={fps}
+                  onChange={(e) => setFps(Number(e.target.value) || 8)}
+                  className="w-20 rounded border px-2 py-1 text-sm"
+                />
+                <p className="text-xs text-muted-foreground">{SB.form.fpsNota}</p>
               </div>
             </CardContent>
           </Card>
-          )}
 
           <div className="flex flex-col items-start gap-3">
             <MultiStateButton
@@ -513,11 +312,7 @@ export function BlocksPanel() {
             <CardContent className="flex flex-col gap-4">
               {running ? (
                 <>
-                  <div className="grid grid-cols-4 gap-2">
-                    {BLOCK_FACINGS.map((f) => (
-                      <Skeleton key={f} className="h-24 w-full" />
-                    ))}
-                  </div>
+                  <Skeleton className="h-24 w-full" />
                   <p className="text-sm text-muted-foreground" role="status">
                     {SB.resultado.aguardando}
                   </p>
@@ -526,25 +321,13 @@ export function BlocksPanel() {
                 <p className="text-sm text-muted-foreground">{SB.resultado.vazio}</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-4 gap-2">
-                    {result.faces.map((f) => (
-                      <div key={f.facing} className="flex flex-col items-center gap-1">
-                        <img
-                          src={`data:image/png;base64,${f.pngB64}`}
-                          alt={SB.resultado.face[f.facing]}
-                          className="max-h-24 w-full object-contain [image-rendering:pixelated]"
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {SB.resultado.face[f.facing]}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <img
+                    src={`/world-blocks/${result.hash}/frames/frame_000.png`}
+                    alt={description}
+                    className="max-h-24 w-full object-contain [image-rendering:pixelated]"
+                  />
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">
-                      {SB.catalogo.tecnica[result.technique as 'chained' | 'rotated' | 'texture'] ??
-                        result.technique}
-                    </Badge>
+                    <Badge variant="outline">{SB.catalogo.tecnica.texture}</Badge>
                     {semGasto && (
                       <Badge variant="outline">{SB.resultado.doCache}</Badge>
                     )}

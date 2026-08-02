@@ -534,19 +534,7 @@ export function MapEditor() {
                     }`}
                     aria-pressed={active}
                   >
-                    {b.faceUrls ? (
-                      <img
-                        src={b.faceUrls.north}
-                        alt=""
-                        className="h-12 w-12 object-contain [image-rendering:pixelated]"
-                      />
-                    ) : (
-                      <span
-                        aria-hidden
-                        className="h-12 w-12 rounded"
-                        style={{ background: `hsl(${b.hue ?? hueOf(b.id)} 45% 47%)` }}
-                      />
-                    )}
+                    <BlockThumb b={b} />
                     <span className="line-clamp-2 text-center leading-tight">{b.label}</span>
                   </button>
                 );
@@ -619,6 +607,38 @@ export function MapEditor() {
         ))}
       </ToastStack>
     </div>
+  );
+}
+
+/**
+ * Miniatura da paleta.
+ *
+ * v2 (4 faces): a face norte. v3 (texture, ADR 0032): o primeiro frame da
+ * animação — o bloco não tem faceUrls, só spritesheet, e o frame individual
+ * já é servido pelo character-builder via proxy. Arte que falha ao carregar
+ * cai no quadrado colorido: o ícone quebrado do navegador não diz nada sobre
+ * a peça, e o quadrado é a mesma reserva que o cubo procedural desenha.
+ */
+function BlockThumb({ b }: { b: BlockDef }) {
+  const [failed, setFailed] = useState(false);
+  const src =
+    b.faceUrls?.north ?? (b.hash ? `/world-blocks/${b.hash}/frames/frame_000.png` : '');
+  if (failed || !src) {
+    return (
+      <span
+        aria-hidden
+        className="h-12 w-12 rounded"
+        style={{ background: `hsl(${b.hue ?? hueOf(b.id)} 45% 47%)` }}
+      />
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => setFailed(true)}
+      className="h-12 w-12 object-contain [image-rendering:pixelated]"
+    />
   );
 }
 

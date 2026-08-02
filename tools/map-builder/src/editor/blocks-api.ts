@@ -130,6 +130,7 @@ export async function loadPalette(): Promise<PaletteLoad> {
     const generated = summaries.map<BlockDef>((b) => ({
       id: `wb:${b.hash}`,
       label: shortLabel(b.description),
+      hash: b.hash,
       faceUrls: b.faceUrls as Record<Facing, string> | undefined,
       spritesheetUrl: b.spritesheetUrl,
       animationUrl: b.animationUrl,

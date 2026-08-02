@@ -100,6 +100,8 @@ export type Facing = (typeof FACINGS)[number];
 export interface BlockDef {
   readonly id: string;
   readonly label: string;
+  /** Hash do asset no catálogo — monta a miniatura da paleta (v3: texture). */
+  readonly hash?: string | undefined;
   /** URLs das quatro faces (v2: chained/rotated). Ausente = cubo procedural ou textura. */
   readonly faceUrls?: Readonly<Record<Facing, string>> | undefined;
   /**
