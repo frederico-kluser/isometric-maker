@@ -24,6 +24,7 @@ import { blocos as SB } from '../../../strings/blocos.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiStateButton } from '@/components/motion-ui/multi-state-button';
@@ -46,6 +47,9 @@ const CLIENT_ERROR_TEXT: Record<BlockErrorCode, string> = {
 
 type ButtonState = 'idle' | 'running' | 'done' | 'error';
 
+/** Opções do seletor de frames: 0 = bloco estático (sem animação). */
+type FrameCountOption = 0 | 4 | 8 | 16;
+
 interface CatalogEntry {
   readonly hash: string;
   readonly description: string;
@@ -53,14 +57,23 @@ interface CatalogEntry {
   readonly technique: 'chained' | 'rotated' | 'texture';
   readonly faceUrls?: Record<BlockFacing, string>;
   readonly spritesheetUrl?: string;
+  /** true para textura animada; false para bloco estático (frameCount 0). */
+  readonly animated?: boolean;
+  /** Loop vai-e-volta gravado no sidecar (playback do editor). */
+  readonly pingPong?: boolean;
+  /** Imagem estática do bloco (frameCount 0): o cubo base. */
+  readonly baseUrl?: string;
   readonly frameCount?: number;
   readonly fps?: number;
 }
 
 export function BlocksPanel() {
   const [description, setDescription] = useState('');
-  const [frameCount, setFrameCount] = useState<4 | 8 | 16>(8);
+  const [action, setAction] = useState('');
+  const [frameCount, setFrameCount] = useState<FrameCountOption>(8);
   const [fps, setFps] = useState(8);
+  const [enhancePrompt, setEnhancePrompt] = useState(true);
+  const [pingPong, setPingPong] = useState(true);
 
   const [buttonState, setButtonState] = useState<ButtonState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +144,7 @@ export function BlocksPanel() {
   }, [pendingHash]);
 
   const handleGenerate = async (): Promise<void> => {
-    const built = buildWorldBlockBody({ description, frameCount, fps });
+    const built = buildWorldBlockBody({ description, action, frameCount, fps, enhancePrompt, pingPong });
     if (!built.ok) {
       setError(CLIENT_ERROR_TEXT[built.code]);
       setButtonState('error');
@@ -243,15 +256,36 @@ export function BlocksPanel() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <Badge variant="secondary" className="w-fit">
-                {SB.form.custo}
+                {frameCount === 0 ? SB.form.custoEstatico : SB.form.custo}
               </Badge>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bloco-acao">{SB.form.acaoRotulo}</Label>
+                <Textarea
+                  id="bloco-acao"
+                  value={action}
+                  onChange={(e) => setAction(e.target.value)}
+                  placeholder={SB.form.acaoPlaceholder}
+                />
+                <p className="text-xs text-muted-foreground">{SB.form.acaoNota}</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="flex items-center gap-2">
+                  <Checkbox
+                    checked={enhancePrompt}
+                    onCheckedChange={(checked) => setEnhancePrompt(checked)}
+                  />
+                  {SB.form.enhanceRotulo}
+                </Label>
+                <p className="text-xs text-muted-foreground">{SB.form.enhanceNota}</p>
+              </div>
               <div className="flex flex-col gap-1.5">
                 <Label>{SB.form.frameCountRotulo}</Label>
                 <SegmentedToggle
                   value={String(frameCount)}
-                  onChange={(v) => setFrameCount(Number(v) as 4 | 8 | 16)}
+                  onChange={(v) => setFrameCount(Number(v) as FrameCountOption)}
                   ariaLabel={SB.form.frameCountRotulo}
                 >
+                  <SegmentedToggleOption value="0">{SB.form.estatico}</SegmentedToggleOption>
                   {[4, 8, 16].map((n) => (
                     <SegmentedToggleOption key={n} value={String(n)}>
                       {n}
@@ -260,18 +294,32 @@ export function BlocksPanel() {
                 </SegmentedToggle>
                 <p className="text-xs text-muted-foreground">{SB.form.frameCountNota}</p>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>{SB.form.fpsRotulo}</Label>
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={fps}
-                  onChange={(e) => setFps(Number(e.target.value) || 8)}
-                  className="w-20 rounded border px-2 py-1 text-sm"
-                />
-                <p className="text-xs text-muted-foreground">{SB.form.fpsNota}</p>
-              </div>
+              {frameCount !== 0 && (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>{SB.form.fpsRotulo}</Label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={fps}
+                      onChange={(e) => setFps(Number(e.target.value) || 8)}
+                      className="w-20 rounded border px-2 py-1 text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">{SB.form.fpsNota}</p>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={pingPong}
+                        onCheckedChange={(checked) => setPingPong(checked)}
+                      />
+                      {SB.form.pingPongRotulo}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">{SB.form.pingPongNota}</p>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -321,13 +369,23 @@ export function BlocksPanel() {
                 <p className="text-sm text-muted-foreground">{SB.resultado.vazio}</p>
               ) : (
                 <>
-                  <AnimPreview
-                    hash={result.hash}
-                    frameCount={frameCount}
-                    fps={fps}
-                    alt={description}
-                    className="max-h-24 w-full object-contain [image-rendering:pixelated]"
-                  />
+                  {frameCount === 0 ? (
+                    // Bloco estático: o cubo base, sem animação.
+                    <img
+                      src={`/world-blocks/${result.hash}/base.png`}
+                      alt={description}
+                      className="max-h-24 w-full object-contain [image-rendering:pixelated]"
+                    />
+                  ) : (
+                    <AnimPreview
+                      hash={result.hash}
+                      frameCount={frameCount}
+                      fps={fps}
+                      pingPong={pingPong}
+                      alt={description}
+                      className="max-h-24 w-full object-contain [image-rendering:pixelated]"
+                    />
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{SB.catalogo.tecnica.texture}</Badge>
                     {semGasto && (
@@ -356,39 +414,54 @@ export function BlocksPanel() {
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-3">
-                    {catalog.map((b) => (
-                      <div
-                        key={b.hash}
-                        className="flex flex-col items-center gap-1 rounded-lg border border-border bg-muted/30 p-2"
-                      >
-                        {b.technique === 'texture' ? (
-                          <AnimPreview
-                            hash={b.hash}
-                            frameCount={b.frameCount}
-                            fps={b.fps}
-                            alt={b.description}
-                            className="h-16 w-16 object-contain [image-rendering:pixelated]"
-                          />
-                        ) : (
-                          <img
-                            src={b.faceUrls?.north ?? ''}
-                            alt={b.description}
-                            className="h-16 w-16 object-contain [image-rendering:pixelated]"
-                          />
-                        )}
-                        <span className="line-clamp-2 text-center text-xs leading-tight">
-                          {b.description}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {b.technique === 'texture'
-                            ? `${b.frameCount ?? '?'}f ${b.fps ?? '?'}fps`
-                            : b.shape}
-                        </span>
-                        <Badge variant="outline" className="text-[10px]">
-                          {SB.catalogo.tecnica[b.technique as 'chained' | 'rotated' | 'texture'] ?? b.technique}
-                        </Badge>
-                      </div>
-                    ))}
+                    {catalog.map((b) => {
+                      const isAnimated =
+                        b.animated ?? (b.frameCount !== undefined && b.frameCount > 1);
+                      return (
+                        <div
+                          key={b.hash}
+                          className="flex flex-col items-center gap-1 rounded-lg border border-border bg-muted/30 p-2"
+                        >
+                          {b.technique === 'texture' ? (
+                            isAnimated ? (
+                              <AnimPreview
+                                hash={b.hash}
+                                frameCount={b.frameCount}
+                                fps={b.fps}
+                                pingPong={b.pingPong}
+                                alt={b.description}
+                                className="h-16 w-16 object-contain [image-rendering:pixelated]"
+                              />
+                            ) : (
+                              <img
+                                src={b.baseUrl ?? `/world-blocks/${b.hash}/base.png`}
+                                alt={b.description}
+                                className="h-16 w-16 object-contain [image-rendering:pixelated]"
+                              />
+                            )
+                          ) : (
+                            <img
+                              src={b.faceUrls?.north ?? ''}
+                              alt={b.description}
+                              className="h-16 w-16 object-contain [image-rendering:pixelated]"
+                            />
+                          )}
+                          <span className="line-clamp-2 text-center text-xs leading-tight">
+                            {b.description}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {b.technique === 'texture'
+                              ? isAnimated
+                                ? `${b.frameCount ?? '?'}f ${b.fps ?? '?'}fps`
+                                : SB.form.estatico
+                              : b.shape}
+                          </span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {SB.catalogo.tecnica[b.technique as 'chained' | 'rotated' | 'texture'] ?? b.technique}
+                          </Badge>
+                        </div>
+                      );
+                    })}
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
                     {SB.catalogo.comparacaoNota}
@@ -407,10 +480,12 @@ export function BlocksPanel() {
  * Prévia animada de um bloco 'texture' (ADR 0032): faz loop pelos frames de
  * /world-blocks/<hash>/frames/ em vez de mostrar só o primeiro frame.
  *
- * O fps e a contagem REAIS de frames vêm do sidecar animation.json — a API
+ * O fps, a contagem e o ping-pong REAIS vêm do sidecar animation.json — a API
  * pode devolver menos frames que os pedidos, e o sidecar grava o que chegou
  * (packSpritesheet usa frames.length). Os props são só o fallback imediato
- * enquanto o sidecar não chega; sem sidecar nem props, nada é renderizado.
+ * enquanto o sidecar não chega. Bloco estático (frameCount <= 1) renderiza o
+ * <img> único: frame_000 quando existe um frame, o cubo base (base.png) quando
+ * não existe nenhum.
  */
 interface AnimPreviewProps {
   readonly hash: string;
@@ -418,6 +493,8 @@ interface AnimPreviewProps {
   readonly frameCount?: number | undefined;
   /** Fallback imediato; o sidecar animation.json é a fonte da verdade. */
   readonly fps?: number | undefined;
+  /** Fallback imediato; o sidecar animation.json é a fonte da verdade. */
+  readonly pingPong?: boolean | undefined;
   readonly alt?: string;
   readonly className?: string;
 }
@@ -428,16 +505,23 @@ const DEFAULT_ANIM_FPS = 8;
 interface AnimSidecar {
   readonly fps?: number;
   readonly frameCount?: number;
+  /** Loop vai-e-volta gravado pelo servidor no animation.json. */
+  readonly pingPong?: boolean;
 }
 
 function frameUrl(hash: string, index: number): string {
   return `/world-blocks/${hash}/frames/frame_${String(index).padStart(3, '0')}.png`;
 }
 
-function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps) {
-  const [meta, setMeta] = useState<{ fps: number; frameCount: number } | null>(null);
+function AnimPreview({ hash, frameCount, fps, pingPong, alt, className }: AnimPreviewProps) {
+  const [meta, setMeta] = useState<{
+    fps: number;
+    frameCount: number;
+    pingPong: boolean;
+  } | null>(null);
   const [loaded, setLoaded] = useState(0);
-  const [frameIndex, setFrameIndex] = useState(0);
+  /** Tick do loop (1 por frame no FPS do sidecar). O índice é derivado. */
+  const [tick, setTick] = useState(0);
 
   // Sidecar primeiro; os props seguram o preview enquanto ele não chega.
   useEffect(() => {
@@ -449,6 +533,7 @@ function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps
         if (cancelled) return;
         const sideCount = sidecar?.frameCount;
         const sideFps = sidecar?.fps;
+        const sidePingPong = sidecar?.pingPong;
         const count =
           typeof sideCount === 'number' && sideCount >= 1
             ? sideCount
@@ -459,26 +544,37 @@ function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps
         setMeta({
           fps: typeof sideFps === 'number' && sideFps >= 1 ? sideFps : (fps ?? DEFAULT_ANIM_FPS),
           frameCount: count,
+          pingPong: typeof sidePingPong === 'boolean' ? sidePingPong : (pingPong ?? true),
         });
       })
       .catch(() => {
         if (cancelled) return;
         if (typeof frameCount === 'number' && frameCount >= 1) {
-          setMeta({ fps: fps ?? DEFAULT_ANIM_FPS, frameCount });
+          setMeta({ fps: fps ?? DEFAULT_ANIM_FPS, frameCount, pingPong: pingPong ?? true });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [hash, frameCount, fps]);
+  }, [hash, frameCount, fps, pingPong]);
 
   const count =
     meta?.frameCount ?? (typeof frameCount === 'number' && frameCount >= 1 ? frameCount : 0);
+  const pingPongEnabled = meta?.pingPong ?? pingPong ?? true;
 
   const urls = useMemo(
     () => Array.from({ length: count }, (_, i) => frameUrl(hash, i)),
     [hash, count],
   );
+
+  // Índice derivado do tick: linear quando ping-pong está desligado, vai-e-volta
+  // quando ligado (0→1→2→3→2→1→0→…). Período do ping-pong: 2×(count−1).
+  const frameIndex = useMemo(() => {
+    if (!pingPongEnabled) return tick % count;
+    const period = 2 * (count - 1);
+    const m = tick % period;
+    return m >= count ? period - m : m;
+  }, [tick, count, pingPongEnabled]);
 
   // Pré-carrega todos os frames — sem isso o loop piscaria imagens vazias no
   // primeiro ciclo. Frame ausente conta como "carregado": um 404 não trava o
@@ -487,7 +583,7 @@ function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps
     let cancelled = false;
     let done = 0;
     setLoaded(0);
-    setFrameIndex(0);
+    setTick(0);
     for (const url of urls) {
       const img = new Image();
       img.decoding = 'async';
@@ -514,12 +610,15 @@ function AnimPreview({ hash, frameCount, fps, alt, className }: AnimPreviewProps
     if (count <= 1 || loaded < count) return;
     const intervalMs = Math.max(1, Math.round(1000 / (meta?.fps ?? DEFAULT_ANIM_FPS)));
     const timer = window.setInterval(() => {
-      setFrameIndex((i) => (i + 1) % count);
+      setTick((t) => t + 1);
     }, intervalMs);
     return () => window.clearInterval(timer);
   }, [count, loaded, meta?.fps]);
 
-  if (count === 0) return null;
+  if (count <= 1) {
+    const src = count === 1 ? frameUrl(hash, 0) : `/world-blocks/${hash}/base.png`;
+    return <img src={src} alt={alt ?? ''} className={className} />;
+  }
 
   const src = urls[frameIndex] ?? urls[0] ?? '';
   return <img src={src} alt={alt ?? ''} className={className} />;

@@ -22,9 +22,28 @@ export const blocos = {
       'referência. Prompt em inglês costuma render melhor.',
 
     custo: '1 tile + 1 animate-with-text-v3 (preço estimado)',
+    custoEstatico: '1 tile (preço estimado)',
+
+    acaoRotulo: 'Ação da animação (action)',
+    acaoPlaceholder: 'água ondulando suavemente, com reflexos de luz',
+    acaoNota:
+      'Opcional. Descreva o MOVIMENTO do material — em branco, o servidor ' +
+      'gera a ação via IA a partir da descrição.',
+
+    enhanceRotulo: 'Otimizar descrição da animação via IA (enhance_prompt)',
+    enhanceNota:
+      'A PixelLab expande o texto da ação antes de gerar. Cobrança estimada ' +
+      'à parte (enhance_usage).',
+
+    pingPongRotulo: 'Animação vai-e-volta (ping-pong)',
+    pingPongNota: 'Evita quebra de continuidade ao reiniciar o loop.',
+
+    estatico: 'Estático',
 
     frameCountRotulo: 'Frames da animação (frame_count)',
-    frameCountNota: '4, 8 ou 16. Tem que ser par — é o que o animate-with-text-v3 aceita.',
+    frameCountNota:
+      'Estático (0) ou animado: 4, 8 ou 16, sempre par — é o que o ' +
+      'animate-with-text-v3 aceita.',
     fpsRotulo: 'FPS da animação',
     fpsNota: 'Quadros por segundo no editor. Só pós-processamento — nunca custa nada.',
 

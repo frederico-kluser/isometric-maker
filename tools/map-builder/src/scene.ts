@@ -106,10 +106,16 @@ export interface BlockDef {
   readonly spritesheetUrl?: string | undefined;
   /** URL do sidecar de animação com fps e frameCount. */
   readonly animationUrl?: string | undefined;
-  /** Número de frames da animação (v3: texture). */
+  /** Número de frames da animação (v3: texture). 0 = estático. */
   readonly frameCount?: number | undefined;
   /** FPS da animação (v3: texture). */
   readonly fps?: number | undefined;
+  /** Ping-pong: vai-e-volta em vez de loop com reset. Default true. */
+  readonly pingPong?: boolean | undefined;
+  /** false = bloco estático, sem animação. Default true. */
+  readonly animated?: boolean | undefined;
+  /** URL da imagem base (estática) quando animated === false. */
+  readonly baseUrl?: string | undefined;
 }
 
 export interface SceneOptions {
@@ -256,8 +262,10 @@ export async function createIsoScene(
    *  Para blocos 'texture' (v3), o array tem os frames da animação. */
   const artwork = new Map<string, Texture[]>();
 
-  /** Estado de animação por bloco: frame atual e timestamp do último avanço. */
-  const animState = new Map<string, { frame: number; lastMs: number }>();
+  /** Estado de animação por bloco: frame atual, direção e timestamp do último avanço. */
+  const animState = new Map<string, { frame: number; direction: 1 | -1; lastMs: number }>();
+  /** Ping-pong ativo por bloco. */
+  const pingPongFlag = new Map<string, boolean>();
   let animTickerActive = false;
 
   /** Avança o frame de todos os blocos animados. Chamado pelo ticker. */
@@ -270,7 +278,23 @@ export async function createIsoScene(
       const fps = animFps.get(id) ?? 8;
       const interval = 1000 / fps;
       if (now - state.lastMs >= interval) {
-        state.frame = (state.frame + 1) % frames.length;
+        const last = frames.length - 1;
+        const pingPong = pingPongFlag.get(id) ?? true;
+        if (pingPong) {
+          // Vai-e-volta: 0 → 1 → ... → last → last-1 → ... → 0 → ...
+          const next = state.frame + state.direction;
+          if (next > last) {
+            state.direction = -1;
+            state.frame = last - 1;
+          } else if (next < 0) {
+            state.direction = 1;
+            state.frame = 1;
+          } else {
+            state.frame = next;
+          }
+        } else {
+          state.frame = (state.frame + 1) % frames.length;
+        }
         state.lastMs = now;
       }
       anyAnimating = true;
@@ -317,6 +341,25 @@ export async function createIsoScene(
       artwork.delete(b.id);
       animState.delete(b.id);
       animFps.delete(b.id);
+      pingPongFlag.delete(b.id);
+
+      // v3 estático: sem animação, só a imagem base.
+      if (b.animated === false || b.frameCount === 0) {
+        const staticUrl = b.baseUrl ?? (b.hash ? `/world-blocks/${b.hash}/base.png` : undefined);
+        if (!staticUrl) {
+          proceduralFor(b.id, b.hue);
+          continue;
+        }
+        try {
+          const tex = await Assets.load<Texture>(staticUrl);
+          tex.source.scaleMode = 'nearest';
+          tex.source.autoGenerateMipmaps = false;
+          artwork.set(b.id, [tex]);
+        } catch {
+          proceduralFor(b.id, b.hue);
+        }
+        continue;
+      }
 
       // v3: textura animada (ADR 0032)
       if (b.spritesheetUrl) {
@@ -340,8 +383,9 @@ export async function createIsoScene(
               tex.source.autoGenerateMipmaps = false;
             }
             artwork.set(b.id, animTextures);
-            animState.set(b.id, { frame: 0, lastMs: performance.now() });
+            animState.set(b.id, { frame: 0, direction: 1, lastMs: performance.now() });
             animFps.set(b.id, b.fps ?? 8);
+            pingPongFlag.set(b.id, b.pingPong ?? true);
             // Liga o ticker de animação se ainda não estiver ativo.
             if (!animTickerActive) {
               animTickerActive = true;
@@ -572,6 +616,7 @@ export async function createIsoScene(
     artwork.clear();
     animState.clear();
     animFps.clear();
+    pingPongFlag.clear();
     app.destroy(true, { children: true, texture: true, textureSource: true });
   };
 

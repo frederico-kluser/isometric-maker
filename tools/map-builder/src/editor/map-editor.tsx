@@ -654,15 +654,17 @@ export function MapEditor() {
  * Miniatura da paleta.
  *
  * v2 (4 faces): a face norte. v3 (texture, ADR 0032): o primeiro frame da
- * animação — o bloco não tem faceUrls, só spritesheet, e o frame individual
- * já é servido pelo character-builder via proxy. Arte que falha ao carregar
+ * animação (ou a imagem base quando estático). Arte que falha ao carregar
  * cai no quadrado colorido: o ícone quebrado do navegador não diz nada sobre
  * a peça, e o quadrado é a mesma reserva que o cubo procedural desenha.
  */
 function BlockThumb({ b }: { b: BlockDef }) {
   const [failed, setFailed] = useState(false);
   const src =
-    b.faceUrls?.north ?? (b.hash ? `/world-blocks/${b.hash}/frames/frame_000.png` : '');
+    b.faceUrls?.north ??
+    (b.animated === false || b.frameCount === 0
+      ? (b.baseUrl ?? (b.hash ? `/world-blocks/${b.hash}/base.png` : ''))
+      : (b.hash ? `/world-blocks/${b.hash}/frames/frame_000.png` : ''));
   if (failed || !src) {
     return (
       <span

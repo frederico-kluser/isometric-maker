@@ -22,10 +22,29 @@ export interface WorldBlockBody {
   readonly description: string;
   /** Técnica fixa: única forma de gerar bloco no laboratório hoje (ADR 0032). */
   readonly technique: 'texture';
-  /** Número de frames da animação. 4, 8 ou 16 (padrão do servidor: 8). */
+  /**
+   * Número de frames da animação. 0 (Estático), 4, 8 ou 16
+   * (padrão do servidor: 8).
+   */
   readonly frameCount?: number;
   /** FPS da animação (1–60; padrão do servidor: 8). */
   readonly fps?: number;
+  /**
+   * Ação da animação (técnica 'texture'). O texto que vai no `action` do
+   * /animate-with-text-v3. Ausente: o servidor gera via LLM a partir da
+   * descrição.
+   */
+  readonly action?: string;
+  /**
+   * Otimizar o action via `enhance_prompt` do /animate-with-text-v3. O painel
+   * envia SEMPRE — o default do endpoint é false, e omitir mentiria o toggle.
+   */
+  readonly enhancePrompt: boolean;
+  /**
+   * Loop vai-e-volta no playback. Só pós-processamento: não gera nada e não
+   * entra no hash do servidor.
+   */
+  readonly pingPong: boolean;
 }
 
 export interface WorldBlockAccepted {
@@ -52,10 +71,16 @@ export interface WorldBlockResult {
 
 export interface BlockFormInput {
   readonly description: string;
-  /** Número de frames da animação (técnica 'texture'). */
-  readonly frameCount?: 4 | 8 | 16;
+  /** Número de frames da animação (técnica 'texture'). 0 = Estático. */
+  readonly frameCount?: 0 | 4 | 8 | 16;
   /** FPS da animação (técnica 'texture'). */
   readonly fps?: number;
+  /** Ação da animação — texto livre do movimento. Em branco: servidor gera via IA. */
+  readonly action?: string;
+  /** Otimizar o action via enhance_prompt (default do painel: ligado). */
+  readonly enhancePrompt: boolean;
+  /** Loop vai-e-volta no playback (default do painel: ligado). */
+  readonly pingPong: boolean;
 }
 
 export type BuildResult =
@@ -68,10 +93,16 @@ export type BuildResult =
  * Campo em branco é OMITIDO do body, nunca enviado como `null` ou `''`: o
  * endpoint tem defaults próprios, e mandar vazio troca o default do fornecedor
  * por um palpite nosso.
+ *
+ * Os toggles booleanos (enhancePrompt, pingPong) são exceção: o painel é dono
+ * deles e envia SEMPRE — o default do endpoint (enhance_prompt=false) não é o
+ * default do painel (ligado), e omitir faria a geração divergir do toggle.
  */
 export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
   const description = input.description.trim();
   if (description === '') return { ok: false, code: 'description-missing' };
+
+  const action = input.action?.trim() ?? '';
 
   return {
     ok: true,
@@ -80,6 +111,9 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
       technique: 'texture',
       ...(input.frameCount !== undefined ? { frameCount: input.frameCount } : {}),
       ...(input.fps !== undefined ? { fps: input.fps } : {}),
+      ...(action !== '' ? { action } : {}),
+      enhancePrompt: input.enhancePrompt,
+      pingPong: input.pingPong,
     },
   };
 }

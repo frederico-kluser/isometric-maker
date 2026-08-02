@@ -7,6 +7,11 @@
  * SEMPRE `texture`: o laboratório só gera cubos por textura animada (ADR 0032),
  * e a técnica entra no hash do servidor.
  *
+ * Exceção à regra: os toggles booleanos (enhancePrompt, pingPong) vão SEMPRE
+ * no body. O painel é dono deles — o default do endpoint (enhance_prompt=false)
+ * não é o default do painel (ligado), e omitir faria a geração divergir do
+ * toggle sem ninguém avisar.
+ *
  * Execute com: node --test src/app/screens/laboratorio/blocks-body.test.ts
  */
 import { test } from 'node:test';
@@ -16,16 +21,20 @@ import { buildWorldBlockBody, type BlockFormInput } from './blocks-body.ts';
 function form(over: Partial<BlockFormInput> = {}): BlockFormInput {
   return {
     description: 'grass on top of dirt',
+    enhancePrompt: true,
+    pingPong: true,
     ...over,
   };
 }
 
-test('body mínimo: description + técnica fixa, nada de campo vazio', () => {
+test('body mínimo: description + técnica fixa + toggles, nada de campo vazio', () => {
   const built = buildWorldBlockBody(form());
   assert.ok(built.ok);
   assert.deepEqual(built.body, {
     description: 'grass on top of dirt',
     technique: 'texture',
+    enhancePrompt: true,
+    pingPong: true,
   });
 });
 
@@ -59,4 +68,32 @@ test('frameCount e fps entram quando informados; em branco são omitidos', () =>
   assert.ok(vazio.ok);
   assert.ok(!('frameCount' in vazio.body));
   assert.ok(!('fps' in vazio.body));
+});
+
+test('frameCount 0 (Estático) é aceito e vai no body', () => {
+  const built = buildWorldBlockBody(form({ frameCount: 0 }));
+  assert.ok(built.ok);
+  assert.equal(built.body.frameCount, 0);
+});
+
+test('action entra aparada quando informada; em branco é omitida', () => {
+  const built = buildWorldBlockBody(form({ action: '  água ondulando  ' }));
+  assert.ok(built.ok);
+  assert.equal(built.body.action, 'água ondulando');
+
+  const semAcao = buildWorldBlockBody(form({ action: '   ' }));
+  assert.ok(semAcao.ok);
+  assert.ok(!('action' in semAcao.body));
+});
+
+test('os toggles enhancePrompt e pingPong vão SEMPRE no body, ligados ou não', () => {
+  const ligado = buildWorldBlockBody(form());
+  assert.ok(ligado.ok);
+  assert.equal(ligado.body.enhancePrompt, true);
+  assert.equal(ligado.body.pingPong, true);
+
+  const desligado = buildWorldBlockBody(form({ enhancePrompt: false, pingPong: false }));
+  assert.ok(desligado.ok);
+  assert.equal(desligado.body.enhancePrompt, false);
+  assert.equal(desligado.body.pingPong, false);
 });

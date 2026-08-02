@@ -586,8 +586,14 @@ export type TileUnitSize = (typeof TILE_UNIT_SIZES)[number];
 export const BLOCK_TECHNIQUES = ['chained', 'rotated', 'texture'] as const;
 export type BlockTechnique = (typeof BLOCK_TECHNIQUES)[number];
 
-/** Número de frames de animação — o que o /animate-with-text-v3 aceita. */
-export const ANIMATION_FRAME_COUNTS = [4, 8, 16] as const;
+/**
+ * Número de frames de animação da técnica 'texture'.
+ *
+ * 0 = sem animação: só o cubo base é gerado, o animate-with-text-v3 nunca é
+ * chamado (convenção deste módulo — o spec só aceita 4–16). 4, 8 ou 16 são os
+ * valores que o /animate-with-text-v3 aceita.
+ */
+export const ANIMATION_FRAME_COUNTS = [0, 4, 8, 16] as const;
 export type AnimationFrameCount = (typeof ANIMATION_FRAME_COUNTS)[number];
 
 /** FPS padrão para animações de bloco. */
