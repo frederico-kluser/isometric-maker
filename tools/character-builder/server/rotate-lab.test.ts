@@ -312,7 +312,7 @@ test('isometric=true entra no request; views, seed e init_image quando informado
 
 // ------------------------------------------------------------------ idempotência
 
-test('segunda execução com o mesmo input — ZERO chamadas (idempotência por hash)', async () => {
+test('segunda execução com o mesmo input — ZERO chamadas (idempotência por hash)', async (t) => {
   const dir = tmpDir();
   try {
     const input = baseInput();
@@ -331,7 +331,10 @@ test('segunda execução com o mesmo input — ZERO chamadas (idempotência por 
     // Ledger não é reescrito no hit de cache.
     assert.equal(readLedger(dir).length, 1, 'ledger tem uma linha só — cache não loga de novo');
 
-    console.log('✓ idempotência: 0 requisições na segunda execução');
+    // Sinal do critério de aceitação, pelo canal do runner: `console.log`
+    // escreveria cru no stdout e corromperia o protocolo serializado do
+    // `node --test`.
+    t.diagnostic('idempotência: 0 requisições na segunda execução');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

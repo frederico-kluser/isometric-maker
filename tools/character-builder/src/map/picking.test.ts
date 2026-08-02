@@ -68,7 +68,7 @@ function worldToScreen(x: number, y: number, z: number): { sx: number; sy: numbe
 
 // ------------------------------------------------------------------ diagonal
 
-test('propriedade da diagonal: screen→cell avança na diagonal com z', () => {
+test('propriedade da diagonal: screen→cell avança na diagonal com z', (t) => {
   // Propriedade: screenToWorld(sx,sy,z+1) = screenToWorld(sx,sy,z) + (0.5, 0.5)
   // com a geometria padrão. Dois níveis de z = uma célula diagonal completa.
   const sx = 32;
@@ -91,7 +91,10 @@ test('propriedade da diagonal: screen→cell avança na diagonal com z', () => {
   // Dois níveis de z = um passo de (1.0, 1.0) no mundo = uma diagonal.
   assert.equal(dx, dy, 'dx deve igualar dy (diagonal)');
   assert.ok(dx === 1 || dx === 2, `dx=${dx} deve ser 1 ou 2`);
-  console.log(`✓ diagonal: cell(z=0)=(${c0.x},${c0.y}) cell(z=2)=(${c2.x},${c2.y}) dx=dy=${dx}`);
+  // As células calculadas são informação, não enfeite: `t.diagnostic` passa pelo
+  // canal do runner. `console.log` escreveria cru no stdout e corromperia o
+  // protocolo serializado que o `node --test` usa entre pai e filho.
+  t.diagnostic(`diagonal: cell(z=0)=(${c0.x},${c0.y}) cell(z=2)=(${c2.x},${c2.y}) dx=dy=${dx}`);
 });
 
 // ------------------------------------------------------------------ bloco único
@@ -148,7 +151,6 @@ test('pick devolve piso quando coluna existe mas bloco está acima do piso', () 
   assert.equal(result!.cell.y, 0);
   assert.equal(result!.cell.z, 0);
   assert.equal(result!.blockType, 'piso');
-  console.log('✓ piso: isFloor=true quando bloco está acima do raio');
 });
 
 // ------------------------------------------------------------------ ausência
@@ -161,7 +163,6 @@ test('pick devolve null para clique fora dos limites do mapa', () => {
   // Mapa com bloco: ponto longe → null
   const map2 = singleBlockMap();
   assert.equal(pick(1000, 1000, map2, GEOM), null);
-  console.log('✓ ausência: clique fora dos limites → null');
 });
 
 // ------------------------------------------------------------------ degraus
@@ -209,8 +210,6 @@ test('mapa com degraus — cada ponto de tela tem resposta esperada', () => {
   // Ponto fora do mapa: (3,3,0) → sem coluna → null
   const pt3 = worldToScreen(3, 3, 0);
   assert.equal(pick(pt3.sx, pt3.sy, map, GEOM), null, '(3,3) sem coluna → null');
-
-  console.log('✓ degraus: cada ponto tem resposta esperada');
 });
 
 // ------------------------------------------------------------------ borda
@@ -239,7 +238,6 @@ test('pickWithHighlight devolve floorCell adicional', () => {
   assert.equal(result!.floorCell.z, 0, 'piso em z=0');
   assert.equal(typeof result!.floorCell.x, 'number');
   assert.equal(typeof result!.floorCell.y, 'number');
-  console.log('✓ highlight: floorCell incluída');
 });
 
 // ------------------------------------------------------------------ coluna alta
@@ -259,5 +257,4 @@ test('coluna alta — pick vê o topo, não o meio', () => {
   assert.ok(result);
   assert.equal(result!.cell.z, 4, 'deveria ver o topo em z=4');
   assert.equal(result!.blockType, 'stone');
-  console.log('✓ coluna alta: z=4 visível, z=0..3 ocultos');
 });
