@@ -622,15 +622,27 @@ export async function createIsoScene(
     snapshotTo(rtA, state.map, camA);
     snapshotTo(rtB, state.map, camB);
 
-    // Pivô de cada quadro: o centro do conteúdo NA TELA. B nasce enquadrado
-    // por settle(), então o dele é o centro do viewport; o de A desloca pelo
-    // pan que o usuário tiver aplicado.
+    // Pivô de cada quadro: o centro VISUAL do conteúdo na tela. B nasce
+    // enquadrado por settle(), então o dele é o centro do viewport; o de A
+    // desloca pelo pan que o usuário tiver aplicado.
+    //
+    // O termo `visualCenterOffsetY` é o que faltava: `centerOn` compensa só
+    // meia altura do LOSANGO (tileHeight/2), mas o sprite desce tileHeight +
+    // cubeHeight abaixo do vértice-âncora — o centro visual do conteúdo fica
+    // meia altura de cubo ABAIXO do ponto calculado. Sem o termo, o pivô
+    // paira ~cubeHeight/2 acima do centro visual e o mapa ORBITA de leve
+    // durante o giro: o conteúdo deriva ~30 px no meio da varredura (medido
+    // em 2026-08-02, zoom 2) e o giro lê como "o mapa não roda em volta do
+    // próprio centro". Os extremos não mudam: em t=0 A está na identidade e
+    // em t=1 B também, então o último quadro da transição continua pixel a
+    // pixel igual ao primeiro quadro parado.
     const centeredA = centerOn(opts.cells, de, w, h, zoom, geom);
+    const visualCenterOffsetY = (cubeGeom.cubeHeight / 2) * zoom;
     const pivotA = {
       x: w / 2 + (camA.panX - centeredA.panX),
-      y: h / 2 + (camA.panY - centeredA.panY),
+      y: h / 2 + (camA.panY - centeredA.panY) + visualCenterOffsetY,
     };
-    const pivotB = { x: w / 2, y: h / 2 };
+    const pivotB = { x: w / 2, y: h / 2 + visualCenterOffsetY };
 
     const layer = new Container();
     const spriteA = new Sprite(rtA);

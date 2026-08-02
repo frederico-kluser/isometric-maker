@@ -65,6 +65,7 @@ import {
   type History,
 } from './map-state.ts';
 import { FALLBACK_BLOCKS, loadPalette } from './blocks-api.ts';
+import { Compass } from '@/components/compass';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -283,7 +284,10 @@ export function MapEditor() {
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
       // Botão do meio ou espaço+arrastar movem a câmera; o esquerdo edita.
+      // Pan durante um giro se perde quando a rotação assenta (o settle() usa
+      // o pan capturado no início) — o mesmo critério do rotateTo e do onWheel.
       if (e.button === 1 || e.shiftKey) {
+        if (sceneRef.current?.isRotating()) return;
         panning.current = { x: e.clientX, y: e.clientY };
         return;
       }
@@ -304,6 +308,10 @@ export function MapEditor() {
   }, []);
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    // Zoom durante um giro se perde quando a rotação assenta: o settle() é
+    // calculado com o zoom capturado no início, e o zoom aplicado no meio
+    // some na volta. Bloquear é o mesmo critério do rotateTo.
+    if (sceneRef.current?.isRotating()) return;
     // Zoom INTEIRO: fracionário borra a arte e desalinha a costura do losango.
     setCamera((c) => {
       const i = ZOOM_STEPS.indexOf(c.zoom as (typeof ZOOM_STEPS)[number]);
@@ -567,6 +575,9 @@ export function MapEditor() {
             onWheel={onWheel}
             onContextMenu={(e) => e.preventDefault()}
           />
+
+          {/* Bússola: mostra para onde a câmera olha e acompanha o giro suave. */}
+          <Compass rotation={camera.rotation} />
 
           {/* Leitura do estado: sem isto, "por que a peça caiu ali?" não tem resposta. */}
           <div className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border border-border bg-card/85 px-3 py-2 text-xs backdrop-blur">
