@@ -20,6 +20,11 @@
  *   8. `texture`: 1 cubo via create-isometric-tile (molde como init_image,
  *      shape 'block', canvas da API → recorte 48×53) + ação de LLM/fallback +
  *      1 animate-with-text-v3; o stub do cubo pago nunca é re-submetido.
+ *   9. Remoção: `deleteWorldBlock` leva o diretório INTEIRO (inclusive nomes
+ *      de formatos antigos), é idempotente, RECUSA qualquer caminho que não
+ *      seja 16 hexadecimais (`..`, `%2e%2e`, separador, NUL) e tira o
+ *      manifesto primeiro, para que uma remoção parcial deixe restos
+ *      invisíveis ao catálogo em vez de bloco listado sem PNG.
  *
  * Execute com: node --test server/world-block.test.ts
  */
@@ -38,6 +43,8 @@ import {
   runWorldBlock,
   readWorldBlockResult,
   listWorldBlocks,
+  deleteWorldBlock,
+  isWorldBlockHash,
   facingPrompt,
   cubePrompt,
   worldBlockHash,
@@ -1395,6 +1402,284 @@ test('listWorldBlocks — [] quando nunca se gerou nada', async () => {
   const dir = tmpDir();
   try {
     assert.deepEqual(await listWorldBlocks(join(dir, 'assets')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ remoção
+
+/**
+ * Seed de um bloco no formato v2 ANTIGO, com nomes de arquivo que o código de
+ * hoje não conhece mais (`view-0.png`, `first-frame.png`). Serve para provar
+ * que a remoção leva o diretório INTEIRO, não uma lista de nomes conhecidos.
+ */
+function seedLegacyBlock(dir: string, hash: string): string[] {
+  const blockPath = join(dir, 'assets', 'world-blocks', hash);
+  mkdirSync(join(blockPath, 'v3'), { recursive: true });
+  const files = [
+    join(blockPath, 'block.json'),
+    join(blockPath, 'view-0.png'),
+    join(blockPath, 'view-1.png'),
+    join(blockPath, 'first-frame.png'),
+    join(blockPath, 'v3', 'north.png'),
+  ];
+  writeFileSync(
+    files[0]!,
+    JSON.stringify({ version: 2, hash, technique: 'chained', faces: [] }),
+  );
+  for (const f of files.slice(1)) writeFileSync(f, 'bytes antigos');
+  return files;
+}
+
+test('isWorldBlockHash aceita 16 hex e recusa tudo o mais', () => {
+  assert.equal(isWorldBlockHash('0123456789abcdef'), true);
+  assert.equal(isWorldBlockHash('0123456789ABCDEF'), true, 'maiúsculas casam (flag i)');
+  for (const bad of [
+    '',
+    '..',
+    '../..',
+    '%2e%2e',
+    '0123456789abcde',        // 15
+    '0123456789abcdef0',      // 17
+    '0123456789abcdeg',       // 'g' não é hex
+    '0123456789abcdef/x',
+    '../0123456789abcdef',
+    '0123456789abcdef\n',     // `$` em JS não aceita \n final sem a flag m
+    '0123456789abcde\0',
+    '0123456789abcdef\0/etc',
+  ]) {
+    assert.equal(isWorldBlockHash(bad), false, `deveria recusar ${JSON.stringify(bad)}`);
+  }
+  assert.equal(isWorldBlockHash(undefined), false);
+  assert.equal(isWorldBlockHash(42), false);
+});
+
+test('deleteWorldBlock RECUSA caminho que não é hash — nada some do disco', async () => {
+  const dir = tmpDir();
+  try {
+    // Um bloco real e um arquivo fora de world-blocks/: as duas coisas que um
+    // DELETE com caminho arbitrário destruiria.
+    const hash = worldBlockHash(baseConfig());
+    seedLegacyBlock(dir, hash);
+    const foraDaArvore = join(dir, 'assets', 'NAO-APAGUE.txt');
+    writeFileSync(foraDaArvore, 'estado do usuário');
+
+    const assetsDir = join(dir, 'assets');
+    for (const evil of [
+      '..',
+      '../..',
+      '../../..',
+      '%2e%2e',
+      '%2e%2e%2f%2e%2e',
+      '..%2f..',
+      `../${hash}`,
+      `${hash}/..`,
+      `${hash}\0`,
+      '/etc',
+      'world-blocks',
+      '.',
+    ]) {
+      await assert.rejects(
+        deleteWorldBlock(assetsDir, evil),
+        (err: unknown) => {
+          assert.ok(
+            err instanceof WorldBlockValidationError,
+            `esperava WorldBlockValidationError para ${JSON.stringify(evil)}, veio ${String(err)}`,
+          );
+          assert.equal(err.code, 'hash-format');
+          return true;
+        },
+        `deleteWorldBlock aceitou ${JSON.stringify(evil)}`,
+      );
+    }
+
+    // Nada foi tocado: nem o bloco legítimo, nem o arquivo vizinho, nem a raiz.
+    assert.equal(existsSync(foraDaArvore), true, 'arquivo fora de world-blocks/ sobreviveu');
+    assert.equal(existsSync(blockFile(dir, hash, 'block.json')), true);
+    assert.equal(existsSync(join(dir, 'assets', 'world-blocks')), true);
+    assert.equal(existsSync(join(dir, 'assets')), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('deleteWorldBlock apaga o diretório INTEIRO e o bloco sai do catálogo', async () => {
+  const dir = tmpDir();
+  try {
+    const result = await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir)),
+    );
+    const hash = result.hash;
+    const blockPath = join(dir, 'assets', 'world-blocks', hash);
+
+    // O que a técnica 'texture' deixa em disco, antes.
+    for (const f of ['block.json', 'base.png', 'spritesheet.png', 'spritesheet.json', 'animation.json']) {
+      assert.equal(existsSync(blockFile(dir, hash, f)), true, `${f} deveria existir antes`);
+    }
+    assert.equal(existsSync(blockFile(dir, hash, 'frames')), true);
+    assert.equal((await listWorldBlocks(join(dir, 'assets'))).length, 1);
+
+    const removal = await deleteWorldBlock(join(dir, 'assets'), hash);
+
+    assert.equal(removal.existed, true);
+    assert.equal(removal.hash, hash);
+    assert.ok(removal.removedFiles >= 5, `contou ${removal.removedFiles} arquivos removidos`);
+    assert.equal(existsSync(blockPath), false, 'o diretório do bloco tem que sumir inteiro');
+    assert.deepEqual(await listWorldBlocks(join(dir, 'assets')), []);
+    assert.equal(await readWorldBlockResult(hash, join(dir, 'assets')), null);
+    // A raiz continua de pé — apagar um bloco não é apagar a coleção.
+    assert.equal(existsSync(join(dir, 'assets', 'world-blocks')), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('deleteWorldBlock leva os formatos v2 antigos, com nomes que este código não conhece mais', async () => {
+  const dir = tmpDir();
+  try {
+    const hash = 'abcdef0123456789';
+    const files = seedLegacyBlock(dir, hash);
+    for (const f of files) assert.equal(existsSync(f), true);
+
+    const removal = await deleteWorldBlock(join(dir, 'assets'), hash);
+
+    assert.equal(removal.existed, true);
+    assert.equal(removal.removedFiles, files.length, 'contou os 5 arquivos, inclusive v3/north.png');
+    for (const f of files) assert.equal(existsSync(f), false, `${f} deveria ter sumido`);
+    assert.equal(existsSync(join(dir, 'assets', 'world-blocks', hash)), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('deleteWorldBlock é IDEMPOTENTE — apagar duas vezes não é erro', async () => {
+  const dir = tmpDir();
+  try {
+    const hash = 'abcdef0123456789';
+    seedLegacyBlock(dir, hash);
+
+    const first = await deleteWorldBlock(join(dir, 'assets'), hash);
+    assert.equal(first.existed, true);
+
+    const second = await deleteWorldBlock(join(dir, 'assets'), hash);
+    assert.equal(second.existed, false, 'a segunda vez responde, não explode');
+    assert.equal(second.removedFiles, 0);
+    assert.equal(second.pendingDiscarded, false);
+
+    // Hash que nunca existiu segue o mesmo caminho — inclusive com assets/
+    // inteiro ausente, que é o estado de uma instalação nova.
+    const virgem = tmpDir();
+    try {
+      const nunca = await deleteWorldBlock(join(virgem, 'assets'), '0000000000000000');
+      assert.equal(nunca.existed, false);
+    } finally {
+      rmSync(virgem, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('deleteWorldBlock toca SÓ o bloco pedido — o irmão fica intacto', async () => {
+  const dir = tmpDir();
+  try {
+    const a = await runWorldBlock(new FakeClient(), baseConfig(), opts(dir));
+    const b = await runWorldBlock(
+      new FakeClient(),
+      { ...baseConfig(), description: 'cobblestone', seed: 9 },
+      opts(dir),
+    );
+    assert.equal((await listWorldBlocks(join(dir, 'assets'))).length, 2);
+
+    await deleteWorldBlock(join(dir, 'assets'), a.hash);
+
+    const list = await listWorldBlocks(join(dir, 'assets'));
+    assert.deepEqual(list.map((x) => x.hash), [b.hash]);
+    assert.equal(existsSync(facePath(dir, b.hash, 'north')), true);
+    // O ledger é da coleção, não do bloco: uma remoção não reescreve histórico
+    // de gasto. O dinheiro saiu e o registro dele continua lá.
+    assert.ok(readLedger(dir).length > 0, 'o ledger sobrevive à remoção');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('deleteWorldBlock avisa quando descarta trabalho JÁ PAGO esperando retomada', async () => {
+  const dir = tmpDir();
+  try {
+    // Bloco cujo cubo foi cobrado e cuja animação ficou pendente: é o estado
+    // que `runWorldBlock` sabe retomar DE GRAÇA pelo stub.
+    const hash = 'abcdef0123456789';
+    const blockPath = join(dir, 'assets', 'world-blocks', hash);
+    mkdirSync(blockPath, { recursive: true });
+    writeFileSync(join(blockPath, 'base.png'), 'cubo pago');
+    writeFileSync(
+      join(blockPath, 'animation.pending.json'),
+      JSON.stringify({ jobId: 'animjob-5' }),
+    );
+
+    const removal = await deleteWorldBlock(join(dir, 'assets'), hash);
+    assert.equal(removal.existed, true);
+    assert.equal(
+      removal.pendingDiscarded,
+      true,
+      'quem chama precisa poder dizer ao usuário que jogou fora algo já pago',
+    );
+
+    // Bloco completo, sem stub nenhum: nada a avisar.
+    const dir2 = tmpDir();
+    try {
+      const done = await withFallbackAction(() =>
+        runWorldBlock(new FakeClient(), textureConfig(), opts(dir2)),
+      );
+      const r2 = await deleteWorldBlock(join(dir2, 'assets'), done.hash);
+      assert.equal(r2.pendingDiscarded, false);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('remoção parcial não deixa o catálogo mostrando bloco sem PNG', async () => {
+  const dir = tmpDir();
+  try {
+    const result = await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir)),
+    );
+    const hash = result.hash;
+    assert.equal((await listWorldBlocks(join(dir, 'assets'))).length, 1);
+
+    // `deleteWorldBlock` tira o manifesto PRIMEIRO justamente para que uma
+    // falha no meio do rm caia neste estado, e não no oposto. Aqui o estado é
+    // reproduzido à mão: manifesto fora, PNGs ainda em disco.
+    rmSync(blockFile(dir, hash, 'block.json'), { force: true });
+    assert.equal(existsSync(blockFile(dir, hash, 'spritesheet.png')), true);
+
+    assert.deepEqual(
+      await listWorldBlocks(join(dir, 'assets')),
+      [],
+      'sem manifesto o bloco some da paleta, mesmo com os PNGs lá',
+    );
+    assert.equal(await readWorldBlockResult(hash, join(dir, 'assets')), null);
+
+    // E o inverso — manifesto de pé, artefato fora — também some do catálogo.
+    const dir2 = tmpDir();
+    try {
+      const r2 = await withFallbackAction(() =>
+        runWorldBlock(new FakeClient(), textureConfig(), opts(dir2)),
+      );
+      rmSync(blockFile(dir2, r2.hash, 'spritesheet.png'), { force: true });
+      assert.deepEqual(await listWorldBlocks(join(dir2, 'assets')), []);
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
+
+    // Chamar a remoção de novo termina o serviço: sobra nada.
+    await deleteWorldBlock(join(dir, 'assets'), hash);
+    assert.equal(existsSync(join(dir, 'assets', 'world-blocks', hash)), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

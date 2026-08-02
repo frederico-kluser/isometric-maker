@@ -19,6 +19,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -41,6 +42,22 @@ const ASSETS_DIR = join(dir, 'assets');
 process.env['CHARACTER_BUILDER_STUDIO_JSON'] = STUDIO_PATH;
 process.env['CHARACTER_BUILDER_ASSETS_DIR'] = ASSETS_DIR;
 delete process.env['PIXELLAB_SECRET'];
+
+/**
+ * O SERVIDOR loga com `console.log` — `api.ts` passa `onLog: (m) =>
+ * console.log(m)` aos módulos de geração, e o guard de custo escreve por ali.
+ * O `node --test` transporta o resultado deste arquivo pelo stdout do processo
+ * filho, num protocolo v8 com prefixo de tamanho: uma escrita crua caindo no
+ * meio de um quadro aborta o arquivo inteiro com "Unable to deserialize cloned
+ * data". E como o log vem de um job em segundo plano, não há hora marcada em
+ * que ele seja seguro.
+ *
+ * Aqui o canal vira stderr, que é fd separado e não passa pelo protocolo. As
+ * mensagens continuam visíveis; o que some é a chance de corromper o stream.
+ */
+console.log = (...args: unknown[]): void => {
+  console.error(...args);
+};
 
 after(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -423,8 +440,11 @@ test('concorrência: duas gerações simultâneas não perdem células nem corro
   assert.equal(s.cells[keyB]?.status, 'falhou', 'a célula B sobreviveu à concorrência');
   assert.equal(s.cells[POSE_KEY]?.status, 'pronto', 'células anteriores intactas');
   assert.equal(s.cells[PECA_KEY]?.status, 'pronto', 'células anteriores intactas');
-
-  console.log('✓ 2 gerações concorrentes: as duas células sobrevivem, JSON íntegro');
+  // Sem `console.log` de encerramento: o `node --test` transporta o resultado
+  // de cada arquivo pelo stdout, num protocolo v8 com prefixo de tamanho, e
+  // uma escrita crua caindo no meio de um quadro aborta o arquivo inteiro com
+  // "Unable to deserialize cloned data". O `✔` do runner já diz o que a linha
+  // dizia. Se precisar imprimir algo, use `t.diagnostic(...)` ou stderr.
 });
 
 // ------------------------------------------------------------------ sprite studio: rotas
@@ -663,4 +683,168 @@ test('characters/import: bundle de kind desconhecido ("config normal") → 400',
   // Nada foi criado nem gravado.
   assert.ok(!readStudioFile().characters.some((c) => c.id === 'config-normal'));
   assert.ok(!existsSync(join(ASSETS_DIR, 'wizard', 'config-normal')));
+});
+
+// ------------------------------------------------------------------ remoção de bloco do mundo
+
+/**
+ * Semeia um bloco 'texture' COMPLETO no assets dir de teste — o formato que
+ * `listWorldBlocks` publica. Nenhuma geração, nenhuma chamada: só disco.
+ */
+function seedWorldBlock(hash: string, description: string): string {
+  const dir = join(ASSETS_DIR, 'world-blocks', hash);
+  mkdirSync(join(dir, 'frames'), { recursive: true });
+  writeFileSync(
+    join(dir, 'block.json'),
+    JSON.stringify({
+      version: 3,
+      hash,
+      technique: 'texture',
+      description,
+      animated: true,
+      frameCount: 4,
+      fps: 8,
+      pingPong: true,
+    }),
+  );
+  writeFileSync(join(dir, 'spritesheet.png'), makePNG(32));
+  writeFileSync(join(dir, 'spritesheet.json'), '{}');
+  writeFileSync(join(dir, 'animation.json'), JSON.stringify({ fps: 8, frameCount: 4 }));
+  writeFileSync(join(dir, 'frames', 'frame_000.png'), makePNG(32));
+  return dir;
+}
+
+async function catalogHashes(): Promise<string[]> {
+  const r = await get('/api/world-blocks');
+  return (r.json['blocks'] as Array<{ hash: string }>).map((b) => b.hash);
+}
+
+test('DELETE /api/world-block/{hash}: apaga o diretório, some do catálogo e é IDEMPOTENTE', async () => {
+  const alvo = '0123456789abcdef';
+  const vizinho = 'fedcba9876543210';
+  const dirAlvo = seedWorldBlock(alvo, 'lava fluindo');
+  const dirVizinho = seedWorldBlock(vizinho, 'grama sobre terra');
+
+  assert.deepEqual((await catalogHashes()).sort(), [alvo, vizinho].sort());
+
+  const r1 = await del(`/api/world-block/${alvo}`, {});
+  assert.equal(r1.status, 200, `esperava 200, veio ${r1.status}`);
+  assert.equal(r1.json['ok'], true);
+  assert.equal(r1.json['existed'], true);
+  assert.equal(r1.json['hash'], alvo);
+  assert.equal(r1.json['removedFiles'], 5);
+  assert.equal(r1.json['pendingDiscarded'], false);
+  assert.equal(existsSync(dirAlvo), false, 'o diretório do bloco tem que sumir');
+  assert.equal(existsSync(dirVizinho), true, 'o vizinho não pode ser tocado');
+  assert.deepEqual(await catalogHashes(), [vizinho]);
+
+  // Segunda vez: 200 do mesmo jeito. Apagar o que já não existe não é erro —
+  // é a mesma regra do DELETE /api/wizard/south/reference.
+  const r2 = await del(`/api/world-block/${alvo}`, {});
+  assert.equal(r2.status, 200, 'DELETE repetido é 200 (idempotente)');
+  assert.equal(r2.json['existed'], false);
+  assert.equal(r2.json['removedFiles'], 0);
+
+  // E o GET do bloco apagado volta a ser "desconhecido", não "pronto".
+  const g = await get(`/api/world-block/${alvo}`);
+  assert.equal(g.status, 200);
+  assert.equal(g.json['status'], 'desconhecido');
+
+  rmSync(dirVizinho, { recursive: true, force: true });
+});
+
+test('DELETE /api/world-block: caminho que não é hash é RECUSADO — nada é apagado', async () => {
+  const alvo = 'aaaabbbbccccdddd';
+  const dirAlvo = seedWorldBlock(alvo, 'pedra');
+  const foraDaArvore = join(ASSETS_DIR, 'NAO-APAGUE.txt');
+  writeFileSync(foraDaArvore, 'estado do usuário');
+
+  // O WHATWG URL NÃO decodifica o pathname: `%2f` continua `%2f` e o segmento
+  // chega inteiro ao handler. É por isso que a regex tem que ser aplicada ao
+  // texto cru — e é ela quem recusa cada um destes.
+  for (const evil of [
+    '%2e%2e%2f%2e%2e',
+    '..%2f..%2fetc',
+    `..%2f${alvo}`,
+    'nao-e-hash',
+    '0123456789abcde',
+    '0123456789abcdefg',
+    `${alvo}%00`,
+    `${alvo}%2f..`,
+  ]) {
+    const r = await del(`/api/world-block/${evil}`, {});
+    assert.equal(r.status, 400, `${evil} deveria ser 400, veio ${r.status}`);
+    assert.equal(r.json['code'], 'hash-format');
+  }
+
+  // Há uma SEGUNDA barreira antes da rota, e ela some com o caminho em vez de
+  // recusá-lo: o parser de URL trata um segmento inteiro igual a `..`, `%2e%2e`
+  // ou `.%2e` (sem distinguir maiúsculas) como "subir um nível" e o remove. O
+  // pathname deixa de bater com o prefixo da rota — 404 de rota desconhecida,
+  // nunca uma remoção.
+  for (const comido of ['%2e%2e', '%2E%2E', '.%2e']) {
+    const r = await del(`/api/world-block/${comido}`, {});
+    assert.equal(r.status, 404, `${comido} deveria morrer antes da rota, veio ${r.status}`);
+  }
+
+  // Traversal cru sai do prefixo /api/ inteiro: o handler nem trata.
+  const res = mockRes();
+  const handled = await handle(
+    mockReq('DELETE', '/api/world-block/../../../../etc/passwd'),
+    res as unknown as ServerResponse,
+  );
+  assert.equal(handled, false, 'traversal cru sai do prefixo /api/ e não é tratado aqui');
+
+  assert.equal(existsSync(foraDaArvore), true, 'arquivo fora de world-blocks/ sobreviveu');
+  assert.equal(existsSync(dirAlvo), true, 'o bloco legítimo sobreviveu');
+  assert.equal(existsSync(join(ASSETS_DIR, 'world-blocks')), true);
+  assert.deepEqual(await catalogHashes(), [alvo]);
+
+  rmSync(dirAlvo, { recursive: true, force: true });
+  rmSync(foraDaArvore, { force: true });
+});
+
+test('DELETE /api/world-block: bloco EM GERAÇÃO → 409, e o bloco continua gerando', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSecret = process.env['PIXELLAB_SECRET'];
+  const originalAnthropic = process.env['ANTHROPIC_API_KEY'];
+  let fetchCalls = 0;
+  // Toda saída de rede destes módulos passa por globalThis.fetch. Aqui ele
+  // vira uma promessa que NUNCA resolve: nada sai da máquina e o job fica
+  // deterministicamente 'gerando' (o AbortSignal.timeout do cliente usa timer
+  // sem ref, então nada disso segura o processo depois do teste).
+  globalThis.fetch = ((): Promise<Response> => {
+    fetchCalls += 1;
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+  process.env['PIXELLAB_SECRET'] = 'fake-token-do-teste';
+  delete process.env['ANTHROPIC_API_KEY'];
+
+  try {
+    const r = await post('/api/world-block', {
+      description: 'lava fluindo devagar',
+      technique: 'texture',
+      seed: 3,
+    });
+    assert.equal(r.status, 202, `esperava 202, veio ${r.status}`);
+    const hash = String(r.json['hash']);
+
+    await sleep(150);
+    assert.ok(fetchCalls > 0, 'o job chegou à submissão e ficou pendurado lá');
+
+    const d = await del(`/api/world-block/${hash}`, {});
+    assert.equal(d.status, 409, `bloco gerando deveria ser 409, veio ${d.status}`);
+    assert.equal(d.json['code'], 'block-generating');
+    assert.match(String(d.json['error']), /gerado agora/);
+    assert.match(String(d.json['error']), /pago/);
+
+    // A recusa não mexeu no estado: o job continua de pé.
+    const g = await get(`/api/world-block/${hash}`);
+    assert.equal(g.json['status'], 'gerando');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSecret === undefined) delete process.env['PIXELLAB_SECRET'];
+    else process.env['PIXELLAB_SECRET'] = originalSecret;
+    if (originalAnthropic !== undefined) process.env['ANTHROPIC_API_KEY'] = originalAnthropic;
+  }
 });
