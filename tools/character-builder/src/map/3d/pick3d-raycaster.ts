@@ -132,7 +132,7 @@ export function pick3d(
     const hitCell: Pick3DCell & { block: string } = {
       x: Math.round(blockPos.x),
       y: Math.round(blockPos.z), // Z do Three.js → Y do mapa
-      z: Math.round(blockPos.y), // Y do Three.js → Z do mapa
+      z: Math.round(blockPos.y - 0.5), // Y do Three.js (desconta offset do centro do BoxGeometry) → Z do mapa
       block: (blockMesh.userData as { blockId?: string }).blockId ?? '',
     };
 
@@ -140,7 +140,7 @@ export function pick3d(
     const placement: Pick3DCell = {
       x: Math.round(blockPos.x + dir.x),
       y: Math.round(blockPos.z + dir.z), // Z do Three.js → Y do mapa
-      z: Math.round(blockPos.y + dir.y), // Y do Three.js → Z do mapa
+      z: Math.round(blockPos.y - 0.5 + dir.y), // Y do Three.js → Z do mapa (desconta offset) → Z do mapa
     };
 
     return { hit: hitCell, placement };

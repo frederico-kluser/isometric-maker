@@ -265,15 +265,13 @@ export function MapEditor3D() {
       } else if (t === 'pintar') {
         if (result.hit) next = paintBlock(current, result.hit, block);
         else next = placeBlock(current, result.placement, block);
+      } else if (t === 'colocar') {
+        // Colocar: usa a posição adjacente exata do raycaster (face normal)
+        // NÃO força o topo da coluna — o bloco vai para a face onde o mouse bateu
+        next = placeBlock(current, result.placement, block);
       } else {
-        // colocar e empilhar
-        const p = result.placement;
-        const colH = mapColumnHeight(current, p.x, p.y);
-        next = placeBlock(
-          current,
-          { x: p.x, y: p.y, z: Math.max(p.z, colH) },
-          block,
-        );
+        // Empilhar: o pickColumnTopRaycaster já ajustou o placement para o topo da coluna
+        next = placeBlock(current, result.placement, block);
       }
       return pushHistory(h, next);
     });
