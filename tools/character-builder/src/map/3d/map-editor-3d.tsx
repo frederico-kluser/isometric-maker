@@ -225,8 +225,8 @@ export function MapEditor3D() {
       previewInvalid,
       highlight: pickState?.hit ?? null,
     });
-    // Atualiza rotação da câmera
-    s3d.setRotation(rotation);
+    // Nota: a rotação da câmera é controlada por animateRotation/rotateTo,
+    // não por este efeito — senão o render queimaria a animação em curso.
   }, [map, rotation, pickState, tool, ready]);
 
   // ---------------------------------------------------------------- ponteiro
@@ -327,18 +327,30 @@ export function MapEditor3D() {
     [],
   );
 
+  // Throttle do wheel: no máximo um passo a cada 80 ms (~12.5 passos/s).
+  // O evento de scroll dispara dezenas de vezes por segundo; sem throttle
+  // cada disparo causa re-render do React, saturando o ciclo.
+  const lastWheelTime = useRef(0);
+
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    setZoom((z) => {
-      const i = ZOOM_STEPS.indexOf(z as (typeof ZOOM_STEPS)[number]);
-      const next =
-        ZOOM_STEPS[
-          Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + (e.deltaY < 0 ? 1 : -1)))
-        ];
-      if (next === undefined) return z;
-      const s3d = scene3dRef.current;
-      if (s3d) s3d.zoom(next);
-      return next;
-    });
+    const now = performance.now();
+    if (now - lastWheelTime.current < 80) return;
+    lastWheelTime.current = now;
+
+    const s3d = scene3dRef.current;
+    const currentZoom = stateRef.current.zoom;
+    const i = ZOOM_STEPS.indexOf(currentZoom as (typeof ZOOM_STEPS)[number]);
+    const delta = e.deltaY < 0 ? 1 : -1;
+    const next =
+      ZOOM_STEPS[
+        Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + delta))
+      ];
+    if (next === undefined || next === currentZoom) return;
+
+    // Aplica na câmera imediatamente (responsivo)
+    s3d?.zoom(next);
+    // Atualiza React para o badge
+    setZoom(next);
   }, []);
 
   // ---------------------------------------------------------------- rotação
@@ -346,7 +358,7 @@ export function MapEditor3D() {
   const rotateTo = useCallback((rot: Rotation) => {
     setRotation(rot);
     setPickState(null);
-    scene3dRef.current?.setRotation(rot);
+    scene3dRef.current?.animateRotation(rot);
   }, []);
 
   const zoomBy = useCallback((delta: number) => {
