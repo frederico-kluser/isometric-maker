@@ -104,6 +104,81 @@ export function canStepUp(
   return true;
 }
 
+// ------------------------------------------------------------------ resolveStepZ
+
+/**
+ * Resolve o `z` depois de um pedido de degrau a partir da célula actual.
+ *
+ * Um degrau precisa de uma célula **vizinha** para onde subir ou descer.
+ * Esta função escolhe a candidata, dando prioridade à direcção do movimento
+ * e caindo nas outras três cardinais a seguir; sem direcção, tenta as quatro
+ * por uma ordem fixa (determinismo).
+ *
+ * Se nenhuma vizinha aceitar o degrau, devolve o `z` de entrada. É por isso
+ * que segurar a tecla de subir no meio do nada não faz o personagem levitar:
+ * a regra é a mesma que valida o degrau, não um incremento cego.
+ *
+ * @param dirX - Componente x da direcção do movimento (0 se parado).
+ * @param dirY - Componente y da direcção do movimento (0 se parado).
+ * @param wantsUp - Botão de subir degrau pressionado.
+ * @param wantsDown - Botão de descer degrau pressionado.
+ */
+export function resolveStepZ(
+  map: CollisionMap,
+  cellX: number,
+  cellY: number,
+  z: number,
+  dirX: number,
+  dirY: number,
+  wantsUp: boolean,
+  wantsDown: boolean,
+): number {
+  if (!wantsUp && !wantsDown) return z;
+
+  const dirs: [number, number][] = [];
+  const cardinalDirs: [number, number][] = [
+    [1, 0], // leste (0°)
+    [0, 1], // norte (90°)
+    [-1, 0], // oeste (180°)
+    [0, -1], // sul (270°)
+  ];
+
+  if (dirX !== 0 || dirY !== 0) {
+    // Prioriza a direcção do input e as direcções próximas.
+    const angle = Math.atan2(dirY, dirX);
+    const octant = Math.round(angle / (Math.PI / 4));
+    const idx = ((octant % 4) + 4) % 4;
+    dirs.push(cardinalDirs[idx]!);
+    for (let i = 1; i < 4; i++) {
+      dirs.push(cardinalDirs[(idx + i) % 4]!);
+    }
+  } else {
+    dirs.push([0, 1], [0, -1], [1, 0], [-1, 0]);
+  }
+
+  if (wantsUp) {
+    for (const [dx, dy] of dirs) {
+      const from = { x: cellX, y: cellY, z };
+      const to = { x: cellX + dx!, y: cellY + dy!, z: z + 1 };
+      if (canStepUp(map, from, to)) {
+        return z + 1;
+      }
+    }
+  }
+
+  if (wantsDown) {
+    for (const [dx, dy] of dirs) {
+      const from = { x: cellX, y: cellY, z };
+      const to = { x: cellX + dx!, y: cellY + dy!, z: z - 1 };
+      if (canStepDown(map, from, to)) {
+        return z - 1;
+      }
+    }
+  }
+
+  return z;
+}
+
 // ------------------------------------------------------------------ canStepDown
 
 /**
