@@ -16,7 +16,7 @@
 import { useSyncExternalStore } from 'react';
 
 /** As telas de primeiro nível. `inicio` é a raiz. */
-export const ROUTES = ['inicio', 'personagem', 'mundo'] as const;
+export const ROUTES = ['inicio', 'personagem', 'mundo', 'mundo3d'] as const;
 export type Route = (typeof ROUTES)[number];
 
 /**
@@ -27,6 +27,7 @@ export const ROUTE_HASH: Record<Route, string> = {
   inicio: '#/',
   personagem: '#/personagem',
   mundo: '#/mundo',
+  mundo3d: '#/mundo3d',
 };
 
 const ROUTE_OF_PATH = new Map<string, Route>(
