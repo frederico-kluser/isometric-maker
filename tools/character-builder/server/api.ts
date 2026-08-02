@@ -58,6 +58,8 @@ import {
 	runWorldBlock,
 	readWorldBlockResult,
 	listWorldBlocks,
+	deleteWorldBlock,
+	isWorldBlockHash,
 	worldBlockHash,
 	validateWorldBlockConfig,
 	WorldBlockValidationError,
@@ -1236,7 +1238,9 @@ export async function handle(
 
 		if (url.pathname.startsWith("/api/world-block/") && req.method === "GET") {
 			const hash = url.pathname.slice("/api/world-block/".length);
-			if (!/^[a-f0-9]{16}$/i.test(hash)) {
+			// A regra do hash mora em world-block.ts (isWorldBlockHash) — uma
+			// fonte só, porque o DELETE abaixo apaga arquivos com base nela.
+			if (!isWorldBlockHash(hash)) {
 				json(res, 404, { error: `bloco do mundo "${hash}" não existe` });
 				return true;
 			}
@@ -1263,6 +1267,52 @@ export async function handle(
 					`não há bloco nem job para "${hash}" — o servidor pode ter reiniciado ` +
 					"durante a geração. Gerar de novo com a mesma configuração reaproveita o disco.",
 			});
+			return true;
+		}
+
+		// Remoção do bloco. Vem DEPOIS do POST exato e não colide com ele nem
+		// com /api/world-blocks (que não tem a barra do prefixo), mas segue a
+		// mesma ordem documentada acima: exato primeiro, prefixado depois.
+		//
+		// Irreversível de propósito e sem lixeira — a confirmação é da tela
+		// (pressionar-e-segurar). O dinheiro da geração já saiu e não volta.
+		if (url.pathname.startsWith("/api/world-block/") && req.method === "DELETE") {
+			const hash = url.pathname.slice("/api/world-block/".length);
+			// 400, não 404: hash malformado é pedido errado, não recurso
+			// ausente — e a resposta tem que ser uma RECUSA visível. `..`, `/`,
+			// `\` e NUL não passam desta linha; o que sobrevive a ela é
+			// literalmente 16 hexadecimais.
+			if (!isWorldBlockHash(hash)) {
+				json(res, 400, {
+					error: `"${hash}" não é hash de bloco: são 16 caracteres hexadecimais. Nada foi apagado.`,
+					code: "hash-format",
+				});
+				return true;
+			}
+
+			// Bloco em geração não se apaga. Dois motivos, os dois sobre
+			// dinheiro: o diretório guarda os stubs (`*.pending.json`,
+			// `v3/character.json`) que são o caminho de volta GRATUITO ao que a
+			// PixelLab já cobrou, e remover arquivos embaixo de runWorldBlock
+			// deixaria o bloco meio gravado. Não há como cancelar o job (o
+			// registro de spawn não tem cancelamento e a chamada remota já
+			// saiu), então recusar é a única resposta honesta.
+			if (jobs.get(`world-block::${hash}`)?.status === "gerando") {
+				json(res, 409, {
+					error:
+						`o bloco "${hash}" está sendo gerado agora — espere terminar para apagar. ` +
+						"A geração já foi cobrada e apagar no meio jogaria fora o caminho de volta ao que foi pago.",
+					code: "block-generating",
+				});
+				return true;
+			}
+
+			const removal = await deleteWorldBlock(ASSETS, hash);
+			// O bloco não existe mais: o registro do job dele também não deve
+			// existir, senão um GET posterior responderia 'falhou' sobre um
+			// hash que não está em lugar nenhum.
+			jobs.delete(`world-block::${hash}`);
+			json(res, 200, { ok: true, ...removal });
 			return true;
 		}
 

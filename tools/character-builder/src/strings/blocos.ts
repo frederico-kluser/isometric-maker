@@ -99,6 +99,31 @@ export const blocos = {
       'cache, e a etiqueta diz de qual veio cada bloco.',
   },
 
+  /**
+   * Remoção de bloco. O texto é deliberadamente sem eufemismo: apagar é
+   * irreversível, o dinheiro da geração já saiu e não volta, e um mapa que já
+   * usava o bloco muda de aparência. Prometer menos do que isso seria a mesma
+   * mentira de interface que o comentário do `semGasto` descreve.
+   */
+  remocao: {
+    acao: 'Apagar',
+    apagando: 'Apagando…',
+    ariaLabel: (descricao: string) =>
+      `Apagar o bloco "${descricao}" — segure para confirmar`,
+    dica:
+      'Segure o botão para apagar. A remoção é definitiva: o bloco sai do disco, ' +
+      'e o dinheiro que a geração custou não volta.',
+    apagado: (descricao: string) => `Bloco "${descricao}" apagado do disco.`,
+    naoExistia: 'Esse bloco já não estava em disco — nada foi apagado.',
+    pendenteDescartado:
+      'Havia trabalho JÁ PAGO esperando retomada neste bloco (stub de tile ou de ' +
+      'animação); ele foi descartado junto e não dá mais para buscá-lo de graça.',
+    avisoMapa:
+      'Um mapa que já tinha este bloco colocado passa a mostrar um cubo procedural ' +
+      'no lugar: o editor de mundo não quebra, mas a aparência muda.',
+    falhou: (motivo: string) => `Não deu para apagar o bloco: ${motivo}`,
+  },
+
   erros: {
     descricaoObrigatoria: 'Escreva a descrição do bloco — o endpoint não gera sem prompt.',
     jobFalhou: 'A geração falhou. Veja o log do servidor.',

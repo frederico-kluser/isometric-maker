@@ -85,9 +85,9 @@
  *     artefato pago (ADR 0023).
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { PixelLabClient, Usage } from '../../pixellab-pipeline/src/api.ts';
 import { PixelLabError, pollJob } from '../../pixellab-pipeline/src/api.ts';
 import { sleep } from '../../pixellab-pipeline/src/util.ts';
@@ -297,7 +297,8 @@ export type WorldBlockErrorCode =
   | 'frame-count-enum'
   | 'fps-range'
   | 'ping-pong-type'
-  | 'enhance-prompt-type';
+  | 'enhance-prompt-type'
+  | 'hash-format';
 
 export class WorldBlockValidationError extends Error {
   readonly code: WorldBlockErrorCode;
@@ -843,7 +844,9 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
   const root = join(assetsDir, 'world-blocks');
   if (!existsSync(root)) return [];
 
-  const { readdir } = await import('node:fs/promises');
+  // readdir vem do import estático do topo (antes era import dinâmico aqui;
+  // com `deleteWorldBlock` usando o mesmo símbolo, dois caminhos para a mesma
+  // função só criariam sombra de escopo).
   const entries = await readdir(root, { withFileTypes: true });
   const out: WorldBlockSummary[] = [];
 
@@ -908,6 +911,128 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
   // Ordem estável: o hash é determinístico, então a paleta não dança entre
   // recargas por causa da ordem do sistema de arquivos.
   return out.sort((a, b) => a.hash.localeCompare(b.hash));
+}
+
+// ---- remoção
+
+/**
+ * Formato do hash de bloco: 16 hexadecimais, exatamente o que
+ * `worldBlockHash` produz. A mesma regra que `GET /api/world-block/{hash}`
+ * usa, repetida aqui de propósito — `deleteWorldBlock` é chamável fora do
+ * HTTP e não pode depender de quem chama ter validado. Uma remoção que aceite
+ * caminho arbitrário apaga a árvore inteira do usuário.
+ *
+ * Em JavaScript, `$` sem a flag `m` casa só o fim REAL da string (não aceita
+ * `\n` final como Perl e Python), então isto também recusa hash com quebra de
+ * linha grudada.
+ */
+const BLOCK_HASH_PATTERN = /^[a-f0-9]{16}$/i;
+
+/** true quando `value` é um hash de bloco (16 hexadecimais) e nada mais. */
+export function isWorldBlockHash(value: unknown): value is string {
+  return typeof value === 'string' && BLOCK_HASH_PATTERN.test(value);
+}
+
+/** O que a remoção de um bloco encontrou e desfez. */
+export interface WorldBlockDeletion {
+  readonly hash: string;
+  /**
+   * true quando o diretório existia antes desta chamada. false NÃO é erro:
+   * a remoção é idempotente, apagar duas vezes responde igual.
+   */
+  readonly existed: boolean;
+  /** Quantos arquivos havia no diretório (recursivo). 0 quando não existia. */
+  readonly removedFiles: number;
+  /**
+   * Havia stub de trabalho JÁ PAGO esperando retomada — `*.pending.json` (o
+   * tile e a animação) ou `v3/character.json` — e ele foi embora junto. Quem
+   * chama tem que dizer isso ao usuário: aquele stub era o caminho de volta
+   * GRATUITO a um artefato que a PixelLab já cobrou.
+   */
+  readonly pendingDiscarded: boolean;
+}
+
+/** Lista recursiva dos arquivos de um diretório. Diretório ilegível conta zero. */
+async function listFilesRecursive(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  const stack: string[] = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined) break;
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = join(current, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else out.push(full);
+    }
+  }
+  return out;
+}
+
+const PENDING_STUB_SUFFIX = '.pending.json';
+
+/**
+ * Apaga o diretório inteiro de um bloco: `block.json`, `base.png`, `frames/`,
+ * `spritesheet.png`/`.json`, `animation.json`, as faces do formato v2
+ * (`north.png` … `west.png`, `source.png`, `v3/`) e qualquer outro arquivo que
+ * esteja lá dentro — inclusive de formatos antigos que este código não conhece
+ * mais.
+ *
+ * **Irreversível, e o dinheiro da geração não volta.** Não há lixeira: a
+ * decisão de confirmar é de quem chama (a tela usa pressionar-e-segurar).
+ *
+ * **Idempotente:** apagar um bloco que já não existe devolve
+ * `existed: false` e não é erro — a segunda tentativa de uma rota DELETE não
+ * pode falhar só por chegar depois da primeira.
+ *
+ * **Parcialidade:** remover uma árvore não é atômico. Por isso o manifesto sai
+ * PRIMEIRO e sozinho: `listWorldBlocks` e `readWorldBlockResult` só enxergam
+ * bloco com `block.json` válido, então uma falha no meio da remoção deixa
+ * restos invisíveis ao catálogo em vez de um bloco listado cujos PNGs sumiram.
+ * A ordem é o que impede a parcialidade de virar peça quebrada na paleta.
+ */
+export async function deleteWorldBlock(
+  assetsDir: string,
+  hash: string,
+): Promise<WorldBlockDeletion> {
+  if (!isWorldBlockHash(hash)) {
+    throw new WorldBlockValidationError(
+      'hash-format',
+      `"${String(hash)}" não é hash de bloco: são 16 caracteres hexadecimais. Nada foi apagado.`,
+    );
+  }
+
+  const dir = blockDir(assetsDir, hash);
+  // Cinto e suspensório. O hash já foi validado, mas a remoção só acontece
+  // DENTRO de world-blocks/ — a regex pode ser afrouxada um dia, e este
+  // recorte é a última linha antes de um `rm -rf` na árvore do usuário.
+  const root = resolve(join(assetsDir, 'world-blocks'));
+  if (!resolve(dir).startsWith(`${root}${sep}`)) {
+    throw new WorldBlockValidationError(
+      'hash-format',
+      `o caminho do bloco "${hash}" cai fora de world-blocks/. Nada foi apagado.`,
+    );
+  }
+
+  if (!existsSync(dir)) {
+    return { hash, existed: false, removedFiles: 0, pendingDiscarded: false };
+  }
+
+  const files = await listFilesRecursive(dir);
+  const pendingDiscarded = files.some(
+    (f) => f.endsWith(PENDING_STUB_SUFFIX) || f === v3StubPath(assetsDir, hash),
+  );
+
+  const manifest = manifestPath(assetsDir, hash);
+  if (existsSync(manifest)) await unlink(manifest);
+  await rm(dir, { recursive: true, force: true });
+
+  return { hash, existed: true, removedFiles: files.length, pendingDiscarded };
 }
 
 // ---- canvas da API × quadro canônico

@@ -11,6 +11,11 @@
  *
  * A montagem e a validação do body ficam no módulo puro ./blocks-body.ts
  * (testado com node --test); aqui é só DOM e coleta de inputs.
+ *
+ * Cada card do catálogo tem um botão de apagar (DELETE /api/world-block/{hash},
+ * em ./delete-block-button.tsx). Apagar é irreversível e o dinheiro da geração
+ * não volta, então o gesto é pressionar-e-segurar e o retorno diz exatamente o
+ * que saiu do disco — inclusive quando junto foi embora trabalho já pago.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { CheckIcon, LoaderCircleIcon, RefreshCwIcon, XIcon } from 'lucide-react';
@@ -40,6 +45,10 @@ import {
   type WorldBlockResult,
   type WorldBlockStatus,
 } from './blocks-body.ts';
+import { DeleteBlockButton, type BlockDeletionReport } from './delete-block-button.tsx';
+
+/** Id único do parágrafo da dica — o `aria-describedby` de cada botão aponta para ele. */
+const REMOVAL_HINT_ID = 'blocos-remocao-dica';
 
 const CLIENT_ERROR_TEXT: Record<BlockErrorCode, string> = {
   'description-missing': SB.erros.descricaoObrigatoria,
@@ -91,6 +100,9 @@ export function BlocksPanel() {
    */
   const [semGasto, setSemGasto] = useState(false);
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
+  /** Retorno da última remoção — o que saiu do disco e o que isso implica. */
+  const [removalNotice, setRemovalNotice] = useState<string | null>(null);
+  const [removalError, setRemovalError] = useState<string | null>(null);
 
   const running = buttonState === 'running';
 
@@ -98,6 +110,29 @@ export function BlocksPanel() {
     void api<{ blocks: CatalogEntry[] }>('world-blocks')
       .then((r) => setCatalog(r.blocks))
       .catch(() => setCatalog([]));
+  };
+
+  /**
+   * Retorno da remoção, sem eufemismo: o que foi apagado, se junto foi embora
+   * trabalho já pago, e o que muda num mapa que já usava o bloco.
+   */
+  const handleDeleted = (report: BlockDeletionReport, description: string): void => {
+    const parts = [
+      report.existed ? SB.remocao.apagado(description) : SB.remocao.naoExistia,
+    ];
+    if (report.pendingDiscarded) parts.push(SB.remocao.pendenteDescartado);
+    if (report.existed) parts.push(SB.remocao.avisoMapa);
+    setRemovalError(null);
+    setRemovalNotice(parts.join(' '));
+    // O bloco apagado não pode continuar no cartão de resultado: a imagem
+    // viraria um 404 na tela.
+    if (result?.hash === report.hash) setResult(null);
+    loadCatalog();
+  };
+
+  const handleRemovalError = (message: string): void => {
+    setRemovalNotice(null);
+    setRemovalError(SB.remocao.falhou(message));
   };
 
   useEffect(loadCatalog, []);
@@ -459,10 +494,36 @@ export function BlocksPanel() {
                           <Badge variant="outline" className="text-[10px]">
                             {SB.catalogo.tecnica[b.technique as 'chained' | 'rotated' | 'texture'] ?? b.technique}
                           </Badge>
+                          <DeleteBlockButton
+                            hash={b.hash}
+                            description={b.description}
+                            hintId={REMOVAL_HINT_ID}
+                            onDeleted={(report) => handleDeleted(report, b.description)}
+                            onError={handleRemovalError}
+                          />
                         </div>
                       );
                     })}
                   </div>
+                  <p id={REMOVAL_HINT_ID} className="mt-3 text-xs text-muted-foreground">
+                    {SB.remocao.dica}
+                  </p>
+                  {removalNotice !== null && (
+                    <p
+                      role="status"
+                      className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs"
+                    >
+                      {removalNotice}
+                    </p>
+                  )}
+                  {removalError !== null && (
+                    <p
+                      role="alert"
+                      className="mt-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                    >
+                      {removalError}
+                    </p>
+                  )}
                   <p className="mt-3 text-xs text-muted-foreground">
                     {SB.catalogo.comparacaoNota}
                   </p>
