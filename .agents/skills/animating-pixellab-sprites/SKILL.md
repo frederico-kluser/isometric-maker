@@ -138,9 +138,38 @@ animations without touching the character or object. Regenerating a single direc
 object animation needs `replace_existing=true` on the object route, otherwise the attempt returns
 **409**.
 
+### World-block animation via `/animate-with-text-v3` (ADR 0032)
+
+World blocks can use a **texture** technique (ADR 0032) instead of the 4-face approach.
+The flow is three stages, all inside `tools/character-builder/server/world-block.ts`:
+
+1. **Base image** — `POST /create-image-pixflux` (synchronous), 48×48 px, top-down view. One
+   generation, no background job. The result is saved as `base.png`.
+
+2. **Action generation** — an LLM (Anthropic API, `claude-haiku-4-5-20251001`) turns the block
+   description into an animation action text. Falls back to keyword matching when the API is
+   unavailable. The fallback yields a different hash → separate cache.
+
+3. **Animation** — `POST /animate-with-text-v3` with `first_frame` (the base image as Base64Image),
+   `action` (the LLM-generated text), and `frame_count` (4, 8, or 16; user-configured).
+   The response is a `background_job_id`, one job for all frames (not per-direction like
+   character animation). Frames arrive in `last_response.images[]` as base64.
+
+The `frame_count` validated against the pixel budget: `48 × 48 × frame_count` stays well
+under the 524,288 ceiling even at 16 frames.
+
+`/animate-with-text-v3` is asynchronous but answers **200** (not 202) — same shape as the
+object creation endpoints. The result shape is `BackgroundJobResponse` with
+`last_response.images[]`.
+
+The spritesheet is a horizontal strip packed as RGBA raw (no sharp dependency) with a
+TexturePacker-format JSON atlas (`animations.anim` → `["frame_000", ...]`). Sidecar
+`animation.json` carries `fps`, `frameCount`, `action`, and `llmGenerated`.
+
 ## References
 
 - `generating-pixellab-characters` — producing the `character_id` this skill animates
 - `composing-pixellab-objects` — the object animation route and its review flow
 - `orchestrating-pixellab-jobs` — one job per direction, and how to collect them
 - `guarding-generation-cost` — why `mode='pro'` needs a recorded decision before it is submitted
+- `docs/adr/0032-textura-animada-unica-abandono-3d.md` — the decision record for the texture technique

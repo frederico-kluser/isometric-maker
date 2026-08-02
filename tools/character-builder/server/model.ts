@@ -571,14 +571,24 @@ export const TILE_UNIT_SIZES = [16, 32] as const;
 export type TileUnitSize = (typeof TILE_UNIT_SIZES)[number];
 
 /**
- * As duas técnicas de derivar as 4 vistas — TODO bloco tem 4 artes distintas
- * (ADR 0029); o que muda é de onde elas saem.
+ * As técnicas de gerar arte para um bloco.
  *
  * 'chained': a norte nasce do molde do cubo e o RESULTADO dela vira o
- * init_image das outras três. 4 gerações de tile.
+ * init_image das outras três. 4 gerações de tile. **(ADR 0029, substituída)**
  * 'rotated': a norte de tile vira reference_image do create-character-v3, que
  * rotaciona para 8 direções; as 4 vistas saem de rotation_urls. 1 tile + 1 v3.
+ * **(ADR 0029, substituída)**
+ * 'texture': UMA textura animada, gerada por create-image-pixflux +
+ * animate-with-text-v3 com ação gerada por LLM. A arte não muda com a
+ * perspectiva da câmera — é um decalque, não um volume. **(ADR 0032)**
  */
-export const BLOCK_TECHNIQUES = ['chained', 'rotated'] as const;
+export const BLOCK_TECHNIQUES = ['chained', 'rotated', 'texture'] as const;
 export type BlockTechnique = (typeof BLOCK_TECHNIQUES)[number];
+
+/** Número de frames de animação — o que o /animate-with-text-v3 aceita. */
+export const ANIMATION_FRAME_COUNTS = [4, 8, 16] as const;
+export type AnimationFrameCount = (typeof ANIMATION_FRAME_COUNTS)[number];
+
+/** FPS padrão para animações de bloco. */
+export const DEFAULT_BLOCK_ANIMATION_FPS = 8;
 

@@ -954,7 +954,7 @@ test('listWorldBlocks só publica bloco COMPLETO do formato v2, em ordem estáve
     );
     assert.equal(list[0]?.technique, 'chained');
     assert.deepEqual(Object.keys(list[0]?.faceUrls ?? {}).sort(), [...BLOCK_FACINGS].sort());
-    assert.match(String(list[0]?.faceUrls.north), /^\/world-blocks\/[a-f0-9]{16}\/north\.png$/);
+    assert.match(String(list[0]?.faceUrls?.north ?? ''), /^\/world-blocks\/[a-f0-9]{16}\/north\.png$/);
 
     // Bloco pela metade sai da paleta: colocá-lo falharia na hora do desenho.
     rmSync(facePath(dir, b.hash, 'south'), { force: true });

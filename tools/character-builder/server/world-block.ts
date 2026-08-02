@@ -91,8 +91,10 @@ import {
   type Rect,
 } from './frame-fit.ts';
 import {
+  ANIMATION_FRAME_COUNTS,
   BLOCK_FACINGS,
   BLOCK_TECHNIQUES,
+  DEFAULT_BLOCK_ANIMATION_FPS,
   DIRECTIONS,
   FACING_LABELS,
   TILE_SHAPES,
@@ -100,6 +102,7 @@ import {
   TILE_SHADINGS,
   TILE_DETAILS,
   TILE_UNIT_SIZES,
+  type AnimationFrameCount,
   type BlockFacing,
   type BlockTechnique,
   type Direction,
@@ -149,10 +152,26 @@ export interface WorldBlockConfig {
   readonly textGuidanceScale?: number;
   /** Seed base; ausente, deriva do hash. */
   readonly seed?: number;
-  /** Como derivar as 4 vistas. Default 'chained'. */
+  /** Como derivar a arte do bloco. Default 'chained'. */
   readonly technique?: BlockTechnique;
   /** `init_image_strength` do spec, 1–999. Omitido usa o default deste módulo. */
   readonly initImageStrength?: number;
+  /**
+   * Número de frames da animação (técnica 'texture' apenas).
+   * 4, 8 ou 16. Default 8. Tem que ser par — é o que o /animate-with-text-v3 aceita.
+   */
+  readonly frameCount?: AnimationFrameCount;
+  /**
+   * Frames por segundo para playback no editor.
+   * Post-processing apenas — nunca custa nada. Default 8.
+   */
+  readonly fps?: number;
+  /**
+   * Ação da animação (técnica 'texture' apenas).
+   * Texto livre descrevendo o movimento, ex.: "water rippling gently".
+   * Ausente: gerado via LLM a partir de `description`.
+   */
+  readonly action?: string;
 }
 
 /**
@@ -242,7 +261,9 @@ export type WorldBlockErrorCode =
   | 'guidance-range'
   | 'seed-range'
   | 'technique-enum'
-  | 'init-strength-range';
+  | 'init-strength-range'
+  | 'frame-count-enum'
+  | 'fps-range';
 
 export class WorldBlockValidationError extends Error {
   readonly code: WorldBlockErrorCode;
@@ -347,6 +368,24 @@ function validate(config: WorldBlockConfig): void {
         `(recebido ${String(config.initImageStrength)}).`,
     );
   }
+  if (
+    config.frameCount !== undefined &&
+    !(ANIMATION_FRAME_COUNTS as readonly number[]).includes(config.frameCount)
+  ) {
+    throw new WorldBlockValidationError(
+      'frame-count-enum',
+      `frameCount inválido: ${String(config.frameCount)}. O spec aceita ${ANIMATION_FRAME_COUNTS.join(', ')}.`,
+    );
+  }
+  if (
+    config.fps !== undefined &&
+    (!Number.isInteger(config.fps) || config.fps < 1 || config.fps > 60)
+  ) {
+    throw new WorldBlockValidationError(
+      'fps-range',
+      `fps fora da faixa: inteiro entre 1 e 60 (recebido ${String(config.fps)}).`,
+    );
+  }
 }
 
 /** Costura de integração para a rota POST /api/world-block. */
@@ -390,19 +429,31 @@ export function facingPrompt(description: string, facing: BlockFacing): string {
  */
 function inputHash(config: WorldBlockConfig): string {
   const geom = BLOCK_GEOMETRY;
+  const technique = config.technique ?? 'chained';
   const h = createHash('sha256');
   h.update(`desc=${config.description}`);
-  h.update(`|shape=${config.shape ?? 'block'}`);
-  h.update(`|tileUnit=${config.tileUnitSize ?? 16}`);
-  h.update(`|outline=${config.outline ?? ''}`);
-  h.update(`|shading=${config.shading ?? ''}`);
-  h.update(`|detail=${config.detail ?? ''}`);
-  h.update(`|guidance=${config.textGuidanceScale ?? 8}`);
+  h.update(`|technique=${technique}`);
   h.update(`|seed=${config.seed ?? ''}`);
-  h.update(`|technique=${config.technique ?? 'chained'}`);
-  h.update(`|initStrength=${config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH}`);
   h.update(`|geom=${geom.tileWidth}x${geom.tileHeight}x${geom.cubeHeight}`);
-  h.update('|views=4');
+
+  if (technique === 'texture') {
+    // A técnica 'texture' inclui frameCount, fps e action — o que define a
+    // animação. shape/outline/shading/detail/guidance/initStrength são do
+    // /create-isometric-tile e não se aplicam aqui.
+    h.update(`|frameCount=${config.frameCount ?? 8}`);
+    h.update(`|fps=${config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS}`);
+    h.update(`|action=${config.action ?? ''}`);
+    h.update('|views=1');
+  } else {
+    h.update(`|shape=${config.shape ?? 'block'}`);
+    h.update(`|tileUnit=${config.tileUnitSize ?? 16}`);
+    h.update(`|outline=${config.outline ?? ''}`);
+    h.update(`|shading=${config.shading ?? ''}`);
+    h.update(`|detail=${config.detail ?? ''}`);
+    h.update(`|guidance=${config.textGuidanceScale ?? 8}`);
+    h.update(`|initStrength=${config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH}`);
+    h.update('|views=4');
+  }
   return h.digest('hex').slice(0, 16);
 }
 
@@ -447,6 +498,33 @@ function v3StubPath(assetsDir: string, hash: string): string {
 /** Stub por tile pendente, pelo mesmo motivo. Apagado quando o PNG chega. */
 function tileStubPath(pngPath: string): string {
   return `${pngPath}.pending.json`;
+}
+
+// ---- paths da técnica 'texture' (ADR 0032)
+
+/** A imagem base (flat, top-down) que vai ser animada. */
+function baseImagePath(assetsDir: string, hash: string): string {
+  return join(blockDir(assetsDir, hash), 'base.png');
+}
+
+/** Spritesheet empacotada dos frames da animação. */
+function spritesheetPath(assetsDir: string, hash: string): string {
+  return join(blockDir(assetsDir, hash), 'spritesheet.png');
+}
+
+/** Atlas JSON (formato TexturePacker/PixiJS) para a spritesheet. */
+function atlasPath(assetsDir: string, hash: string): string {
+  return join(blockDir(assetsDir, hash), 'spritesheet.json');
+}
+
+/** Sidecar com metadados da animação (fps, frameCount, action). */
+function animSidecarPath(assetsDir: string, hash: string): string {
+  return join(blockDir(assetsDir, hash), 'animation.json');
+}
+
+/** Stub da submissão do animate-with-text-v3. */
+function animStubPath(assetsDir: string, hash: string): string {
+  return join(blockDir(assetsDir, hash), 'animation.pending.json');
 }
 
 function manifestPath(assetsDir: string, hash: string): string {
@@ -528,10 +606,10 @@ interface ManifestFace {
  * versão anterior (blocos uniformes, canonização) não é lido: aquele catálogo
  * foi arquivado junto com a feature que o produzia.
  */
-interface WorldBlockManifest {
+interface WorldBlockManifestV2 {
   readonly version: 2;
   readonly hash: string;
-  readonly technique: BlockTechnique;
+  readonly technique: 'chained' | 'rotated';
   readonly shape: TileShape;
   readonly description: string;
   readonly geometry: ManifestGeometry;
@@ -553,6 +631,41 @@ interface WorldBlockManifest {
   readonly v3Mapping?: string;
 }
 
+/**
+ * Manifesto v3 — técnica 'texture' (ADR 0032).
+ *
+ * UMA textura animada, sem faces por vista. A spritesheet contém todos os
+ * frames; o sidecar `animation.json` tem fps e frameCount.
+ */
+interface WorldBlockManifestV3 {
+  readonly version: 3;
+  readonly hash: string;
+  readonly technique: 'texture';
+  readonly description: string;
+  readonly geometry: ManifestGeometry;
+  /** Ação da animação — o texto que foi enviado ao /animate-with-text-v3. */
+  readonly action: string;
+  /** Texto gerado pelo LLM (quando `action` não foi fornecido). */
+  readonly llmGenerated?: boolean;
+  /** Número de frames. */
+  readonly frameCount: number;
+  /** Frames por segundo. */
+  readonly fps: number;
+  /** A imagem base (flat, top-down) que serviu de first_frame. */
+  readonly base?: {
+    readonly seed: number;
+    readonly usage?: ManifestUsage;
+  };
+  /** A submissão do animate-with-text-v3. */
+  readonly animation?: {
+    readonly jobId?: string;
+    readonly seed: number;
+    readonly usage?: ManifestUsage;
+  };
+}
+
+type WorldBlockManifest = WorldBlockManifestV2 | WorldBlockManifestV3;
+
 async function readManifestFile(
   assetsDir: string,
   hash: string,
@@ -561,7 +674,7 @@ async function readManifestFile(
   if (!existsSync(path)) return null;
   try {
     const manifest = JSON.parse(await readFile(path, 'utf8')) as WorldBlockManifest;
-    if (manifest.version !== 2 || manifest.hash !== hash) return null;
+    if (!((manifest.version === 2 || manifest.version === 3) && manifest.hash === hash)) return null;
     return manifest;
   } catch {
     return null;
@@ -581,23 +694,41 @@ export async function readWorldBlockResult(
   assetsDir: string,
 ): Promise<WorldBlockResult | null> {
   const manifest = await readManifestFile(assetsDir, hash);
-  if (!manifest || !Array.isArray(manifest.faces)) return null;
-  if (manifest.technique === 'rotated' && manifest.v3Mapping !== V3_MAPPING_ID) return null;
+  if (!manifest) return null;
 
-  const faces: WorldBlockFace[] = [];
-  for (const f of manifest.faces) {
-    const png = facePngPath(assetsDir, hash, f.facing);
-    if (!existsSync(png)) return null;
-    faces.push({
-      facing: f.facing,
-      seed: f.seed,
-      pngB64: (await readFile(png)).toString('base64'),
-      ...(f.tileId ? { tileId: f.tileId } : {}),
-      ...(f.usage ? { usage: f.usage } : {}),
-    });
+  // v3: textura animada — faces ficam vazias, a spritesheet é o artefato.
+  if (manifest.version === 3 && manifest.technique === 'texture') {
+    if (!existsSync(spritesheetPath(assetsDir, hash))) return null;
+    return {
+      hash,
+      technique: 'texture',
+      faces: [],
+      fromCache: true,
+      generated: 0,
+    };
   }
-  if (faces.length !== BLOCK_FACINGS.length) return null;
-  return { hash, technique: manifest.technique, faces, fromCache: true, generated: 0 };
+
+  // v2: 4 faces
+  if (manifest.version === 2 && Array.isArray(manifest.faces)) {
+    if (manifest.technique === 'rotated' && manifest.v3Mapping !== V3_MAPPING_ID) return null;
+
+    const faces: WorldBlockFace[] = [];
+    for (const f of manifest.faces) {
+      const png = facePngPath(assetsDir, hash, f.facing);
+      if (!existsSync(png)) return null;
+      faces.push({
+        facing: f.facing,
+        seed: f.seed,
+        pngB64: (await readFile(png)).toString('base64'),
+        ...(f.tileId ? { tileId: f.tileId } : {}),
+        ...(f.usage ? { usage: f.usage } : {}),
+      });
+    }
+    if (faces.length !== BLOCK_FACINGS.length) return null;
+    return { hash, technique: manifest.technique, faces, fromCache: true, generated: 0 };
+  }
+
+  return null;
 }
 
 /** Uma entrada do catálogo lido por GET /api/world-blocks. */
@@ -608,14 +739,22 @@ export interface WorldBlockSummary {
   readonly technique: BlockTechnique;
   /** Projeção em que o bloco está desenhado. */
   readonly geometry: ManifestGeometry;
-  /** Face → caminho público servido pela API do estúdio. */
-  readonly faceUrls: Readonly<Record<BlockFacing, string>>;
+  /** Face → caminho público (v2: 4 faces). Ausente em v3 (texture). */
+  readonly faceUrls?: Readonly<Record<BlockFacing, string>>;
+  /** Caminho da spritesheet (v3: texture). Ausente em v2. */
+  readonly spritesheetUrl?: string;
+  /** Caminho do sidecar de animação (v3: texture). */
+  readonly animationUrl?: string;
+  /** Número de frames (v3: texture). */
+  readonly frameCount?: number;
+  /** FPS da animação (v3: texture). */
+  readonly fps?: number;
 }
 
 /**
  * Catálogo dos blocos completos em disco — é daqui que o map-builder monta a
- * paleta. Só entram blocos com manifesto v2 E as quatro faces gravadas: um
- * bloco pela metade na paleta seria uma peça que falha ao ser colocada.
+ * paleta. Só entram blocos com manifesto completo: v2 com as 4 faces ou v3 com
+ * a spritesheet.
  */
 export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSummary[]> {
   const root = join(assetsDir, 'world-blocks');
@@ -630,20 +769,38 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
     const hash = e.name;
     const manifest = await readManifestFile(assetsDir, hash);
     if (!manifest) continue;
-    if (!BLOCK_FACINGS.every((f) => existsSync(facePngPath(assetsDir, hash, f)))) continue;
 
-    const faceUrls = Object.fromEntries(
-      BLOCK_FACINGS.map((f) => [f, `/world-blocks/${hash}/${f}.png`]),
-    ) as Record<BlockFacing, string>;
+    if (manifest.version === 3 && manifest.technique === 'texture') {
+      if (!existsSync(spritesheetPath(assetsDir, hash))) continue;
+      out.push({
+        hash,
+        description: manifest.description,
+        shape: 'block', // textura plana, não tem shape 3D
+        technique: 'texture',
+        geometry: MANIFEST_GEOMETRY,
+        spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
+        animationUrl: `/world-blocks/${hash}/animation.json`,
+        frameCount: manifest.frameCount,
+        fps: manifest.fps,
+      });
+      continue;
+    }
 
-    out.push({
-      hash,
-      description: manifest.description,
-      shape: manifest.shape,
-      technique: manifest.technique,
-      geometry: manifest.geometry ?? MANIFEST_GEOMETRY,
-      faceUrls,
-    });
+    if (manifest.version === 2) {
+      if (!BLOCK_FACINGS.every((f) => existsSync(facePngPath(assetsDir, hash, f)))) continue;
+      const faceUrls = Object.fromEntries(
+        BLOCK_FACINGS.map((f) => [f, `/world-blocks/${hash}/${f}.png`]),
+      ) as Record<BlockFacing, string>;
+
+      out.push({
+        hash,
+        description: manifest.description,
+        shape: manifest.shape,
+        technique: manifest.technique,
+        geometry: manifest.geometry ?? MANIFEST_GEOMETRY,
+        faceUrls,
+      });
+    }
   }
 
   // Ordem estável: o hash é determinístico, então a paleta não dança entre
@@ -868,6 +1025,266 @@ function deriveFacesFromV3(pngs: readonly Buffer[]): Buffer[] {
     }
     return encodePngFromRgba(out, w, h);
   });
+}
+
+// ---- geração de ação da animação (técnica 'texture')
+
+/**
+ * Mapeamento de palavras-chave para ações de animação — fallback quando o LLM
+ * não está disponível.
+ *
+ * É heurística, declarada como tal. A ação gerada é o que vai no campo `action`
+ * do /animate-with-text-v3.
+ */
+const ACTION_FALLBACK: ReadonlyArray<[RegExp, string]> = [
+  [/\b(water|sea|ocean|river|lake|pond|stream)\b/i, 'water rippling and flowing gently with subtle light reflections'],
+  [/\b(lava|magma|fire|flame|burning)\b/i, 'lava bubbling and glowing with slow viscous movement and flickering embers'],
+  [/\b(grass|turf|lawn|meadow|field)\b/i, 'grass swaying softly in a gentle breeze with subtle color variations'],
+  [/\b(leaves|leaf|foliage|bush|hedge|tree)\b/i, 'leaves rustling and swaying gently with dappled light'],
+  [/\b(stone|rock|cobble|granite|brick|wall)\b/i, 'stone surface with subtle shimmer of mineral veins and gentle light play'],
+  [/\b(wood|plank|timber|log|crate)\b/i, 'wood grain with subtle shifting highlights and gentle warm tones'],
+  [/\b(metal|iron|steel|copper|gold|silver)\b/i, 'metallic surface gleaming with subtle reflected light and gentle sheen'],
+  [/\b(ice|frost|frozen|crystal)\b/i, 'ice crystals shimmering with slow subtle light refraction and cold mist'],
+  [/\b(sand|desert|dune)\b/i, 'sand shifting subtly with tiny grain movements and warm light variations'],
+  [/\b(dirt|soil|mud|earth)\b/i, 'earth surface with subtle texture variations and small particles shifting'],
+  [/\b(cloud|sky|mist|fog)\b/i, 'clouds drifting slowly with soft wisps of vapor and gentle light changes'],
+  [/\b(magic|arcane|spell|enchanted)\b/i, 'magical energy pulsating gently with subtle sparkles and ethereal glow'],
+  [/\b(snow|winter)\b/i, 'snow sparkling gently with subtle light reflection and soft drifting particles'],
+];
+
+function fallbackAction(description: string): string {
+  for (const [re, action] of ACTION_FALLBACK) {
+    if (re.test(description)) return action;
+  }
+  return 'subtle ambient motion with gentle light variations and soft texture shimmer';
+}
+
+/**
+ * Gera o texto de ação da animação via LLM.
+ *
+ * Chama a Anthropic API com uma chave do ambiente (`ANTHROPIC_API_KEY`).
+ * Em caso de falha (sem chave, sem rede, erro da API), cai no fallback
+ * determinístico — a ação de fallback entra no hash do bloco, então o
+ * cache é separado e o bloco pode ser regerado com LLM quando disponível.
+ */
+async function generateActionViaLlm(
+  description: string,
+  onLog?: (m: string) => void,
+): Promise<{ action: string; llmGenerated: boolean }> {
+  const apiKey = process.env['ANTHROPIC_API_KEY'];
+  if (!apiKey) {
+    onLog?.('[world-block] ANTHROPIC_API_KEY não definida — usando fallback para ação da animação.');
+    return { action: fallbackAction(description), llmGenerated: false };
+  }
+
+  try {
+    const prompt = [
+      'Given a block described as:',
+      `"${description}"`,
+      '',
+      'Write a short animation action for a pixel-art sprite animation API.',
+      'Describe subtle ambient motion appropriate for this material.',
+      'Keep it under 200 characters.',
+      'Respond with ONLY the action text, no explanation, no quotes.',
+    ].join('\n');
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        temperature: 0.7,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      onLog?.(`[world-block] LLM respondeu ${res.status} — usando fallback. ${errText.slice(0, 120)}`);
+      return { action: fallbackAction(description), llmGenerated: false };
+    }
+
+    const body = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    const text = body.content?.find((c) => c.type === 'text')?.text?.trim();
+    if (!text || text.length === 0) {
+      onLog?.('[world-block] LLM devolveu resposta vazia — usando fallback.');
+      return { action: fallbackAction(description), llmGenerated: false };
+    }
+
+    // Limpa formatação residual que o LLM possa ter incluído
+    const clean = text.replace(/^["']|["']$/g, '').replace(/\n+/g, ' ').trim();
+    onLog?.(`[world-block] ação gerada por LLM: "${clean.slice(0, 80)}${clean.length > 80 ? '…' : ''}"`);
+    return { action: clean.slice(0, 500), llmGenerated: true };
+  } catch (err) {
+    onLog?.(
+      `[world-block] falha ao chamar LLM: ${err instanceof Error ? err.message : String(err)} — usando fallback.`,
+    );
+    return { action: fallbackAction(description), llmGenerated: false };
+  }
+}
+
+// ---- geração de imagem base (pixflux, técnica 'texture')
+
+interface PixfluxResponse {
+  readonly image?: { readonly base64?: string };
+  readonly usage?: Usage | null;
+}
+
+/**
+ * Gera uma imagem plana do material via create-image-pixflux.
+ *
+ * Síncrono, sem job — o pixflux é o modelo mais direto da PixelLab. A imagem
+ * volta em 48×48, top-down, e serve como `first_frame` do animate-with-text-v3.
+ */
+async function generateBaseImage(
+  client: PixelLabClient,
+  description: string,
+  seed: number,
+  onLog?: (m: string) => void,
+): Promise<{ b64: string; usage?: Usage | null }> {
+  const size = 48; // Múltiplo de 4, compatível com o pixel budget da animação
+  const params: Record<string, unknown> = {
+    description: `${description}, top-down view, flat surface texture, pixel art`,
+    image_size: { width: size, height: size },
+    view: 'high top-down',
+    no_background: false,
+    seed,
+  };
+
+  const res = await client.submit<PixfluxResponse>('create-image-pixflux', params);
+
+  if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+  const b64 = res.data?.image?.base64;
+  if (!b64) throw new Error('create-image-pixflux não devolveu imagem');
+
+  const png = Buffer.from(b64, 'base64');
+  onLog?.(`[world-block] imagem base gerada via pixflux (${size}×${size}, ${png.length} bytes)`);
+  return { b64, usage: res.usage ?? null };
+}
+
+// ---- empacotamento de spritesheet (técnica 'texture')
+
+interface AnimSidecar {
+  readonly fps: number;
+  readonly frameCount: number;
+  readonly action: string;
+  readonly llmGenerated?: boolean;
+}
+
+/**
+ * Escreve os frames de animação como PNGs individuais e um atlas JSON no
+ * formato PixiJS (TexturePacker-compatible).
+ *
+ * Sem dependência de sharp: os frames já chegam como PNGs prontos da API.
+ * A "spritesheet" é uma tira horizontal montada copiando os buffers PNG
+ * decodificados como RGBA cru.
+ */
+async function packSpritesheet(
+  assetsDir: string,
+  hash: string,
+  frames: readonly Buffer[],
+  sidecar: AnimSidecar,
+  onLog?: (m: string) => void,
+): Promise<void> {
+  if (frames.length === 0) throw new Error('sem frames para empacotar');
+
+  // Salva frames individuais
+  const framesDir = join(blockDir(assetsDir, hash), 'frames');
+  await mkdir(framesDir, { recursive: true });
+
+  const frameWidth = 48;
+  const frameHeight = 48;
+
+  // Decodifica frames para RGBA cru (são PNGs)
+  const decoded: Array<{ width: number; height: number; rgba: Buffer }> = [];
+  for (let i = 0; i < frames.length; i++) {
+    const png = frames[i]!;
+    await writeFile(join(framesDir, `frame_${String(i).toString().padStart(3, '0')}.png`), png);
+    try {
+      const img = decode(png);
+      decoded.push(img);
+    } catch {
+      // Fallback: frame não é PNG válido, tenta como RGBA cru
+      if (png.length === frameWidth * frameHeight * 4) {
+        decoded.push({ width: frameWidth, height: frameHeight, rgba: png });
+      } else {
+        throw new Error(`frame ${i} não é PNG nem RGBA cru de ${frameWidth}×${frameHeight}`);
+      }
+    }
+  }
+
+  // Monta tira horizontal como RGBA cru
+  const totalWidth = frameWidth * frames.length;
+  const totalHeight = frameHeight;
+  const sheetRgba = Buffer.alloc(totalWidth * totalHeight * 4);
+
+  for (let i = 0; i < decoded.length; i++) {
+    const img = decoded[i]!;
+    for (let y = 0; y < frameHeight; y++) {
+      const srcOff = y * frameWidth * 4;
+      const dstOff = (y * totalWidth + i * frameWidth) * 4;
+      img.rgba.copy(sheetRgba, dstOff, srcOff, srcOff + frameWidth * 4);
+    }
+  }
+
+  // Codifica a spritesheet como PNG
+  const sheetPng = encodePngFromRgba(sheetRgba, totalWidth, totalHeight);
+  await writeFile(spritesheetPath(assetsDir, hash), sheetPng);
+
+  // Atlas JSON (formato TexturePacker)
+  const atlasFrames: Record<string, {
+    frame: { x: number; y: number; w: number; h: number };
+    rotated: boolean;
+    trimmed: boolean;
+    spriteSourceSize: { x: number; y: number; w: number; h: number };
+    sourceSize: { w: number; h: number };
+  }> = {};
+
+  const animFrames: string[] = [];
+  for (let i = 0; i < frames.length; i++) {
+    const name = `frame_${String(i).toString().padStart(3, '0')}`;
+    animFrames.push(name);
+    atlasFrames[name] = {
+      frame: { x: i * frameWidth, y: 0, w: frameWidth, h: frameHeight },
+      rotated: false,
+      trimmed: false,
+      spriteSourceSize: { x: 0, y: 0, w: frameWidth, h: frameHeight },
+      sourceSize: { w: frameWidth, h: frameHeight },
+    };
+  }
+
+  const atlas = {
+    frames: atlasFrames,
+    meta: {
+      app: 'isometric-maker',
+      version: '1.0',
+      image: 'spritesheet.png',
+      format: 'RGBA8888',
+      size: { w: totalWidth, h: totalHeight },
+      scale: '1',
+    },
+    animations: {
+      anim: animFrames,
+    },
+  };
+
+  await writeFile(atlasPath(assetsDir, hash), `${JSON.stringify(atlas, null, 2)}\n`);
+  await writeFile(
+    animSidecarPath(assetsDir, hash),
+    `${JSON.stringify(sidecar, null, 2)}\n`,
+  );
+
+  onLog?.(
+    `[world-block] spritesheet empacotada: ${totalWidth}×${totalHeight}, ` +
+      `${frames.length} frames, ${sidecar.fps} fps`,
+  );
 }
 
 // ---- execução
@@ -1099,9 +1516,13 @@ export async function runWorldBlock(
   );
 
   let faces: WorldBlockFace[];
-  let sourceRecord: WorldBlockManifest['source'];
-  let characterRecord: WorldBlockManifest['character'];
+  let sourceRecord: WorldBlockManifestV2['source'];
+  let characterRecord: WorldBlockManifestV2['character'];
   let manifestDirty = false;
+  // Técnica 'texture': variáveis usadas no manifesto v3.
+  let textureBaseUsage: Usage | null | undefined;
+  let textureAnimJobId: string | undefined;
+  let textureAnimUsage: Usage | null | undefined;
 
   if (technique === 'chained') {
     // ---- molde encadeado: norte nasce do molde; o resultado é o molde das outras.
@@ -1188,6 +1609,188 @@ export async function runWorldBlock(
       }),
     );
     faces = [north, ...rest];
+  } else if (technique === 'texture') {
+    // ---- textura animada: 1 pixflux + LLM + 1 animate-with-text-v3 (ADR 0032).
+    const frameCount = config.frameCount ?? 8;
+    const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
+    const basePath = baseImagePath(opts.assetsDir, hash);
+    const sheetPath = spritesheetPath(opts.assetsDir, hash);
+    const stubPath = animStubPath(opts.assetsDir, hash);
+
+    interface AnimStub {
+      readonly jobId: string;
+      readonly seed: number;
+      readonly frameCount: number;
+    }
+
+    let baseSeedNum = base + 1;
+    let actionText: string;
+    let llmGenerated = false;
+
+    // 1. Imagem base (pixflux) — ou cache.
+    if (!existsSync(basePath)) {
+      const pixfluxEstimate = estimateByArea(
+        COST_TABLE['create-image-pixflux'],
+        48 * 48,
+      );
+      logGuard(
+        'create-image-pixflux (1× imagem base plana; preço estimado)',
+        guardFor(pixfluxEstimate, pixfluxEstimate.point),
+        opts.onLog,
+      );
+
+      const baseImg = await generateBaseImage(
+        client,
+        config.description,
+        baseSeedNum,
+        opts.onLog,
+      );
+      await writeFile(basePath, Buffer.from(baseImg.b64, 'base64'));
+      textureBaseUsage = baseImg.usage;
+      generated += 1;
+      manifestDirty = true;
+
+      appendLedger(opts.ledgerPath, {
+        at: new Date().toISOString(),
+        endpoint: 'create-image-pixflux',
+        lab: true,
+        kind: 'world-block',
+        hash,
+        technique,
+        seed: baseSeedNum,
+        usd: baseImg.usage?.usd ?? null,
+        generations: baseImg.usage?.generations ?? null,
+        unit: baseImg.usage?.type ?? 'unknown',
+      });
+    } else {
+      opts.onLog?.('[world-block] imagem base já existe. Sem chamada.');
+    }
+
+    // 2. Ação da animação — LLM ou config explícita.
+    if (config.action !== undefined && config.action.trim().length > 0) {
+      actionText = config.action.trim();
+      llmGenerated = false;
+    } else {
+      const result = await generateActionViaLlm(config.description, opts.onLog);
+      actionText = result.action;
+      llmGenerated = result.llmGenerated;
+    }
+
+    // 3. Animação (animate-with-text-v3) — ou retomada.
+    if (!existsSync(sheetPath)) {
+      let animStub: AnimStub | null = null;
+      if (existsSync(stubPath)) {
+        try {
+          animStub = JSON.parse(await readFile(stubPath, 'utf8')) as AnimStub;
+        } catch { animStub = null; }
+      }
+
+      if (animStub?.jobId) {
+        opts.onLog?.(
+          `[world-block] retomando animação já paga job=${animStub.jobId} — nenhuma submissão nova.`,
+        );
+        textureAnimJobId = animStub.jobId;
+        baseSeedNum = animStub.seed;
+      } else {
+        const animEstimate = estimateByArea(
+          COST_TABLE['animate-with-text-v3'],
+          48 * 48,
+        );
+        logGuard(
+          `animate-with-text-v3 (${frameCount} frames; preço estimado)`,
+          guardFor(animEstimate, animEstimate.point),
+          opts.onLog,
+        );
+
+        const baseB64 = (await readFile(basePath)).toString('base64');
+        const animSeed = baseSeedNum + 1;
+        const animParams: Record<string, unknown> = {
+          first_frame: asBase64Image(baseB64),
+          action: actionText,
+          frame_count: frameCount,
+          seed: animSeed,
+        };
+
+        const res = await client.submit<{ background_job_id?: string; usage?: Usage | null }>(
+          'animate-with-text-v3',
+          animParams,
+        );
+        generated += 1;
+
+        if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+        textureAnimUsage = res.usage;
+        const jobId = res.data?.background_job_id;
+        if (!jobId) throw new Error('animate-with-text-v3 não devolveu background_job_id');
+        textureAnimJobId = jobId;
+        baseSeedNum = animSeed;
+        manifestDirty = true;
+
+        appendLedger(opts.ledgerPath, {
+          at: new Date().toISOString(),
+          endpoint: 'animate-with-text-v3',
+          lab: true,
+          kind: 'world-block',
+          hash,
+          technique,
+          seed: animSeed,
+          jobId,
+          usd: res.usage?.usd ?? null,
+          generations: res.usage?.generations ?? null,
+          unit: res.usage?.type ?? 'unknown',
+        });
+
+        const stub: AnimStub = { jobId, seed: animSeed, frameCount };
+        await writeFile(stubPath, `${JSON.stringify(stub)}\n`);
+      }
+
+      // Poll + download frames
+      const jobIdForPoll = textureAnimJobId;
+      if (!jobIdForPoll) throw new Error('animate-with-text-v3: jobId ausente');
+      const polled = await pollJob(client, jobIdForPoll, { timeoutMs: 600_000 });
+      if (!polled.ok) {
+        throw new Error(
+          polled.reason === 'timeout'
+            ? 'tempo esgotado aguardando animate-with-text-v3'
+            : (polled.detail ?? 'animate-with-text-v3 falhou'),
+        );
+      }
+
+      const lastResp = polled.job.last_response as
+        | { images?: Array<{ base64?: string }> }
+        | undefined;
+      const images = lastResp?.images;
+      if (!images || images.length === 0) {
+        throw new Error('animate-with-text-v3 concluiu mas não devolveu frames');
+      }
+
+      const frames: Buffer[] = [];
+      for (const img of images) {
+        const fb64 = img.base64;
+        if (!fb64) continue;
+        frames.push(Buffer.from(fb64, 'base64'));
+      }
+
+      if (frames.length === 0) {
+        throw new Error('animate-with-text-v3: nenhum frame com base64');
+      }
+
+      opts.onLog?.(`[world-block] ${frames.length} frames baixados da animação.`);
+
+      await packSpritesheet(opts.assetsDir, hash, frames, {
+        fps,
+        frameCount,
+        action: actionText,
+        llmGenerated,
+      }, opts.onLog);
+
+      await unlink(stubPath).catch(() => {});
+    } else {
+      opts.onLog?.('[world-block] spritesheet já existe. Sem chamada.');
+    }
+
+    faces = [];
+    sourceRecord = undefined;
+    characterRecord = undefined;
   } else {
     // ---- rotate via v3: 1 tile (source) + 1 v3 (8 direções) + derivação local.
     const sourcePath = sourcePngPath(opts.assetsDir, hash);
@@ -1199,7 +1802,8 @@ export async function runWorldBlock(
 
     // Rederivar também quando o mapeamento mudou desde a última derivação —
     // é o que torna real a promessa de "trocar leste↔oeste corrige tudo".
-    const mappingChanged = prev !== null && prev.v3Mapping !== V3_MAPPING_ID;
+    const prevV2 = prev?.version === 2 ? (prev as WorldBlockManifestV2) : null;
+    const mappingChanged = prevV2 !== null && prevV2.v3Mapping !== V3_MAPPING_ID;
     const needDerive = missingFaces.length > 0 || mappingChanged;
 
     let v3Stub: V3Stub | null = null;
@@ -1215,11 +1819,11 @@ export async function runWorldBlock(
     }
     // O manifesto anterior também é caminho de volta: um personagem já pago
     // reentrega rotation_urls de graça, mesmo sem stub.
-    if (v3Stub === null && prev?.character?.id) {
+    if (v3Stub === null && prevV2?.character?.id) {
       v3Stub = {
-        characterId: prev.character.id,
-        jobId: prev.character.jobId ?? null,
-        seed: prev.character.seed,
+        characterId: prevV2.character.id,
+        jobId: prevV2.character.jobId ?? null,
+        seed: prevV2.character.seed,
       };
     }
 
@@ -1402,7 +2006,7 @@ export async function runWorldBlock(
       // Na retomada o usage da submissão original mora no manifesto anterior —
       // sobrescrevê-lo com um registro sem usage apagaria o que foi pago.
       const prevUsage =
-        prev?.character?.id === characterId ? prev.character.usage : undefined;
+        prevV2?.character?.id === characterId ? prevV2.character.usage : undefined;
       characterRecord = {
         id: characterId,
         ...(jobId ? { jobId } : {}),
@@ -1461,38 +2065,87 @@ export async function runWorldBlock(
   const fromCache = generated === 0;
 
   // Manifesto por último: é ele que distingue "bloco completo" de "execução
-  // interrompida" para readWorldBlockResult. A escrita FUNDE com o manifesto
-  // anterior: face que esta execução não regenerou herda tileId/usage/seed de
-  // antes, e source/character nunca somem por uma retomada parcial.
+  // interrompida" para readWorldBlockResult.
   if (!fromCache || manifestDirty || prev === null) {
-    const mergedFaces: ManifestFace[] = faces.map((f) => {
-      const prevFace = prev?.faces?.find?.((p) => p.facing === f.facing);
-      if (!fresh.has(f.facing) && prevFace) return prevFace;
-      return {
-        facing: f.facing,
-        seed: f.seed,
-        ...(f.tileId ? { tileId: f.tileId } : {}),
-        ...(f.usage ? { usage: f.usage } : {}),
+    if (technique === 'texture') {
+      // Manifesto v3 — textura animada (ADR 0032).
+      const frameCount = config.frameCount ?? 8;
+      const fps = config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS;
+
+      // Recupera action/llmGenerated do sidecar se a spritesheet já existia.
+      let actionText = config.action ?? '';
+      let llmGenerated = false;
+      if (existsSync(animSidecarPath(opts.assetsDir, hash))) {
+        try {
+          const sc = JSON.parse(await readFile(animSidecarPath(opts.assetsDir, hash), 'utf8')) as AnimSidecar;
+          actionText = sc.action;
+          llmGenerated = sc.llmGenerated ?? false;
+        } catch { /* mantém defaults */ }
+      }
+
+      // Recupera usage da base image do ledger — o manifesto anterior.
+      const prevV3 = prev?.version === 3 && prev.technique === 'texture' ? prev : null;
+
+      const manifestV3: WorldBlockManifestV3 = {
+        version: 3,
+        hash,
+        technique: 'texture',
+        description: config.description,
+        geometry: MANIFEST_GEOMETRY,
+        action: actionText,
+        ...(llmGenerated ? { llmGenerated } : {}),
+        frameCount,
+        fps,
+        ...(textureBaseUsage || prevV3?.base?.usage
+          ? { base: { seed: base + 1, ...(textureBaseUsage ? { usage: textureBaseUsage } : {}), ...(prevV3?.base?.usage && !textureBaseUsage ? { usage: prevV3.base.usage } : {}) } }
+          : {}),
+        ...(textureAnimJobId || prevV3?.animation?.jobId
+          ? {
+              animation: {
+                ...(textureAnimJobId ? { jobId: textureAnimJobId } : {}),
+                ...(prevV3?.animation?.jobId && !textureAnimJobId ? { jobId: prevV3.animation.jobId } : {}),
+                seed: base + 2,
+                ...(textureAnimUsage ? { usage: textureAnimUsage } : {}),
+                ...(prevV3?.animation?.usage && !textureAnimUsage ? { usage: prevV3.animation.usage } : {}),
+              },
+            }
+          : {}),
       };
-    });
-    const mergedSource = sourceRecord ?? prev?.source;
-    const mergedCharacter = characterRecord ?? prev?.character;
-    const manifest: WorldBlockManifest = {
-      version: 2,
-      hash,
-      technique,
-      shape,
-      description: config.description,
-      geometry: MANIFEST_GEOMETRY,
-      faces: mergedFaces,
-      ...(mergedSource ? { source: mergedSource } : {}),
-      ...(mergedCharacter ? { character: mergedCharacter } : {}),
-      ...(technique === 'rotated' ? { v3Mapping: V3_MAPPING_ID } : {}),
-    };
-    await writeFile(
-      manifestPath(opts.assetsDir, hash),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
+      await writeFile(
+        manifestPath(opts.assetsDir, hash),
+        `${JSON.stringify(manifestV3, null, 2)}\n`,
+      );
+    } else {
+      // Manifesto v2 — 4 faces (ADR 0029). FUNDE com o manifesto anterior.
+      const mergedFaces: ManifestFace[] = faces.map((f) => {
+        const prevFace = (prev as WorldBlockManifestV2 | null)?.faces?.find?.((p) => p.facing === f.facing);
+        if (!fresh.has(f.facing) && prevFace) return prevFace;
+        return {
+          facing: f.facing,
+          seed: f.seed,
+          ...(f.tileId ? { tileId: f.tileId } : {}),
+          ...(f.usage ? { usage: f.usage } : {}),
+        };
+      });
+      const mergedSource = sourceRecord ?? (prev as WorldBlockManifestV2 | null)?.source;
+      const mergedCharacter = characterRecord ?? (prev as WorldBlockManifestV2 | null)?.character;
+      const manifestV2: WorldBlockManifestV2 = {
+        version: 2,
+        hash,
+        technique: technique as 'chained' | 'rotated',
+        shape,
+        description: config.description,
+        geometry: MANIFEST_GEOMETRY,
+        faces: mergedFaces,
+        ...(mergedSource ? { source: mergedSource } : {}),
+        ...(mergedCharacter ? { character: mergedCharacter } : {}),
+        ...(technique === 'rotated' ? { v3Mapping: V3_MAPPING_ID } : {}),
+      };
+      await writeFile(
+        manifestPath(opts.assetsDir, hash),
+        `${JSON.stringify(manifestV2, null, 2)}\n`,
+      );
+    }
   }
 
   return { hash, technique, faces, fromCache, generated };

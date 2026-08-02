@@ -31,9 +31,18 @@ interface WorldBlockSummary {
   readonly hash: string;
   readonly description: string;
   readonly shape: string;
-  /** 'chained' (molde encadeado) ou 'rotated' (rotate via v3) — ADR 0029. */
+  /** 'chained' | 'rotated' | 'texture'. 'texture' = textura animada (ADR 0032). */
   readonly technique: string;
-  readonly faceUrls: Record<Facing, string>;
+  /** v2: 4 faces. Ausente em v3 (texture). */
+  readonly faceUrls?: Record<Facing, string>;
+  /** v3 (texture): spritesheet da animação. */
+  readonly spritesheetUrl?: string;
+  /** v3 (texture): sidecar com fps e frameCount. */
+  readonly animationUrl?: string;
+  /** v3 (texture): número de frames. */
+  readonly frameCount?: number;
+  /** v3 (texture): FPS da animação. */
+  readonly fps?: number;
   readonly geometry?: {
     readonly tileWidth: number;
     readonly tileHeight: number;
@@ -121,7 +130,11 @@ export async function loadPalette(): Promise<PaletteLoad> {
     const generated = summaries.map<BlockDef>((b) => ({
       id: `wb:${b.hash}`,
       label: shortLabel(b.description),
-      faceUrls: b.faceUrls,
+      faceUrls: b.faceUrls as Record<Facing, string> | undefined,
+      spritesheetUrl: b.spritesheetUrl,
+      animationUrl: b.animationUrl,
+      frameCount: b.frameCount,
+      fps: b.fps,
     }));
 
     const definitions: BlockDefinition[] = [

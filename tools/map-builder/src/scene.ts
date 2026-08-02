@@ -96,17 +96,25 @@ import { spriteBox } from './placement.ts';
 export const FACINGS = ['north', 'east', 'south', 'west'] as const;
 export type Facing = (typeof FACINGS)[number];
 
-/** Uma peça colocável: ou arte gerada (4 faces), ou cubo procedural. */
+/** Uma peça colocável: arte gerada (4 faces ou textura animada) ou cubo procedural. */
 export interface BlockDef {
   readonly id: string;
   readonly label: string;
-  /** URLs das quatro faces. Ausente = cubo procedural. */
+  /** URLs das quatro faces (v2: chained/rotated). Ausente = cubo procedural ou textura. */
   readonly faceUrls?: Readonly<Record<Facing, string>> | undefined;
   /**
    * Matiz HSL do cubo procedural. Ausente, deriva do id — estável, mas sem
    * relação com o nome da peça (foi como "Grama" saiu vermelha).
    */
   readonly hue?: number | undefined;
+  /** URL da spritesheet da animação (v3: texture, ADR 0032). */
+  readonly spritesheetUrl?: string | undefined;
+  /** URL do sidecar de animação com fps e frameCount. */
+  readonly animationUrl?: string | undefined;
+  /** Número de frames da animação (v3: texture). */
+  readonly frameCount?: number | undefined;
+  /** FPS da animação (v3: texture). */
+  readonly fps?: number | undefined;
 }
 
 export interface SceneOptions {
@@ -256,8 +264,37 @@ export async function createIsoScene(
     makeDiamondCanvas(cubeGeom, HIGHLIGHT_STROKE, HIGHLIGHT_FILL),
   );
 
-  /** id da peça → textura por face; peça procedural tem a mesma nas quatro. */
+  /** id da peça → textura por face; peça procedural tem a mesma nas quatro.
+   *  Para blocos 'texture' (v3), o array tem os frames da animação. */
   const artwork = new Map<string, Texture[]>();
+
+  /** Estado de animação por bloco: frame atual e timestamp do último avanço. */
+  const animState = new Map<string, { frame: number; lastMs: number }>();
+  let animTickerActive = false;
+
+  /** Avança o frame de todos os blocos animados. Chamado pelo ticker. */
+  const tickAnim = (): void => {
+    const now = performance.now();
+    let anyAnimating = false;
+    for (const [id, state] of animState) {
+      const frames = artwork.get(id);
+      if (!frames || frames.length <= 1) continue;
+      const fps = animFps.get(id) ?? 8;
+      const interval = 1000 / fps;
+      if (now - state.lastMs >= interval) {
+        state.frame = (state.frame + 1) % frames.length;
+        state.lastMs = now;
+      }
+      anyAnimating = true;
+    }
+    // Se há blocos animados, redesenha para mostrar o novo frame.
+    if (anyAnimating && lastState && !rotating) {
+      render(lastState);
+    }
+  };
+
+  /** FPS de animação por bloco. */
+  const animFps = new Map<string, number>();
 
   /**
    * Cubo procedural determinístico, criado sob demanda e cacheado.
@@ -284,6 +321,45 @@ export async function createIsoScene(
       // chegava depois e o cache antigo ganhava: a plataforma inicial saía
       // salmão enquanto a miniatura da mesma peça, na paleta, saía verde.
       artwork.delete(b.id);
+      animState.delete(b.id);
+      animFps.delete(b.id);
+
+      // v3: textura animada (ADR 0032)
+      if (b.spritesheetUrl) {
+        try {
+          const sheet = await Assets.load(b.spritesheetUrl);
+          // A spritesheet tem animations.anim com os nomes dos frames.
+          const animFrames: string[] =
+            (sheet as { animations?: { anim?: string[] } }).animations?.anim ?? [];
+          const textures: Texture[] = [];
+          for (const name of animFrames) {
+            const tex = (sheet as { textures?: Record<string, Texture> }).textures?.[name];
+            if (tex) {
+              tex.source.scaleMode = 'nearest';
+              tex.source.autoGenerateMipmaps = false;
+              textures.push(tex);
+            }
+          }
+          if (textures.length > 0) {
+            artwork.set(b.id, textures);
+            animState.set(b.id, { frame: 0, lastMs: performance.now() });
+            animFps.set(b.id, b.fps ?? 8);
+            // Liga o ticker de animação se ainda não estiver ativo.
+            if (!animTickerActive) {
+              animTickerActive = true;
+              app.ticker.add(tickAnim);
+            }
+          } else {
+            proceduralFor(b.id, b.hue);
+          }
+        } catch {
+          // Arte que não carrega NÃO derruba o editor.
+          proceduralFor(b.id, b.hue);
+        }
+        continue;
+      }
+
+      // v2: 4 faces (ADR 0029)
       if (!b.faceUrls) {
         proceduralFor(b.id, b.hue);
         continue;
@@ -306,16 +382,25 @@ export async function createIsoScene(
   };
 
   /**
-   * Textura da peça numa vista.
+   * Textura da peça para desenho.
    *
-   * `(facing + rotation) mod 4` é o mesmo reindexamento das 8 direções de
-   * personagem, com N=4: cada giro de 90° avança exatamente uma face. É isto
-   * que faz quatro artes darem conta das quatro vistas sem gerar mais nada.
+   * Blocos v3 ('texture', ADR 0032): a textura é a mesma em qualquer vista —
+   * o frame atual da animação. A rotação de câmera não afeta a arte.
+   *
+   * Blocos v2 (4 faces, ADR 0029): `(facing + rotation) mod 4` seleciona a
+   * face correta para a vista da câmera.
    */
   function textureFor(blockId: string, rotation: Rotation): Texture {
-    const four = artwork.get(blockId) ?? proceduralFor(blockId);
+    const frames = artwork.get(blockId) ?? proceduralFor(blockId);
+    // Bloco animado (texture): sempre o frame atual, independe da rotação.
+    if (animState.has(blockId)) {
+      const state = animState.get(blockId);
+      const idx = state?.frame ?? 0;
+      return frames[idx] ?? frames[0]!;
+    }
+    // Bloco de 4 faces: seleciona por rotação.
     const idx = rotateDirectionIndex(0, 4, rotation);
-    return four[idx] ?? four[0]!;
+    return frames[idx] ?? frames[0]!;
   }
 
   // ------------------------------------------------------------------ desenho
@@ -593,12 +678,18 @@ export async function createIsoScene(
 
   const destroy = (): void => {
     disposeTurn();
+    if (animTickerActive) {
+      app.ticker.remove(tickAnim);
+      animTickerActive = false;
+    }
     gridPool.destroy();
     blockPool.destroy();
     overlayPool.destroy();
     for (const t of owned) t.destroy(true);
     owned.length = 0;
     artwork.clear();
+    animState.clear();
+    animFps.clear();
     app.destroy(true, { children: true, texture: true, textureSource: true });
   };
 

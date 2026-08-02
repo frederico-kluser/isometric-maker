@@ -108,9 +108,10 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0026`](./adr/0026-giro-de-camera-animado.md) | O giro da câmera é animado: posição interpolada, sprite nunca rotacionado | substituída por 0030 |
 | [`0027`](./adr/0027-exportacao-v2-instancias-e-materiais.md) | Exportação v2: cada bloco colocado sai com id, posição, tipo e material | vigente |
 | [`0028`](./adr/0028-modo-manequim-e-preenchimento-do-quadro.md) | O manequim é prompt, não `template_id`; e o quadro cheio é pós-processamento | vigente |
-| [`0029`](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) | Todo bloco tem quatro vistas: molde encadeado, e rotate via v3 para comparar | vigente · corrigida pela 0031 |
+| [`0029`](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) | Todo bloco tem quatro vistas: molde encadeado, e rotate via v3 para comparar | substituída por 0032 · corrigida pela 0031 |
 | [`0030`](./adr/0030-giro-rigido-do-quadro-composto.md) | O giro é do quadro composto: dois snapshots sob a mesma afim, nunca peça por peça | vigente |
 | [`0031`](./adr/0031-canvas-multiplo-de-4-e-init-image-quebrado.md) | O canvas da API é múltiplo de 4, e o init_image do tile está quebrado no fornecedor | vigente · corrige 0029 |
+| [`0032`](./adr/0032-textura-animada-unica-abandono-3d.md) | Textura animada única: abandono das 4 vistas 3D em favor de animação por `animate-with-text-v3` | vigente · substitui 0029 |
 
 ## Skills
 
@@ -137,6 +138,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-01 | Spec revendorizado; [ADR 0019](./adr/0019-create-character-v3-e-o-caminho-do-personagem.md) alinha a decisão de personagem ao código em v3; [ADR 0020](./adr/0020-identidade-da-diagonal-de-picking.md) corrige a diagonal do picking e estreia o campo `**Corrige:**`; quatro skills novas para o modelo isométrico, incluindo a de rotação de câmera |
 | 2026-08-01 | **Todo bloco passa a ter quatro vistas** ([ADR 0029](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md)): o modo uniforme e a canonização saem, o molde vira encadeado (o resultado da norte é o `init_image` das outras faces) e nasce a técnica `rotated` via `create-character-v3` para comparar; os cinco blocos uniformes pagos foram arquivados |
 | 2026-08-01 | **O mapa gira como um corpo só** ([ADR 0030](./adr/0030-giro-rigido-do-quadro-composto.md)): a transição vira dois snapshots sob a mesma afim (squash–rotate–unsquash), com o precedente do Mode 7 e o insight do Doom; e a primeira compra real das quatro vistas revela duas restrições fora do spec ([ADR 0031](./adr/0031-canvas-multiplo-de-4-e-init-image-quebrado.md)) — canvas múltiplo de 4, e o `init_image` do tile quebrado no fornecedor, com fallback sem referência de imagem |
+| 2026-08-02 | **Abandono do 3D: textura animada única** ([ADR 0032](./adr/0032-textura-animada-unica-abandono-3d.md)): as técnicas `chained` e `rotated` (4 vistas) saem em favor de UMA textura animada por bloco — `create-image-pixflux` gera a imagem base, um LLM escreve a ação da animação, e o `/animate-with-text-v3` produz os frames; número de frames configurável (4/8/16); a câmera continua girando (ADR 0030) mas a arte do bloco não muda com a perspectiva |
 
 ## Referências
 

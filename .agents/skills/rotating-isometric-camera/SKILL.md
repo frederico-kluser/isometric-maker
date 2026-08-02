@@ -226,17 +226,33 @@ would point the wrong way in three of the four views.
 - **Never present the turn's duration or easing as a community convention.** Nothing external
   verified them.
 
+### Texture blocks don't rotate (ADR 0032)
+
+Block art has two paths (ADR 0032):
+
+- **v2 blocks** (`chained` | `rotated`, 4 faces): rotation selects the face via
+  `(facing + rotation) mod 4`. Each view shows different art — the classic 3D illusion.
+- **v3 blocks** (`texture`, ADR 0032): one animated texture, same in every view. The camera
+  still turns (the grid rotates, the affine transforms, the cross-fade runs), but `textureFor`
+  always returns the current animation frame regardless of `rotation`. The block is a decal,
+  not a volume.
+
+The animation plays continuously via `app.ticker` in `scene.ts` — unlike the rest of the scene
+which only draws on state change, animated blocks need a per-frame tick to advance their frame
+index. The tick only fires when at least one animated block is in the palette.
+
 ## References
 
 - `docs/adr/0021-rotacao-de-camera-em-quatro-vistas.md` — rotation as a view parameter, discrete
 - `docs/adr/0030-giro-rigido-do-quadro-composto.md` — the rigid composed-frame turn; supersedes 0026
+- `docs/adr/0032-textura-animada-unica-abandono-3d.md` — animated textures, rotation-independent art
 - `docs/adr/0026-giro-de-camera-animado.md` — the per-position turn this replaced, kept as record
 - `packages/iso-core/src/rotation.ts` — the four discrete views and the reindexing
 - `packages/iso-core/src/rotation-rigid.ts` — the screen affine `L(τ)` and its snapped endpoints
 - `packages/iso-core/src/rotation-tween.ts` — tween timing, easing and the short path
 - `packages/iso-core/src/depth.ts` — the key whose `x+y` term rotation invalidates
 - `packages/iso-core/src/geometry.ts` — the projection this pre-transforms into
-- `tools/map-builder/src/scene.ts` — the cross-fade and the ticker loop
+- `tools/map-builder/src/scene.ts` — the cross-fade and the ticker loop, plus animated texture support
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the unrotated coordinate rules
 - `.agents/skills/composing-pixi-scene/SKILL.md` — where draw order is applied in this renderer
 - OpenRCT2, `src/openrct2/world/Location.hpp` and `src/openrct2/interface/Viewport.cpp` — rotation
