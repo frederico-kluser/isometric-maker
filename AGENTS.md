@@ -81,7 +81,7 @@ Se algo não foi verificado, escreva que não foi verificado. Documentação que
 
 ## Comandos
 
-Não existe workspace npm. Desde 2026-08-02 há um `package.json` na raiz com um único script de conveniência — `npm run dev`, que sobe o editor inteiro (`cd tools/character-builder && npm run dev`, em `http://localhost:5174/`). Todo o resto roda de dentro da sua ferramenta.
+O repo usa **npm workspaces**. `npm i` na raiz instala todos os subprojetos de uma vez. O `.npmrc` da raiz configura o registry privado do `@motionplus` (token em `MOTION_TOKEN`). Há um script de conveniência — `npm run dev`, que sobe o editor inteiro em `http://localhost:5174/`. Todo comando de build, teste e typecheck roda de dentro da sua ferramenta.
 
 ```bash
 # O editor inteiro (tela inicial + estúdio + editor de mapa)

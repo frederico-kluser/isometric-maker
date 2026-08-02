@@ -2,7 +2,11 @@
   "name": "isometric-maker",
   "version": "0.1.0",
   "private": true,
-  "description": "Atalho de conveniência — o repo não tem workspace.",
+  "description": "Editor isométrico local — personagem, mapa 3D e pipeline de assets.",
+  "workspaces": [
+    "packages/*",
+    "tools/*"
+  ],
   "scripts": {
     "dev": "cd tools/character-builder && npm run dev"
   }
