@@ -55,6 +55,12 @@ import { waitForCharacterRotations } from './character-detail.ts';
 import { fitFramesOnDisk } from './frame-fit.ts';
 import { parseAndWriteFrames } from './frames.ts';
 import {
+  MOLD_INIT_STRENGTH,
+  REFERENCE_STYLE_STRENGTH,
+  readMoldPngB64,
+  withMoldNegative,
+} from './mold.ts';
+import {
   buildMannequinPrompt,
   MANNEQUIN_COVERAGE,
 } from './mannequin-prompt.ts';
@@ -304,7 +310,10 @@ export async function generateSouthFromText(
   // of what to avoid") e é o que realmente segura roupa, cabelo e rosto — o
   // andaime positivo sozinho não segura. OMITIDO fora do modo manequim quando o
   // personagem não trouxe negativo próprio.
-  const negative = composed?.negativeDescription ?? ch.negativePrompt?.trim();
+  // Com molde, o negativo ganha os termos que nomeiam o boneco de madeira — sem
+  // eles a estrutura vem junto com o material. Ver mold.ts.
+  const negativeBase = composed?.negativeDescription ?? ch.negativePrompt?.trim();
+  const negative = ch.mold ? withMoldNegative(negativeBase) : negativeBase;
   if (negative) body['negative_description'] = negative;
   // coverage_percentage (0–100): quanto do quadro o sprite deve ocupar. É o
   // único endpoint da API que tem esse campo. OMITIDO quando não configurado.
@@ -322,8 +331,29 @@ export async function generateSouthFromText(
   // fiéis de uma imagem existente"; o default 300 só transfere cor grosseira.
   // Mesmo formato de objeto base64 que color_image já usa. OMITIDO sem o
   // arquivo: a sul volta ao modo texto puro.
+  //
+  // Com molde escolhido, os dois papéis se separam: o molde manda em ESTRUTURA
+  // (`init_image`, força moderada — alta demais traria a madeira junto) e a
+  // referência do usuário passa a mandar em APARÊNCIA (`style_image`, com
+  // `style_strength`). Os dois campos existem no CreateImageBitforgeRequest e
+  // são independentes; não é preciso array nenhum. Ver mold.ts.
   const refPath = referencePath(opts.assetsDir, characterId);
-  if (existsSync(refPath)) {
+  const temReferencia = existsSync(refPath);
+  if (ch.mold) {
+    body['init_image'] = asBase64Image(await readMoldPngB64(ch.mold, size));
+    body['init_image_strength'] = MOLD_INIT_STRENGTH;
+    if (temReferencia) {
+      const refB64 = await readFile(refPath, 'base64');
+      body['style_image'] = asBase64Image(refB64);
+      body['style_strength'] = REFERENCE_STYLE_STRENGTH;
+    }
+    opts.onLog?.(
+      `[wizard] molde "${ch.mold}" em init_image (força ${MOLD_INIT_STRENGTH})` +
+        (temReferencia
+          ? `, referência em style_image (força ${REFERENCE_STYLE_STRENGTH})`
+          : ', sem referência de estilo'),
+    );
+  } else if (temReferencia) {
     const refB64 = await readFile(refPath, 'base64');
     body['init_image'] = asBase64Image(refB64);
     body['init_image_strength'] = 500;

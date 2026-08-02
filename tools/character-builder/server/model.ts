@@ -135,6 +135,25 @@ export type Silhouette =
 	| "quadrupede";
 
 /**
+ * Proportion molds: the wooden mannequin drawings that say where the body sits
+ * in the frame and how much of it the body fills. Position and size only —
+ * appearance never comes from a mold.
+ *
+ * Declared here, and not in `mold.ts`, because the wizard has to render the
+ * picker and `mold.ts` imports `node:fs`. Same reason `blocks-body.ts` keeps
+ * away from `world-block.ts`.
+ */
+export const MOLD_IDS = ["adulto", "crianca"] as const;
+
+export type MoldId = (typeof MOLD_IDS)[number];
+
+export function isMoldId(value: unknown): value is MoldId {
+	return (
+		typeof value === "string" && (MOLD_IDS as readonly string[]).includes(value)
+	);
+}
+
+/**
  * Wizard steps, in order. The cardinals step was removed with the v3 migration:
  * `create-character-v3` rotates the south-facing `reference_image` directly into
  * 8 directions — no intermediate `/rotate` calls needed.
@@ -193,6 +212,16 @@ export interface Character {
 	 * the animator fits, per the vendored spec.
 	 */
 	mannequin?: boolean;
+	/**
+	 * Proportion mold for the south face: `adulto` or `crianca`. Absent means the
+	 * historical path — the user's reference goes in as `init_image` and nothing
+	 * constrains proportions.
+	 *
+	 * When present the mold takes `init_image` (structure) and the reference moves
+	 * to `style_image` (appearance), which is the only split that lets the mold
+	 * dictate position and size without dictating looks. See `mold.ts`.
+	 */
+	mold?: MoldId;
 	/** Extra `negative_description` terms, appended to the mannequin defaults. */
 	negativePrompt?: string;
 	/**

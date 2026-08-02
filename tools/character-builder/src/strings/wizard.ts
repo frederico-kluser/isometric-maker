@@ -234,6 +234,24 @@ export const wizard = {
       'só o ESTILO — o corpo vem de um andaime fixo somado a uma lista de negativos ' +
       '(negative_description), que é o que de fato segura roupa e cabelo. O seletor de ' +
       'esqueleto não faz isso: ele só escolhe o esqueleto da animação.',
+    /** Rótulo do seletor de molde de proporção */
+    moldeRotulo: 'Molde de proporção',
+    /** Nome de cada molde no seletor, incluindo a ausência dele */
+    moldeNomes: {
+      nenhum: 'Nenhum',
+      adulto: 'Adulto',
+      crianca: 'Criança',
+    },
+    /** Nota do seletor de molde: o que o molde decide e o que ele não decide */
+    moldeNota:
+      'O molde decide POSIÇÃO e TAMANHO do corpo no quadro, e mais nada. O adulto ocupa o ' +
+      'quadro quase inteiro; a criança é mais baixa, com a mesma linha de chão. Com molde ' +
+      'escolhido, ele vai como imagem inicial (init_image, força 320) e a sua referência ' +
+      'passa a ser referência de ESTILO (style_image, força 50) — são campos diferentes do ' +
+      'mesmo endpoint, então as duas coisas convivem. Sem molde, a sua referência volta a ' +
+      'ser a imagem inicial, como antes.',
+    /** Texto alternativo da prévia de um molde */
+    moldeAlt: (nome: string): string => `Molde de proporção: ${nome}`,
     /** Rótulo do campo de texto quando o modo manequim está ligado */
     estiloRotulo: 'Estilo (em inglês — é o prompt)',
     /** Placeholder do estilo: é prompt, fica em inglês */

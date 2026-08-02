@@ -26,10 +26,12 @@ import {
 	TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import type { MoldId } from '../../../../server/model.ts';
 import { versaoSulAria, wizard } from '../../../strings/wizard.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
 import { FailureNotice } from './failure-notice.tsx';
+import { MoldPicker } from './mold-picker.tsx';
 import {
 	ReferencePicker,
 	type ReferenceImage,
@@ -74,6 +76,12 @@ function SouthGenerate({
 	);
 	const [refImage, setRefImage] = useState<ReferenceImage | null>(null);
 	const [refProbe, setRefProbe] = useState(0);
+	// Molde de proporção. Default: o que o personagem já tem. Nenhum molde é
+	// escolha válida e é o caminho histórico — não vale forçar "adulto" em quem
+	// nunca pediu molde.
+	const [mold, setMold] = useState<MoldId | null>(
+		progress.character.mold ?? null,
+	);
 	// O corpo-base começa em modo manequim; personagens derivados, não. É a
 	// única combinação em que o default acerta sem o usuário mexer.
 	const [mannequin, setMannequin] = useState(
@@ -94,6 +102,9 @@ function SouthGenerate({
 					characterId: progress.character.id,
 					description: description.trim(),
 					mannequin,
+					// null APAGA o molde no servidor; undefined deixaria o anterior
+					// valendo, e o usuário que desmarcou veria a proporção antiga.
+					mold,
 					negativePrompt: negativo.trim(),
 					// b64 puro, sem prefixo data: — o servidor grava o upload em
 					// assets/wizard/<charId>/reference.png e usa como init_image.
@@ -123,6 +134,17 @@ function SouthGenerate({
 					refresh={refresh}
 					disabled={generating || busy}
 				/>
+			</div>
+			<div className="flex flex-col gap-2">
+				<Label>{wizard.sul.moldeRotulo}</Label>
+				<MoldPicker
+					value={mold}
+					onChange={setMold}
+					disabled={generating || busy}
+				/>
+				<p className="max-w-prose text-xs text-muted-foreground">
+					{wizard.sul.moldeNota}
+				</p>
 			</div>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">

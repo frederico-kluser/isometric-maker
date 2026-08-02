@@ -41,6 +41,7 @@ import {
 	type WizardOpts,
 } from "./mannequin.ts";
 import { exportMannequin, importMannequin } from "./mannequin-io.ts";
+import { MOLD_DIR, moldExists, moldPath } from "./mold.ts";
 import {
 	runRotateLab,
 	RotateLabValidationError,
@@ -79,6 +80,8 @@ import {
 	VIEW_OPTIONS,
 	cellKey,
 	directions8Key,
+	isMoldId,
+	MOLD_IDS,
 	seedStudio,
 	southKey,
 	wardrobeKey,
@@ -798,6 +801,7 @@ export async function handle(
 				colorImageB64?: string;
 				referenceBase64?: string;
 				mannequin?: boolean;
+				mold?: string | null;
 				negativePrompt?: string;
 			}>(req);
 			if (
@@ -816,9 +820,31 @@ export async function handle(
 			// Modo manequim e negativo são do PERSONAGEM, não do request: a geração
 			// roda em background e mannequin.ts lê o studio.json de novo lá dentro.
 			// Gravar antes do spawn é o que faz o andaime chegar no request.
-			if (b.mannequin !== undefined || b.negativePrompt !== undefined) {
+			if (
+				b.mannequin !== undefined ||
+				b.mold !== undefined ||
+				b.negativePrompt !== undefined
+			) {
 				if (b.mannequin !== undefined && typeof b.mannequin !== "boolean") {
 					badRequest(res, "mannequin precisa ser booleano");
+					return true;
+				}
+				// `null` APAGA o molde e volta ao caminho histórico (referência do
+				// usuário em init_image). Um id desconhecido é recusado em vez de
+				// ignorado: gerar sem o molde que o usuário escolheu, calado, gastaria
+				// dinheiro produzindo a proporção errada.
+				if (b.mold !== undefined && b.mold !== null && !isMoldId(b.mold)) {
+					badRequest(
+						res,
+						`mold precisa ser um de: ${MOLD_IDS.join(", ")} (ou null para nenhum)`,
+					);
+					return true;
+				}
+				if (b.mold !== undefined && b.mold !== null && !moldExists(b.mold)) {
+					badRequest(
+						res,
+						`o molde "${b.mold}" não está em ${MOLD_DIR} — o arquivo do projeto sumiu`,
+					);
 					return true;
 				}
 				if (
@@ -831,6 +857,10 @@ export async function handle(
 				const idx = s.characters.findIndex((c) => c.id === ch.id);
 				const atualizado: Character = { ...ch };
 				if (b.mannequin !== undefined) atualizado.mannequin = b.mannequin;
+				if (b.mold !== undefined) {
+					if (b.mold === null) delete atualizado.mold;
+					else atualizado.mold = b.mold;
+				}
 				if (b.negativePrompt !== undefined) {
 					const negativo = b.negativePrompt.trim();
 					// Campo vazio APAGA o negativo; deixá-lo como undefined explícito
@@ -1323,6 +1353,33 @@ export async function handle(
 		}
 
 		// O molde em PNG: o editor mostra ao usuário a forma que toda geração segue.
+		// Prévia dos moldes de proporção. Serve o PNG do pacote de assets em vez de
+		// copiá-lo para `assets/`: molde é asset versionado do projeto, não arte
+		// gerada, e duplicá-lo criaria duas verdades sobre a mesma proporção.
+		if (url.pathname.startsWith("/api/molde/") && req.method === "GET") {
+			const id = url.pathname.slice("/api/molde/".length).replace(/\.png$/, "");
+			if (!isMoldId(id)) {
+				json(res, 404, {
+					error: `molde desconhecido: "${id}". Existem: ${MOLD_IDS.join(", ")}.`,
+				});
+				return true;
+			}
+			if (!moldExists(id)) {
+				json(res, 404, {
+					error: `o molde "${id}" não está em ${MOLD_DIR}.`,
+				});
+				return true;
+			}
+			const png = await readFile(moldPath(id));
+			res.writeHead(200, {
+				"content-type": "image/png",
+				"content-length": String(png.length),
+				"cache-control": "no-cache",
+			});
+			res.end(png);
+			return true;
+		}
+
 		if (url.pathname === "/api/block-mould.png" && req.method === "GET") {
 			const png = renderMouldPng();
 			res.writeHead(200, {
