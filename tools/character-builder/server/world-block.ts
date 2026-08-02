@@ -80,8 +80,8 @@ import {
 } from '../../pixellab-pipeline/src/cost.ts';
 import { asBase64Image, extractBase64 } from './base64-image.ts';
 import { trackSpend } from './estimate.ts';
-import { encodePngFromRgba, toPngBytes } from './png.ts';
-import { BLOCK_GEOMETRY, blockImageSize, mouldBase64 } from './cube-mould.ts';
+import { encodePngFromRgba, isPng } from './png.ts';
+import { BLOCK_GEOMETRY, apiImageSize, blockImageSize, mouldBase64 } from './cube-mould.ts';
 import { waitForCharacterRotations } from './character-detail.ts';
 import {
   alphaBBox,
@@ -651,16 +651,103 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
   return out.sort((a, b) => a.hash.localeCompare(b.hash));
 }
 
+// ---- canvas da API × quadro canônico
+
+interface ImageSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Acolchoa um PNG no canvas da API e devolve os pixels como **RGBA CRU** em
+ * base64 — colunas centradas, conteúdo assentado na BASE, linhas extras como
+ * céu transparente no topo.
+ *
+ * RGBA cru porque é o que o backend consome: o traceback de um job falho
+ * (2026-08-01) mostra `Image.frombytes(mode="RGBA", size=image_size)` direto
+ * sobre o base64 do `init_image` — "Expected image of size 48x56 but got
+ * another size" é um PNG sendo lido como bytes crus. O endpoint de tile é
+ * RGBA cru nas DUAS direções (a saída já era, ver png.ts); nenhuma geração
+ * bem-sucedida jamais tinha mandado `init_image`, então o contrato de entrada
+ * nunca tinha sido exercitado. O spec (`Base64Image`) não diz nada disso.
+ */
+export function padPngToApiCanvas(pngB64: string, api: ImageSize): string {
+  const img = decode(Buffer.from(pngB64, 'base64'));
+  if (img.width > api.width || img.height > api.height) {
+    throw new Error(
+      `imagem ${img.width}×${img.height} não cabe no canvas da API ${api.width}×${api.height}.`,
+    );
+  }
+  const out = Buffer.alloc(api.width * api.height * 4);
+  const offX = Math.floor((api.width - img.width) / 2);
+  const offY = api.height - img.height;
+  for (let y = 0; y < img.height; y += 1) {
+    const src = y * img.width * 4;
+    img.rgba.copy(out, ((y + offY) * api.width + offX) * 4, src, src + img.width * 4);
+  }
+  return out.toString('base64');
+}
+
+/**
+ * A volta: recorta os bytes vindos da API para o quadro canônico — a inversa
+ * exata do acolchoamento (mesmo offset de base e de centro).
+ *
+ * O endpoint devolve pixels RGBA CRUS no canvas da API (ver png.ts). Um PNG
+ * de outro tamanho passa direto, como sempre passou: recortar só faz sentido
+ * sobre o canvas que nós mesmos acolchoamos.
+ */
+export function apiBytesToCanonicalPng(
+  bruto: Buffer,
+  api: ImageSize,
+  frame: ImageSize,
+): Buffer {
+  let img: { width: number; height: number; rgba: Buffer };
+  if (isPng(bruto)) {
+    const d = decode(bruto);
+    if (d.width !== api.width || d.height !== api.height) return bruto;
+    img = d;
+  } else {
+    if (bruto.length !== api.width * api.height * 4) {
+      // Não é PNG nem RGBA do canvas pedido: deixa o codificador canônico
+      // levantar o erro nomeado de tamanho (RgbaSizeError), com a conta certa.
+      return encodePngFromRgba(bruto, api.width, api.height);
+    }
+    img = { width: api.width, height: api.height, rgba: bruto };
+  }
+  if (img.width === frame.width && img.height === frame.height) {
+    return encodePngFromRgba(img.rgba, frame.width, frame.height);
+  }
+  const offX = Math.floor((img.width - frame.width) / 2);
+  const offY = img.height - frame.height;
+  const out = Buffer.alloc(frame.width * frame.height * 4);
+  for (let y = 0; y < frame.height; y += 1) {
+    const src = ((y + offY) * img.width + offX) * 4;
+    img.rgba.copy(out, y * frame.width * 4, src, src + frame.width * 4);
+  }
+  return encodePngFromRgba(out, frame.width, frame.height);
+}
+
 // ---- recuperação do PNG do tile (as duas formas de resposta)
+
+interface BackgroundJobStatus {
+  readonly status?: string;
+  readonly last_response?: { readonly detail?: string } | null;
+}
 
 /**
  * Busca o PNG de um tile JÁ PAGO por id — o caminho de volta gratuito.
  * 423 = ainda processando (do spec); qualquer outro erro sobe.
+ *
+ * Com `jobId`, cada 423 é acompanhado de um GET (grátis) do job: um tile cujo
+ * job FALHOU responde 423 para sempre, e sondar às cegas custava 2 minutos de
+ * espera e uma resubmissão sem diagnóstico. Foi assim que o 48×53 queimou três
+ * submissões antes de alguém ler o `detail` do job (2026-08-01).
  */
 async function fetchTilePngById(
   client: PixelLabClient,
   tileId: string,
   onLog?: (m: string) => void,
+  jobId?: string | null,
 ): Promise<string> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
@@ -672,6 +759,20 @@ async function fetchTilePngById(
       if (b64 !== '') return b64;
     } catch (err) {
       if (!(err instanceof PixelLabError) || err.status !== 423) throw err;
+    }
+    if (jobId) {
+      const job = await client.request<BackgroundJobStatus>(
+        'GET',
+        `/background-jobs/${encodeURIComponent(jobId)}`,
+      );
+      if (job.data?.status === 'failed') {
+        const detail = job.data.last_response?.detail;
+        throw new Error(
+          `o job do tile ${tileId} FALHOU no fornecedor` +
+            (detail ? `: ${detail}` : ' (sem detail)') +
+            '. Jobs falhos reportam usd 0 — submeter de novo não repaga este.',
+        );
+      }
     }
     onLog?.(`[world-block] tile ${tileId} ainda processando — nova sondagem em 3s.`);
     await sleep(3_000);
@@ -719,7 +820,7 @@ async function resolveTilePng(
   );
   if (fromJob !== '') return { b64: fromJob, tileId };
 
-  return { b64: await fetchTilePngById(client, tileId, onLog), tileId };
+  return { b64: await fetchTilePngById(client, tileId, onLog, jobId), tileId };
 }
 
 // ---- derivação das faces a partir de v3/
@@ -811,11 +912,13 @@ export async function runWorldBlock(
   const shape = config.shape ?? 'block';
   const technique: BlockTechnique = config.technique ?? 'chained';
   const strength = config.initImageStrength ?? DEFAULT_INIT_IMAGE_STRENGTH;
-  // Canvas do tile: o bounding box EXATO do cubo (48×53). O spec permite
-  // width e height independentes de 16 a 64, e é o tamanho do molde que vai
-  // como init_image — pedir outro canvas seria pedir para a referência não
-  // caber.
+  // DOIS canvas, de propósito. O quadro canônico (48×53, bounding box exato
+  // do cubo) é o contrato do DISCO e do map-builder. O canvas da API é o
+  // canônico arredondado a múltiplos de 4 (48×56): a GPU da PixelLab recusa
+  // outro — `code 3006`, restrição fora do spec, verificada em 2026-08-01.
+  // Toda submissão acolchoa o topo na ida e recorta na volta.
   const imageSize = blockImageSize();
+  const apiSize = apiImageSize();
 
   // O manifesto anterior (se houver) é fundido no final: uma retomada parcial
   // não pode apagar tile_id/usage/character de artefatos que ela NÃO tocou —
@@ -855,9 +958,9 @@ export async function runWorldBlock(
           `[world-block] retomando tile já pago ${stub.tileId} — nenhuma submissão nova.`,
         );
         try {
-          const b64 = await fetchTilePngById(client, stub.tileId, opts.onLog);
+          const b64 = await fetchTilePngById(client, stub.tileId, opts.onLog, stub.jobId);
           const bruto = Buffer.from(b64, 'base64');
-          const png = toPngBytes(bruto, imageSize.width, imageSize.height);
+          const png = apiBytesToCanonicalPng(bruto, apiSize, imageSize);
           await writeFile(path, png);
           await unlink(stubPath);
           return { pngB64: png.toString('base64'), tileId: stub.tileId };
@@ -875,7 +978,7 @@ export async function runWorldBlock(
     // no request quando informado.
     const params: Record<string, unknown> = {
       description: prompt,
-      image_size: imageSize,
+      image_size: apiSize,
       isometric_tile_shape: shape,
       seed,
     };
@@ -887,12 +990,49 @@ export async function runWorldBlock(
       params['text_guidance_scale'] = config.textGuidanceScale;
     }
     if (init !== null) {
-      params['init_image'] = asBase64Image(init.b64);
+      params['init_image'] = asBase64Image(padPngToApiCanvas(init.b64, apiSize));
       params['init_image_strength'] = init.strength;
     }
-    if (colorImageB64 !== undefined) params['color_image'] = asBase64Image(colorImageB64);
+    if (colorImageB64 !== undefined) {
+      params['color_image'] = asBase64Image(padPngToApiCanvas(colorImageB64, apiSize));
+    }
 
-    const res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
+    /**
+     * O init_image do /create-isometric-tile está QUEBRADO no fornecedor
+     * (verificado 2026-08-01, spec "dev"): a validação Pydantic exige um
+     * arquivo que o Pillow abra ("Send PNG…"), e o worker
+     * (generate_pixelart_flux → get_image_from_byte) faz
+     * `Image.frombytes(mode="RGBA", size=image_size)` — que só aceita RGBA
+     * cru. PNG passa na validação e morre no worker ("Expected image of size
+     * 48x56"); RGBA cru morre na validação (422). Nenhum payload satisfaz os
+     * dois estágios.
+     *
+     * O 422 é SÍNCRONO e custa $0, então a tentativa com imagem é barata:
+     * quando recusada, resubmete SEM referência de imagem — o modo em que os
+     * cinco blocos da era uniforme foram gerados com sucesso — e avisa alto.
+     * Quando o fornecedor consertar, a primeira tentativa volta a valer e o
+     * fallback nunca dispara.
+     */
+    let res: Awaited<ReturnType<typeof client.submit<IsometricTileResponse>>>;
+    try {
+      res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
+    } catch (err) {
+      const rejectedImages =
+        err instanceof PixelLabError &&
+        err.status === 422 &&
+        /init_image|color_image/.test(err.body) &&
+        ('init_image' in params || 'color_image' in params);
+      if (!rejectedImages) throw err;
+      opts.onLog?.(
+        '[world-block] AVISO: o fornecedor recusou init_image/color_image (validação pede ' +
+          'PNG, worker exige RGBA cru — incompatíveis hoje). Gerando SEM referência de ' +
+          'imagem: a forma fica por conta do prompt, como na era uniforme.',
+      );
+      delete params['init_image'];
+      delete params['init_image_strength'];
+      delete params['color_image'];
+      res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
+    }
     generated += 1;
 
     // O dinheiro sai na submissão: tracking, ledger e stub ANTES de resolver
@@ -924,9 +1064,10 @@ export async function runWorldBlock(
     // O /create-isometric-tile devolve PIXELS RGBA CRUS, não um arquivo PNG
     // (verificado contra a API em 2026-08-01: 48×48 chega com exatos 9216
     // bytes). Gravar isso como `.png` produz arquivo que nenhum navegador abre
-    // — e a geração já foi paga. Ver server/png.ts.
+    // — e a geração já foi paga. Ver server/png.ts. O recorte devolve o canvas
+    // da API ao quadro canônico antes de tocar o disco.
     const bruto = Buffer.from(b64, 'base64');
-    const png = toPngBytes(bruto, imageSize.width, imageSize.height);
+    const png = apiBytesToCanonicalPng(bruto, apiSize, imageSize);
     await writeFile(path, png);
     await unlink(stubPath).catch(() => {});
     opts.onLog?.(`[world-block] tile → ${path} (seed ${seed}, ${png.length} bytes PNG)`);
@@ -954,7 +1095,7 @@ export async function runWorldBlock(
 
   const tileEstimate = estimateByArea(
     COST_TABLE['create-isometric-tile'],
-    imageSize.width * imageSize.height,
+    apiSize.width * apiSize.height,
   );
 
   let faces: WorldBlockFace[];
@@ -1099,7 +1240,7 @@ export async function runWorldBlock(
     if (needSubmitV3) {
       const v3Estimate = estimateByArea(
         COST_TABLE['create-character-v3'],
-        imageSize.width * imageSize.height,
+        apiSize.width * apiSize.height,
       );
       logGuard(
         'create-character-v3 (8 direções a partir da source; preço estimado)',
@@ -1151,7 +1292,9 @@ export async function runWorldBlock(
           view: 'low top-down',
           no_background: true,
           seed: v3Seed,
-          image_size: { width: imageSize.width, height: imageSize.height },
+          // O canvas da API, nunca o canônico: se a regra do múltiplo de 4
+          // valer também aqui, 48×53 falharia do mesmo jeito que o tile.
+          image_size: { width: apiSize.width, height: apiSize.height },
         };
         const res = await client.submit<CreateCharacterV3Response>('create-character-v3', body);
         generated += 1;

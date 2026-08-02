@@ -47,13 +47,37 @@ import { encodePngFromRgba } from './png.ts';
 /** A geometria que este projeto usa para bloco. Uma só, em todo lugar. */
 export const BLOCK_GEOMETRY: IsoCubeGeometry = CANONICAL_CUBE;
 
-/** `image_size` a mandar ao endpoint: o bounding box exato do cubo. */
+/** O quadro CANÔNICO em disco: o bounding box exato do cubo. */
 export function blockImageSize(geom: IsoCubeGeometry = BLOCK_GEOMETRY): {
   width: number;
   height: number;
 } {
   assertFitsPixelLab(geom);
   return { width: geom.spriteWidth, height: geom.spriteHeight };
+}
+
+/**
+ * `image_size` a mandar ao endpoint: o bounding box arredondado PARA CIMA ao
+ * múltiplo de 4.
+ *
+ * A GPU da PixelLab recusa canvas cujo lado não seja múltiplo de 4 — o job
+ * assíncrono falha com `code 3006: "Canvas width and height must be divisible
+ * by 4 (got 48x53)"`. Verificado contra jobs reais em 2026-08-01; a restrição
+ * NÃO está no spec vendorizado, cujo schema só diz 16–64 por lado. A falha é
+ * pós-submissão e reporta `usd: 0` — não cobra, mas também nunca entrega.
+ *
+ * O disco continua no quadro canônico ({@link blockImageSize}): quem gera
+ * acolchoa o topo na ida e recorta na volta (`world-block.ts`).
+ */
+export function apiImageSize(geom: IsoCubeGeometry = BLOCK_GEOMETRY): {
+  width: number;
+  height: number;
+} {
+  const box = blockImageSize(geom);
+  return {
+    width: Math.ceil(box.width / 4) * 4,
+    height: Math.ceil(box.height / 4) * 4,
+  };
 }
 
 // ---------------------------------------------------------------- o molde
