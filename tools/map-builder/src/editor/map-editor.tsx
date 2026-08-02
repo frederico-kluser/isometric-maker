@@ -321,10 +321,7 @@ export function MapEditor() {
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
       // Botão do meio ou espaço+arrastar movem a câmera; o esquerdo edita.
-      // Pan durante um giro se perde quando a rotação assenta (o settle() usa
-      // o pan capturado no início) — o mesmo critério do rotateTo e do onWheel.
       if (e.button === 1 || e.shiftKey) {
-        if (sceneRef.current?.isRotating()) return;
         panning.current = { x: e.clientX, y: e.clientY };
         return;
       }
@@ -345,10 +342,6 @@ export function MapEditor() {
   }, []);
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    // Zoom durante um giro se perde quando a rotação assenta: o settle() é
-    // calculado com o zoom capturado no início, e o zoom aplicado no meio
-    // some na volta. Bloquear é o mesmo critério do rotateTo.
-    if (sceneRef.current?.isRotating()) return;
     // Zoom INTEIRO: fracionário borra a arte e desalinha a costura do losango.
     setCamera((c) => {
       const i = ZOOM_STEPS.indexOf(c.zoom as (typeof ZOOM_STEPS)[number]);
@@ -379,15 +372,14 @@ export function MapEditor() {
       setCamera((c) => ({ ...c, rotation, turn: rotation }));
       return;
     }
-    if (scene.isRotating()) return;
     setPickState(null);
-    void scene
-      .rotateTo(rotation, {
+    setCamera(
+      scene.rotateTo(rotation, {
         cells: occupiedCells(stateRef.current.map),
         viewportWidth: box.clientWidth,
         viewportHeight: box.clientHeight,
-      })
-      .then(setCamera);
+      }),
+    );
   }, []);
 
   const zoomBy = useCallback((delta: number) => {
