@@ -17,36 +17,49 @@ this codebase — the boundary is marked throughout.
 ## The status here, first
 
 **The decision was taken and rotation is implemented.** `packages/iso-core/src/rotation.ts` holds the
-four discrete views, `rotation-tween.ts` the animated transition between them, and
-`tools/map-builder` has the control. Two ADRs record it: `0021` (rotation as a view parameter) and
-`0026` (the animated turn).
+four discrete views, `rotation-tween.ts` the tween timing, `rotation-rigid.ts` the screen-space
+affine of the turn, and `tools/map-builder` has the control. Three ADRs record it: `0021` (rotation
+as a view parameter), `0026` (the animated turn, superseded) and `0030` (the rigid composed-frame
+turn that replaced 0026's mid-turn mechanism).
 
 What follows is still the material the decision was made from, plus what the implementation added.
 Read it before touching rotation — the traps are all still live.
 
-### The turn is animated, and only the position interpolates
+### The turn is animated, and the COMPOSED FRAME is what moves (ADR 0030)
 
 Flipping `rotation` from 0 to 1 in one frame does not read as a turn; it reads as a cut, and whoever
-was editing loses track of where they were. So the grid coordinate rotates through a **continuous**
-angle and is projected by the same single formula, over 280 ms with a symmetric cubic ease.
+was editing loses track of where they were. So the turn is a 280 ms tween with a symmetric cubic
+ease — and what that tween drives changed once, for a reason worth keeping.
 
-**The sprite is never rotated.** Pixel art rotated by any angle that is not a multiple of 90° gets
-resampled, and resampling destroys the pixel grid — the art you paid for is a smear for the whole
-transition. That single constraint rules out the obvious solution of spinning the container, and it
-is why the *facing* cross-fades instead: source view underneath, opaque; target view on top, at the
-eased progress. Two semi-transparent copies would let the background show through mid-turn.
+**Interpolating per-block positions was tried (ADR 0026) and reads wrong.** The projected lattice
+squashes mid-turn while each unrotated sprite keeps its size: neighbours gap and overlap, depth
+swaps pop block by block, and the map reads as pieces sliding individually. Geometrically correct,
+visually broken — the user's words were "cada bloco roda individualmente".
 
-The depth key is recomputed each frame from the **continuous** coordinate: during a 90° turn two
-blocks genuinely swap depth, and the continuous key makes the swap happen at the geometrically right
-instant instead of all at once at one end.
+The current mechanism (`tools/map-builder/src/scene.ts`, ADR 0030): snapshot the source view and the
+target view into two viewport-sized `RenderTexture`s, then move BOTH under the same screen affine
+`L(τ) = P ∘ R(τ) ∘ P⁻¹` — squash the ground plane, rotate, unsquash
+(`packages/iso-core/src/rotation-rigid.ts`) — with a cross-fade, source opaque underneath. At integer
+τ the trig is snapped to {−1, 0, 1} and endpoint agreement with `rotatePoint` is exact by strict
+equality, so the last transition frame lands pixel-identical on the first resting frame. `L` is exact
+only for z = 0: height shears slightly mid-sweep and destination occlusion is carried by the fade,
+not recomputed — declared, and invisible in practice at 280 ms.
 
-The framing is recomputed each frame too. Without it the map describes an arc and leaves the screen
-halfway, because turning flips the sign of `x − y`.
+**No individual art is ever resampled at rest.** Rotating one piece of pixel art by any
+non-multiple of 90° resamples it and smears the paid art — the constraint that ruled out spinning
+the container in ADR 0026, and it still holds per piece; it is also what forces the cross-fade
+between pre-drawn views. What ADR 0030 changed is where the one deliberate resample happens: the
+composed frame, once, during the sweep, with `linear` filtering on the snapshots only
+(`SNAPSHOT_SCALE_MODE`) — a named aesthetic choice, one line to flip.
 
-**Nothing external corroborates the timing or the curve.** A research pass looking for how commercial
-isometric games do this transition — cross-fade, container tween, easing, duration, and the behaviour
-of specific titles — produced **zero claims that survived verification**. 280 ms and the cubic ease
-are this project's choice, in a named constant.
+**External precedent, verified this time:** Doom (r_things.c) never rotates a sprite on screen — it
+selects one of up to 8 pre-drawn rotations and lets projection do all motion (its floor *flats* ARE
+angle-resampled each frame, r_plane.c, so quote the claim narrowly). SNES Mode 7 / Contra III rotate
+the composited playfield as a single layer while sprites swap pre-drawn views — the exact pattern
+transplanted here. The squash–rotate–unsquash conjugation itself was found documented nowhere: it is
+this project's derivation, fixed by tests, not an external convention. On duration and easing the
+result is unchanged from the 0026-era pass — zero claims that survived verification: 280 ms and the
+cubic ease remain this project's choice, in a named constant.
 
 ### During a turn there is no cell under the cursor
 
@@ -201,8 +214,8 @@ would point the wrong way in three of the four views.
 
 - **Never store rotated coordinates.** Rotation is a view parameter; the document does not change.
 - **Never rotate `z`.** It is invariant, and in the depth key it is the term that already works.
-- **Never rotate a pixel-art sprite by a non-multiple of 90°.** Interpolate the position; cross-fade
-  the facing.
+- **Never resample a piece's art individually.** The transition moves the composed frame as one body
+  — two snapshots, the same affine, cross-fade (ADR 0030); at rest every view is pre-drawn art.
 - **Never pick a cell from the continuous `turn`.** Picking reads the discrete `rotation`.
 - **Never take the long way round.** From view 3 to view 0 is `+1`, not `−3`; a half turn is
   genuinely ambiguous and must break the tie by a declared rule.
@@ -216,9 +229,11 @@ would point the wrong way in three of the four views.
 ## References
 
 - `docs/adr/0021-rotacao-de-camera-em-quatro-vistas.md` — rotation as a view parameter, discrete
-- `docs/adr/0026-giro-de-camera-animado.md` — the animated turn, and what research failed to find
+- `docs/adr/0030-giro-rigido-do-quadro-composto.md` — the rigid composed-frame turn; supersedes 0026
+- `docs/adr/0026-giro-de-camera-animado.md` — the per-position turn this replaced, kept as record
 - `packages/iso-core/src/rotation.ts` — the four discrete views and the reindexing
-- `packages/iso-core/src/rotation-tween.ts` — continuous rotation, easing and the short path
+- `packages/iso-core/src/rotation-rigid.ts` — the screen affine `L(τ)` and its snapped endpoints
+- `packages/iso-core/src/rotation-tween.ts` — tween timing, easing and the short path
 - `packages/iso-core/src/depth.ts` — the key whose `x+y` term rotation invalidates
 - `packages/iso-core/src/geometry.ts` — the projection this pre-transforms into
 - `tools/map-builder/src/scene.ts` — the cross-fade and the ticker loop

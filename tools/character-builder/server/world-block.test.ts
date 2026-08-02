@@ -28,8 +28,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { PixelLabClient, PixelLabError, type ApiResult } from '../../pixellab-pipeline/src/api.ts';
-import { mouldBase64, BLOCK_GEOMETRY } from './cube-mould.ts';
-import { readPngHeader } from './png.ts';
+import { apiImageSize, mouldBase64, BLOCK_GEOMETRY } from './cube-mould.ts';
+import { decodePngToRgba, encodePngFromRgba, readPngHeader } from './png.ts';
 import { DIRECTIONS } from './model.ts';
 import {
   runWorldBlock,
@@ -37,6 +37,8 @@ import {
   listWorldBlocks,
   facingPrompt,
   worldBlockHash,
+  padPngToApiCanvas,
+  apiBytesToCanonicalPng,
   WorldBlockValidationError,
   BLOCK_FACINGS,
   FACING_TO_V3_DIRECTION,
@@ -131,6 +133,13 @@ class FakeClient extends PixelLabClient {
     super('fake-token-for-test-only');
   }
 
+  /**
+   * Simula o estado do fornecedor em 2026-08-01: qualquer submissão de tile
+   * com init_image/color_image morre em 422 síncrono (validação pede PNG,
+   * worker exige RGBA cru — incompatíveis; ver o comentário em generateTile).
+   */
+  rejectImageInputs = false;
+
   override async request<T>(
     method: string,
     path: string,
@@ -138,6 +147,16 @@ class FakeClient extends PixelLabClient {
   ): Promise<ApiResult<T>> {
     if (method === 'POST' && path === '/create-isometric-tile') {
       const b = (body ?? {}) as Record<string, unknown>;
+      if (this.rejectImageInputs && ('init_image' in b || 'color_image' in b)) {
+        // Antes do push: o 422 não cobra, não vira ledger e não conta corpo.
+        throw new PixelLabError(
+          '422 em POST /create-isometric-tile',
+          422,
+          '{"detail":[{"type":"value_error","loc":["body","init_image","base64"],' +
+            '"msg":"Value error, decodes but is not a readable image."}]}',
+          false,
+        );
+      }
       this.tileBodies.push(b);
       this.order.push(String(b['description']));
       const seed = Number(b['seed']);
@@ -386,26 +405,28 @@ test('chained: 4 gerações, norte PRIMEIRO com o molde, e o resultado dela nas 
     assert.equal(result.generated, 4);
     assert.equal(result.technique, 'chained');
 
-    // Norte primeiro, com o MOLDE como init_image.
+    // Norte primeiro, com o MOLDE como init_image — acolchoado no canvas da
+    // API (múltiplos de 4; o 48×53 cru falha com code 3006 no fornecedor).
     assert.equal(client.order[0], facingPrompt('grass on top of dirt', 'north'));
     const northBody = client.tileBodies[0]!;
     assert.deepEqual(
       northBody['init_image'],
-      { type: 'base64', base64: mouldBase64() },
-      'a norte nasce do molde do cubo',
+      { type: 'base64', base64: padPngToApiCanvas(mouldBase64(), apiImageSize()) },
+      'a norte nasce do molde do cubo, no canvas da API',
     );
     assert.equal(northBody['init_image_strength'], 480);
     assert.equal(northBody['color_image'], undefined, 'a primeira não tem paleta para travar');
 
     // As outras três recebem o RESULTADO da norte como molde E paleta.
     const northB64 = readFileSync(facePath(dir, result.hash, 'north')).toString('base64');
+    const northApiB64 = padPngToApiCanvas(northB64, apiImageSize());
     for (const b of client.tileBodies.slice(1)) {
       assert.deepEqual(
         b['init_image'],
-        { type: 'base64', base64: northB64 },
+        { type: 'base64', base64: northApiB64 },
         'o resultado da norte É o molde das outras faces',
       );
-      assert.deepEqual(b['color_image'], { type: 'base64', base64: northB64 });
+      assert.deepEqual(b['color_image'], { type: 'base64', base64: northApiB64 });
     }
 
     // Cada vista tem seu prompt e sua arte.
@@ -419,11 +440,13 @@ test('chained: 4 gerações, norte PRIMEIRO com o molde, e o resultado dela nas 
     );
     assert.equal(new Set(bytes).size, 4, '4 vistas = 4 artes distintas');
 
-    // O canvas é o bounding box do molde, não um quadrado.
-    assert.deepEqual(client.tileBodies[0]!['image_size'], {
-      width: BLOCK_GEOMETRY.spriteWidth,
-      height: BLOCK_GEOMETRY.spriteHeight,
-    });
+    // O canvas da API é o bounding box arredondado a múltiplos de 4 — nunca o
+    // canônico cru (48×53 falha no fornecedor com code 3006).
+    assert.deepEqual(client.tileBodies[0]!['image_size'], apiImageSize());
+    assert.equal(apiImageSize().width % 4, 0);
+    assert.equal(apiImageSize().height % 4, 0);
+    assert.ok(apiImageSize().width >= BLOCK_GEOMETRY.spriteWidth);
+    assert.ok(apiImageSize().height >= BLOCK_GEOMETRY.spriteHeight);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -445,6 +468,55 @@ test('chained: segunda execução com a mesma config — ZERO submissões e from
   }
 });
 
+test('canvas da API: acolchoa a múltiplos de 4 e o recorte devolve o quadro canônico intacto', () => {
+  const frame = { width: BLOCK_GEOMETRY.spriteWidth, height: BLOCK_GEOMETRY.spriteHeight };
+  const api = apiImageSize();
+
+  const rgba = Buffer.alloc(frame.width * frame.height * 4);
+  for (let i = 0; i < rgba.length; i += 1) rgba[i] = (i * 31 + 7) & 0xff;
+  const canonical = encodePngFromRgba(rgba, frame.width, frame.height);
+
+  // A ida emite RGBA CRU no canvas da API — é o que `Image.frombytes` do
+  // backend espera; um PNG aqui derruba o job com "Expected image of size".
+  const padded = Buffer.from(padPngToApiCanvas(canonical.toString('base64'), api), 'base64');
+  assert.equal(padded.length, api.width * api.height * 4, 'RGBA cru, nunca PNG');
+
+  // A API devolve os pixels CRUS do canvas DELA — a volta tem de ser a
+  // inversa exata da ida.
+  const cropped = apiBytesToCanonicalPng(padded, api, frame);
+  const back = readPngHeader(cropped);
+  assert.equal(back.width, frame.width);
+  assert.equal(back.height, frame.height);
+  assert.deepEqual(decodePngToRgba(cropped).data, rgba, 'ida e volta sem perder um byte');
+});
+
+test('fornecedor recusando init/color (estado 2026-08-01) → resubmete sem imagens e completa', async () => {
+  const dir = tmpDir();
+  try {
+    const logs: string[] = [];
+    const client = new FakeClient();
+    client.rejectImageInputs = true;
+    const result = await runWorldBlock(client, baseConfig(), opts(dir, logs));
+
+    assert.equal(result.generated, 4, 'as 4 vistas saem mesmo com o fornecedor recusando imagem');
+    assert.equal(client.tileBodies.length, 4, 'o 422 síncrono não conta como submissão');
+    for (const b of client.tileBodies) {
+      assert.ok(!('init_image' in b), 'o fallback remove o init_image');
+      assert.ok(!('color_image' in b), 'o fallback remove o color_image');
+      assert.ok(!('init_image_strength' in b));
+    }
+    assert.ok(
+      logs.some((l) => l.includes('recusou init_image')),
+      'o aviso do fallback é gritante no log',
+    );
+    for (const f of BLOCK_FACINGS) {
+      assert.ok(existsSync(facePath(dir, result.hash, f)), `face ${f} em disco`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('chained: apagar UMA face regenera só ela, encadeada na norte que está em disco', async () => {
   const dir = tmpDir();
   try {
@@ -456,7 +528,10 @@ test('chained: apagar UMA face regenera só ela, encadeada na norte que está em
     assert.equal(client.tileBodies.length, 1, 'só a face que sumiu volta a custar');
     assert.equal(client.tileBodies[0]?.['description'], facingPrompt('grass on top of dirt', 'east'));
     const northB64 = readFileSync(facePath(dir, first.hash, 'north')).toString('base64');
-    assert.deepEqual(client.tileBodies[0]?.['init_image'], { type: 'base64', base64: northB64 });
+    assert.deepEqual(client.tileBodies[0]?.['init_image'], {
+      type: 'base64',
+      base64: padPngToApiCanvas(northB64, apiImageSize()),
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -584,10 +659,10 @@ test('rotated: 1 tile (source com o molde) + 1 v3, 8 direções em v3/, 4 faces 
     assert.equal(result.generated, 2);
     assert.equal(result.technique, 'rotated');
 
-    // A source nasce do molde, como na chained.
+    // A source nasce do molde, como na chained — acolchoado no canvas da API.
     assert.deepEqual(client.tileBodies[0]!['init_image'], {
       type: 'base64',
-      base64: mouldBase64(),
+      base64: padPngToApiCanvas(mouldBase64(), apiImageSize()),
     });
     assert.ok(existsSync(blockFile(dir, result.hash, 'source.png')));
 
