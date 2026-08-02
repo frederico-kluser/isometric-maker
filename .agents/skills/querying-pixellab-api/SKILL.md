@@ -13,7 +13,7 @@ metadata:
 Before asserting anything about this API. Before writing a request body. Before quoting a limit,
 an enum value, a price, or a response code.
 
-This skill is the **hub**. It owns what is true of every endpoint; the nine domain skills below own
+This skill is the **hub**. It owns what is true of every endpoint; the seven domain skills below own
 what is true of one family. Load this one first, then the family.
 
 ## Routing to the domain skills
@@ -25,10 +25,7 @@ what is true of one family. Load this one first, then the family.
 | animation, frame counts, animation modes, skeletons | `animating-pixellab-sprites` |
 | props, map objects, the review/select-frames flow | `composing-pixellab-objects` |
 | terrain, Wang tilesets, isometric tiles, tiles-pro | `generating-pixellab-tilesets` |
-| text-to-image, model choice, prompt enhancement | `creating-pixellab-images` |
 | inpaint, edit, resize, remove background, to-pixelart | `editing-pixellab-images` |
-| portraits, visemes, lip-sync, talking heads | `generating-pixellab-portraits` |
-| UI panels, HUD elements, pixel fonts | `designing-pixellab-interfaces` |
 | polling, retries, error codes, balance, job lifecycle | `orchestrating-pixellab-jobs` |
 
 ## Injected knowledge
@@ -201,7 +198,7 @@ Treat `node $S summary` plus this skill's verification signal as the real drift 
 ## References
 
 - `references/spec-queries.md` — raw `jq` recipes, for when the script is not enough
-- The nine domain skills in the routing table above — each owns one spec group and its traps
+- The seven domain skills in the routing table above — each owns one spec group and its traps
 - Machine-wide skill `pixellab-assets` — general API lore, licensing, cost strategy. This skill
   deliberately does not restate it; it covers only what is true of the vendored snapshot in **this**
   repository.

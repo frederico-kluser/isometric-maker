@@ -67,10 +67,7 @@ The usual mappings:
 | animation, frame counts, animation modes, skeletons | `animating-pixellab-sprites` |
 | props, map objects, the review/select-frames flow | `composing-pixellab-objects` |
 | terrain, Wang tilesets, isometric tiles, tiles-pro | `generating-pixellab-tilesets` |
-| text-to-image, model choice, prompt enhancement | `creating-pixellab-images` |
 | inpaint, edit, resize, remove background, to-pixelart | `editing-pixellab-images` |
-| portraits, visemes, lip-sync, talking heads | `generating-pixellab-portraits` |
-| UI panels, HUD elements, pixel fonts | `designing-pixellab-interfaces` |
 | polling, retries, error codes, balance, job lifecycle | `orchestrating-pixellab-jobs` |
 | generating assets, the pipeline CLI, catalog or cost code | `guarding-generation-cost` |
 | screen↔grid conversion, draw order, the depth key, the anchor | `projecting-isometric-geometry` |

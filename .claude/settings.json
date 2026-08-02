@@ -1,0 +1,51 @@
+{
+  "$comment": "Deterministic enforcement for the knowledge-skills system. Prose in a skill is advice; these are guarantees. Hooks are captured at session start, so edits here take effect on the next session - validate a hook by piping a JSON payload into it directly.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-skill-write.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-security.mjs\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bootstrap-stop.mjs\""
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(node .agents/skills/scripts/lint-skills.mjs:*)",
+      "Bash(node .agents/skills/scripts/run-skill-evals.mjs:*)",
+      "Bash(node .agents/skills/scripts/check-spec-claims.mjs:*)",
+      "Bash(node .agents/skills/scripts/validate-bootstrap.mjs:*)",
+      "Bash(node .agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs:*)",
+      "Bash(bash scripts/check-docs.sh)",
+      "Bash(git hash-object:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)"
+    ]
+  }
+}

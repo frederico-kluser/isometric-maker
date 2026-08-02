@@ -118,7 +118,6 @@ not.
 
 ## References
 
-- `creating-pixellab-images` — generating from scratch, and the shared style-hint enums
 - `animating-pixellab-sprites` — `/edit-animation-v2` and `/transfer-outfit-v2`, the frame-batch editors
 - `orchestrating-pixellab-jobs` — which of these poll, and the `529` retry surface
 - `guarding-generation-cost` — editing an asset changes its hash and therefore re-bills it
