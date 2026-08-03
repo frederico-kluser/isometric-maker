@@ -43,6 +43,7 @@ test('seedStudio — v2: manequim com wizard na etapa sul', () => {
   assert.equal(m.description, '', 'description vazia — o wizard preenche');
   assert.equal(m.size, 128, 'manequim nasce 128×128 (decisão: qualidade máxima)');
   assert.equal(m.seed, 1);
+  assert.equal(m.mold, 'adulto', 'molde adulto é a referência padrão do projeto (ADR 0035)');
 
   assert.ok(m.wizard, 'manequim nasce com wizard');
   assert.equal(m.wizard.etapa, 'sul');

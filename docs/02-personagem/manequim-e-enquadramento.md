@@ -53,6 +53,24 @@ negative_desc.:   clothes, clothing, shirt, ... hair, hairstyle, beard, ... eyes
 O modo é **por personagem**. O corpo-base nasce com ele ligado; personagens derivados nascem com ele
 desligado, porque derivado é para ficar vestido.
 
+## Molde de proporção como referência de geração
+
+Além do andaime por texto, a sul pode nascer sobre um **molde de proporção** (ADR 0035): o adulto ou a
+criança vão como `init_image` do `/create-image-bitforge` com força `MOLD_INIT_STRENGTH = 320` (não
+500 — a faixa "fiel" traria a textura do boneco de madeira junto com a proporção), a referência do
+usuário passa a `style_image` com força 50, e o `negative_description` ganha `MOLD_NEGATIVE`, que
+nomeia o boneco para o modelo evitá-lo. Sem molde, nada muda: a referência volta a `init_image` com
+força 500.
+
+**O adulto é o padrão do projeto** (2026-08-03): o manequim do `seedStudio` nasce com `mold: "adulto"`
+e os personagens derivados herdam o molde do corpo-base — o seletor do passo da sul continua com as
+três opções (`Nenhum / Adulto / Criança`). Com isso, o projeto parou de shipar o manequim gerado
+pronto que vivia em `packages/game-assets/manequim/` (bundle com 12 PNGs + `mannequin.json`, removido
+nesta onda): o corpo-base é gerado de novo a partir do molde, e a cadeia inteira herda a proporção —
+as 8 direções derivam da sul pelo `create-character-v3` (modo `reference_image`) e as ações/poses
+derivam do personagem fechado. **O sprite-lab não recebe molde**: o `CreateCharacterV3Request` do spec
+vendorizado não tem `init_image` — molde só entra pelo bitforge, no passo da sul.
+
 ## Preenchimento do quadro
 
 Na configuração, `Preencher o quadro nas 8 direções` — ligado por padrão. Depois do download das oito
@@ -95,9 +113,11 @@ rodar duas vezes recortaria o recorte e o personagem encolheria a cada execuçã
 ## Referências
 
 - [ADR 0028](../adr/0028-modo-manequim-e-preenchimento-do-quadro.md) — a decisão e o porquê
+- [ADR 0035](../adr/0035-molde-de-proporcao-como-referencia-de-geracao.md) — o molde como `init_image` com força 320
 - [ADR 0019](../adr/0019-create-character-v3-e-o-caminho-do-personagem.md) — por que a v3
 - [`tools/character-builder/server/mannequin-prompt.ts`](../../tools/character-builder/server/mannequin-prompt.ts) — o andaime e os negativos
+- [`tools/character-builder/server/mold.ts`](../../tools/character-builder/server/mold.ts) — a força do molde e o negativo que nomeia o boneco
 - [`tools/character-builder/server/frame-fit.ts`](../../tools/character-builder/server/frame-fit.ts) — o recorte comum
 - [`docs/01-pixellab/custos-e-limites.md`](../01-pixellab/custos-e-limites.md) — custo estimado por endpoint
 
-**Última atualização:** 2026-08-01
+**Última atualização:** 2026-08-03
