@@ -1,6 +1,6 @@
 ---
 name: routing-pixijs-work
-description: Routes any task touching the PixiJS renderer of this isometric editor, choosing between the 26 official PixiJS skills vendored from the package and this repo's own bridge skills, and enforcing that no PixiJS API is ever written from memory. Use whenever a request involves drawing, rendering, scene, camera, sprite, animation, tilemap, atlas, editor chrome, input or frame rate - including Portuguese phrasings like "desenhar na tela", "renderizar o mapa", "montar a cena", "animar o personagem", "mover a camera", "carregar o atlas", "clicar na celula", "selecionar o bloco", "esta com lag", "quantos quadros por segundo". Use it before writing any line that imports pixi.js. Triggers on PixiJS, pixi, renderizador, cliente, canvas, WebGPU, WebGL, sprite, spritesheet, tilemap, isometrico, culling, ticker, draw call, editor.
+description: Routes any task touching PixiJS in this repo — the exported game's runtime (tools/runtime) and the atlas packer (tools/pixellab-pipeline/src/atlas.ts) — choosing between the 26 official PixiJS skills vendored from the package and this repo's own bridge skills, and enforcing that no PixiJS API is ever written from memory. The map editor no longer uses PixiJS; route its rendering to the Three.js family instead. Use whenever a request involves drawing, rendering, scene, camera, sprite, animation, tilemap, atlas, input or frame rate in the runtime or the packer - including Portuguese phrasings like "desenhar na tela", "renderizar o mapa", "montar a cena", "animar os sprites do jogo", "mover a camera", "carregar o atlas", "esta com lag", "quantos quadros por segundo". Use it before writing any line that imports pixi.js. Triggers on PixiJS, pixi, renderizador, cliente, canvas, WebGPU, WebGL, sprite, spritesheet, tilemap, isometrico, culling, ticker, draw call, runtime, atlas, jogo exportado.
 metadata:
   type: router
   verification_signal: node .agents/skills/scripts/check-pixi-claims.mjs
@@ -9,13 +9,22 @@ metadata:
 # Routing PixiJS work
 
 **Sub-router.** `project-router` runs first and asks the general questions. This one runs after it,
-for the renderer half of a task, and asks only what is specific to PixiJS. Its questions to the
+for the PixiJS half of a task, and asks only what is specific to PixiJS. Its questions to the
 developer are in Brazilian Portuguese, like every other question this repo asks.
+
+**The map editor is Three.js — it does not route here.** PixiJS survives in `tools/runtime`, the
+exported game's runtime, and `tools/pixellab-pipeline/src/atlas.ts`, the atlas packer. Tasks about
+the editor's viewport route to the Three.js family instead.
 
 ## When to use
 
-Before writing any line that imports `pixi.js`. Before answering any question about what PixiJS can
-or cannot do. Before estimating whether something will hold its frame rate.
+Before writing any line that imports `pixi.js` — in `tools/runtime` or
+`tools/pixellab-pipeline/src/atlas.ts`. Before answering any question about what PixiJS can or
+cannot do. Before estimating whether something will hold its frame rate.
+
+Not for the map editor: it renders with Three.js and is routed to the Three.js family
+(`bootstrapping-threejs-scene`, `creating-threejs-cubes`, `controlling-threejs-camera`,
+`raycasting-threejs-blocks`).
 
 ## The rule that comes before any routing
 
@@ -36,10 +45,10 @@ The source of truth is `tools/pixi-reference/vendor/`, pinned at pixi.js 8.19.0
 
 `project-router` has already asked about scope and acceptance. Ask only what changes renderer work:
 
-- "Isso é código de cliente que vai para produção, ou é protótipo para ver na tela?"
+- "Isso roda no jogo exportado (`tools/runtime`) ou no empacotador de atlas (`tools/pixellab-pipeline/src/atlas.ts`)?"
 - "Qual o orçamento de quadro? 60 fps travado, ou 30 é aceitável nesse caso?"
 - "Quantos sprites simultâneos, na pior hipótese que você consegue imaginar?"
-- "Isso desenha estado do documento em edição, ou é chrome do editor? Com que frequência muda?"
+- "Isso desenha o mapa do jogo exportado, ou é um passo do build de sprites? Com que frequência muda?"
 - "Pode depender de pacote da comunidade, ou só do `pixi.js` que já está fixado?"
 
 The last one is not a formality: several things a renderer needs — tilemap, UI kit, extra filters —
@@ -49,7 +58,7 @@ verified**. Adding one is a dependency decision, not an implementation detail.
 ### 2. Classify the surface
 
 Which of the ten areas the task touches, and for each: is the question **what the API does** or **how
-this editor does it**? That single distinction decides the routing.
+this repo does it**? That single distinction decides the routing.
 
 ### 3. Route
 
@@ -58,15 +67,15 @@ this editor does it**? That single distinction decides the routing.
 
 Most real tasks need one of each.
 
-| The task is about | Upstream, for the API | Here, for this editor |
+| The task is about | Upstream, for the API | Here, for this repo |
 |---|---|---|
 | booting the app, the frame loop, teardown | `pixijs-application`, `pixijs-ticker` | `bootstrapping-pixi-app` |
 | WebGPU vs WebGL, resolution, pixel-art sharpness | `pixijs-core-concepts`, `pixijs-environments` | `choosing-pixi-renderer` |
 | containers, camera, draw order, culling | `pixijs-scene-core-concepts`, `pixijs-scene-container` | `composing-pixi-scene` |
 | sprites, atlas, animation, wardrobe layers | `pixijs-scene-sprite`, `pixijs-assets` | `animating-pixi-sprites` |
 | the ground, tiles, stacked blocks, very many quads | `pixijs-scene-particle-container` | `rendering-pixi-tilemap` |
-| clicks, pointer, hit-testing, picking a cell | `pixijs-events`, `pixijs-math` | `handling-pixi-input` |
-| labels, editor chrome, fonts | `pixijs-scene-text` | `building-pixi-ui` |
+| clicks, pointer, hit-testing | `pixijs-events`, `pixijs-math` | `handling-pixi-input` |
+| labels, UI text, fonts | `pixijs-scene-text` | `building-pixi-ui` |
 | filters, masks, blend modes | `pixijs-filters`, `pixijs-blend-modes` | `applying-pixi-filters` |
 | smoothing motion between grid cells, the jump | `pixijs-ticker` | `interpolating-pixi-state` |
 | frame rate, draw calls, GPU memory, leaks | `pixijs-performance` | `profiling-pixi-performance` |

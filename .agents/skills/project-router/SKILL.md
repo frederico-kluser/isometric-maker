@@ -74,21 +74,30 @@ The usual mappings:
 | collision, walkability, steps, jumping, falling, deterministic replay | `simulating-isometric-physics` |
 | placing a piece, picking a cell, painting terrain, autotiling, exporting the map | `editing-isometric-maps` |
 | rotating the camera, more than one view of the map, "efeito 3D" | `rotating-isometric-camera` — and it is an **ADR**, not a ticket |
+| booting the 3D viewport, the light rig, resize, teardown | `bootstrapping-threejs-scene` |
+| block cubes, their faces, textures, materials | `creating-threejs-cubes` |
+| camera controls — pan, zoom, the 90° rotations | `controlling-threejs-camera` |
+| clicking a block, placing or removing with the mouse, picking a cell | `raycasting-threejs-blocks` |
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
-| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate |
+| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate — for the map editor 3D, delegate to the Three.js skills instead |
+| **map editor 3D** — renderer, scene, camera, picking, the viewport | the Three.js family: `bootstrapping-threejs-scene`, `creating-threejs-cubes`, `controlling-threejs-camera`, `raycasting-threejs-blocks`; hand off, do not enumerate |
 | no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
 
 `routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in
 `tools/pixi-reference/vendor/skills/`. Delegate the renderer half of a task to it rather than picking
 from that set here — it exists so this table does not have to grow by thirty-six rows.
 
-**The three isometric skills are the model, not the renderer, and the split matters.** What is *true*
+With the 2D editor removed (ADR 0037), PixiJS in the repo survives only in `tools/runtime` and the
+atlas packer. The `routing-pixijs-work` family has been re-scoped accordingly.
+
+**The isometric skills are the model, not the renderer, and the split matters.** What is *true*
 about the world — which cell a pixel falls in, what may occupy it, what draws before what — belongs
-to them. How it reaches the screen belongs to `routing-pixijs-work`. A task about a sprite drawn in
-the wrong order needs both: the key comes from `projecting-isometric-geometry`, the sort from
-`composing-pixi-scene`. Loading only the renderer half produces a fix in the wrong layer.
+to them. How it reaches the screen belongs to the renderer half: the Three.js family for the map
+editor, `routing-pixijs-work` for the runtime and the atlas packer. A task about something drawn in
+the wrong order needs both: the key comes from `projecting-isometric-geometry`, the sort from the
+renderer side. Loading only the renderer half produces a fix in the wrong layer.
 
 **There is no server, and no skill claims otherwise.** This repository is a local single-user
 isometric editor (`docs/adr/0010-pivo-para-editor-isometrico.md`); `enforcing-server-authority` was

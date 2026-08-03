@@ -17,7 +17,7 @@ skill still reads as if a server decided anything, that is a leftover and a defe
 | Skill | Type | Fires on |
 |---|---|---|
 | [`project-router`](project-router/SKILL.md) | router | **every** request that touches this repo — it asks clarifying questions in pt-BR, writes `TASK_PLAN.md`, selects the chain, and deletes the plan at the end |
-| [`routing-pixijs-work`](routing-pixijs-work/SKILL.md) | router | sub-router, entered from `project-router` for anything drawn on screen — splits every question into "what the API does" (vendored upstream) and "how this editor does it" (the ten bridge skills below) |
+| [`routing-pixijs-work`](routing-pixijs-work/SKILL.md) | router | sub-router, entered from `project-router` for PixiJS work — the exported game's runtime (`tools/runtime`) and the atlas packer (`tools/pixellab-pipeline/src/atlas.ts`) — splits every question into "what the API does" (vendored upstream) and "how this repo does it" (the ten bridge skills below); the map editor's 3D rendering routes to the Three.js family instead |
 
 Nothing else should be planned or edited before the router runs.
 
@@ -58,8 +58,8 @@ now documents the one that was. Signal for all four: the package's own test suit
 | Skill | Owns | The trap it exists for |
 |---|---|---|
 | [`projecting-isometric-geometry`](projecting-isometric-geometry/SKILL.md) | the 2:1 projection, the cube's vertical edge, the floor rule, the diagonal identity, the depth key, the declared anchor | `zStep` is not a taste parameter: it is `sqrt((W²−H²)/2)`, and the `16` this repo shipped drew blocks at 40.8% of a cube — see `docs/adr/0024` |
-| [`simulating-isometric-physics`](simulating-isometric-physics/SKILL.md) | continuous xy over integer Z, support and edge rules, the one-level step, the screen-only jump parabola, deterministic replay | routing the step through `canCross` looks like deduplication and makes every staircase unwalkable |
-| [`editing-isometric-maps`](editing-isometric-maps/SKILL.md) | picking as a diagonal walk, the RLE column store, autotiling from returned rules, the two formats — RLE to author, instances to export | hit-testing sprites picks the wrong cell exactly at the diamond edges, where the user aims |
+| [`simulating-isometric-physics`](simulating-isometric-physics/SKILL.md) | continuous xy over integer Z, support and edge rules, the one-level step, the screen-only jump parabola, the swept AABB box (0.65) that gives the character a body, deterministic replay | routing the step through `canCross` looks like deduplication and makes every staircase unwalkable |
+| [`editing-isometric-maps`](editing-isometric-maps/SKILL.md) | the Raycaster face-normal picking contract, the pure MapData→MapData editing state, the RLE column store, autotiling rules that never reached the UI, the export contract | clicking the face of a cube places in the adjacent cell, not on it — and the first ray hit is the surface the camera sees, not a sprite |
 | [`rotating-isometric-camera`](rotating-isometric-camera/SKILL.md) | the four views: discrete rotation state, Z invariance, the `x+y` term that must be recomputed, the animated turn, camera-fixed light | the reference engine ships **two** sort implementations and still calls its occlusion fix partial — and the sprite can never be rotated, only cross-faded |
 
 `editing-isometric-maps` also carries the list of what the editor **does not have** — multi-cell
@@ -71,8 +71,11 @@ now implemented; the skill says so, because a stale absence wastes a whole task.
 ## Knowledge — PixiJS, and what upstream cannot know
 
 The `pixi.js` package publishes its own 26 agent skills, vendored here with provenance. **These ten
-do not restate the API.** Each carries what this game does and hands the API question to the upstream
-skill named in its references. All ten share one verification signal:
+do not restate the API.** Each carries what this repo does with PixiJS and hands the API question to
+the upstream skill named in its references. **The family was re-scoped with the 3D pivot: the map
+editor no longer uses PixiJS.** What remains is `tools/runtime` — the exported game's runtime, still
+pinned at pixi.js 8.19.0 — and `tools/pixellab-pipeline/src/atlas.ts`, the atlas packer. All ten
+share one verification signal:
 `node .agents/skills/scripts/check-pixi-claims.mjs`, which resolves every PixiJS symbol they name
 against the pinned declarations and **fails on deprecated ones**, because v8 kept the v7 methods as
 shims and v7 code therefore typechecks clean.
@@ -89,6 +92,19 @@ shims and v7 code therefore typechecks clean.
 | [`applying-pixi-filters`](applying-pixi-filters/SKILL.md) | the render-target budget, and which effects are cheaper as art than as shaders |
 | [`interpolating-pixi-state`](interpolating-pixi-state/SKILL.md) | render clock apart from logic clock, smoothing motion between grid cells, the jump whose parabola exists only on screen |
 | [`profiling-pixi-performance`](profiling-pixi-performance/SKILL.md) | there is no baseline yet, draw calls over sprite counts, the GC options that are now silently ignored |
+
+## Knowledge — Three.js, the map editor's renderer
+
+The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Four skills
+carry how this editor renders — scene boot, cubes, camera, picking. They share one verification
+signal: `cd tools/character-builder && npx tsc --noEmit`.
+
+| Skill | Owns |
+|---|---|
+| [`bootstrapping-threejs-scene`](bootstrapping-threejs-scene/SKILL.md) | async init do WebGLRenderer, lights, render-on-demand, ResizeObserver, teardown |
+| [`creating-threejs-cubes`](creating-threejs-cubes/SKILL.md) | BoxGeometry face order, material array, NearestFilter, procedural fallback, shared geometry |
+| [`controlling-threejs-camera`](controlling-threejs-camera/SKILL.md) | pan via view-plane, integer zoom, discrete 90° rotation, no OrbitControls |
+| [`raycasting-threejs-blocks`](raycasting-threejs-blocks/SKILL.md) | Raycaster, face normal → adjacent cell, ground plane, 4 traps |
 
 ## Task — procedures with a pass/fail signal
 
@@ -116,6 +132,7 @@ nothing; that is the intended outcome.
 | `node .agents/skills/scripts/run-skill-evals.mjs [--skill N] [--write-token]` | routing evals, body invariants, citation resolution — and the **only** way to mint the token the write gate requires |
 | `node .agents/skills/scripts/check-spec-claims.mjs` | every endpoint and enum a skill asserts exists in the vendored spec |
 | `node .agents/skills/scripts/check-pixi-claims.mjs` | every PixiJS symbol a skill asserts exists in the pinned declarations, is not deprecated, and every upstream skill it cites is present |
+| `node scripts/check-pixi-pin.mjs` | the three sources of the PixiJS pin agree — **currently failing**: pixi.js was removed from character-builder, so that source is gone; the script needs updating (see `scripts/gate.sh`) |
 | `node .agents/skills/routing-pixijs-work/scripts/inspect-pixi.mjs <cmd>` | query the PixiJS surface without loading 47.533 lines |
 | `node tools/pixi-reference/scripts/vendor-types.mjs [--check]` | regenerate or verify the vendored PixiJS snapshot |
 | `node .agents/skills/scripts/validate-bootstrap.mjs [--phase N]` | the phase gates |
