@@ -51,8 +51,8 @@ Pixel art must not be smoothed. Every texture — loaded or procedural — is co
 ## Procedural fallback: canvas → texture
 
 Blocks without art get solid HSL colors, and their cube faces come from the cube rasterizer in
-`src/map/cube.ts` — `makeCubeCanvasFromHue` and `makeCubeViewsFromHue`
-(`tools/character-builder/src/map/cube.ts:73@4db79a20`, `tools/character-builder/src/map/cube.ts:89@4db79a20`)
+`src/map/3d/cube-canvas.ts` — `makeCubeCanvasFromHue` and `makeCubeViewsFromHue`
+(`tools/character-builder/src/map/3d/cube-canvas.ts:67@171c2e2e`, `tools/character-builder/src/map/3d/cube-canvas.ts:83@171c2e2e`)
 — rasterized with the canonical 48px geometry from iso-core
 (`packages/iso-core/src/iso-cube.ts:222@2ad14e9b`). The rasterizer lives in the character-builder,
 not in iso-core; iso-core owns only the geometry math.
@@ -89,6 +89,6 @@ The "under 100 cubes" draw-call threshold is a rule of thumb, not a measurement.
 ## References
 
 - `tools/character-builder/src/map/3d/cube3d.ts` — the cube factory
-- `tools/character-builder/src/map/cube.ts` — the isometric cube rasterizer
+- `tools/character-builder/src/map/3d/cube-canvas.ts` — the isometric cube rasterizer
 - `packages/iso-core/src/iso-cube.ts` — the canonical cube geometry
 - [Three.js BoxGeometry docs](https://threejs.org/docs/#api/en/geometries/BoxGeometry)
