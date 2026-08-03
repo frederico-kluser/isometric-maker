@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
- * Verifica que as três fontes do pin do PixiJS batem entre si.
+ * Verifica que as duas fontes do pin do PixiJS batem entre si.
  *
- * Três fontes, nenhuma é autoridade sobre a outra:
+ * Duas fontes, nenhuma é autoridade sobre a outra:
  *   (A) tools/pixi-reference/package.json          → dependencies["pixi.js"]
  *   (B) tools/pixi-reference/vendor/manifest.json   → pixiVersion
- *   (C) tools/character-builder/package.json        → dependencies["pixi.js"]
  *
- * Falha se qualquer par divergir.
- * Exit 0 = os três batem.
+ * (C) tools/character-builder/package.json foi removido como fonte em
+ *     2026-08-03 (ADR 0037): o editor migrou para Three.js e não importa
+ *     mais pixi.js. O runtime (tools/runtime) ainda usa a versão pinada.
+ *
+ * Falha se o par divergir.
+ * Exit 0 = as duas batem.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -59,17 +62,13 @@ function readPin(label, filePath, ...segments) {
 const LABELS = {
   A: 'pixi-reference/package.json',
   B: 'pixi-reference/vendor/manifest.json',
-  C: 'character-builder/package.json',
 };
 
 const A = readPin(LABELS.A, resolve(ROOT, 'tools/pixi-reference/package.json'), 'dependencies', 'pixi.js');
 const B = readPin(LABELS.B, resolve(ROOT, 'tools/pixi-reference/vendor/manifest.json'), 'pixiVersion');
-const C = readPin(LABELS.C, resolve(ROOT, 'tools/character-builder/package.json'), 'dependencies', 'pixi.js');
 
 const pairs = [
   ['A', A, 'B', B],
-  ['A', A, 'C', C],
-  ['B', B, 'C', C],
 ];
 
 let ok = true;
@@ -85,4 +84,4 @@ if (!ok) {
   process.exit(1);
 }
 
-console.log(`${GREEN}ok${RESET} pixi.js ${A} bate nos três lugares`);
+console.log(`${GREEN}ok${RESET} pixi.js ${A} bate nas duas fontes`);
