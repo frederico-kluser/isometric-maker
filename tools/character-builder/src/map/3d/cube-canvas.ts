@@ -1,17 +1,16 @@
 /**
  * Cubo isométrico no navegador — a mesma forma do molde, em canvas.
  *
- * Este arquivo **não desenha mais nada por conta própria**. A forma vem inteira
- * de `packages/iso-core/src/cube-raster.ts`, que é o mesmo código que gera o
- * PNG do molde mandado à PixelLab. Antes havia duas implementações da mesma
- * geometria — uma aqui, outra no gerador — e elas discordavam: o editor
- * desenhava a face lateral com `zStep = 16` px enquanto a arte gerada vinha com
- * 20 a 22. O preview mentia sobre onde a peça ia cair.
+ * Antes morava em `map/cube.ts`, que era a ponte para o DOM usada pela cena
+ * PixiJS do editor 2D. Com o fim do 2D (onda 2), os únicos consumidores
+ * restantes são os materiais procedurais do editor 3D (`cube3d.ts`), então a
+ * ponte veio para junto deles.
  *
- * O que sobrou aqui é a ponte para o DOM: `Uint8ClampedArray` → `ImageData` →
- * `<canvas>` → textura do PixiJS.
+ * A forma vem inteira de `packages/iso-core/src/cube-raster.ts` — o mesmo
+ * código que gera o PNG do molde mandado à PixelLab. O que sobra aqui é
+ * `Uint8ClampedArray` → `ImageData` → `<canvas>` → textura.
  *
- * ## Dois usos, uma forma
+ * **Dois usos, uma forma**
  *
  *   1. **Arte de reserva.** Um bloco sem sprite gerado precisa aparecer. Sem
  *      isso o editor só é utilizável DEPOIS de gastar dinheiro na API.
@@ -22,19 +21,14 @@
 import {
   CANONICAL_CUBE,
   type IsoCubeGeometry,
-} from '../../../../packages/iso-core/src/iso-cube.ts';
+} from '../../../../../packages/iso-core/src/iso-cube.ts';
 import {
   materialShader,
   paletteFromHue,
   rasterizeCube,
-  rasterizeDiamond,
   type CubePalette,
-  type Rgba,
   type RgbaImage,
-} from '../../../../packages/iso-core/src/cube-raster.ts';
-
-export type { IsoCubeGeometry } from '../../../../packages/iso-core/src/iso-cube.ts';
-export { CANONICAL_CUBE } from '../../../../packages/iso-core/src/iso-cube.ts';
+} from '../../../../../packages/iso-core/src/cube-raster.ts';
 
 /** Buffer RGBA → canvas, com suavização desligada. */
 function toCanvas(img: RgbaImage): HTMLCanvasElement {
@@ -61,7 +55,7 @@ function toCanvas(img: RgbaImage): HTMLCanvasElement {
  * —, então o sprite ancora no mesmo ponto que a projeção calcula, sem offset
  * mágico em lugar nenhum.
  */
-export function makeCubeCanvas(
+function makeCubeCanvas(
   palette: CubePalette,
   geom: IsoCubeGeometry = CANONICAL_CUBE,
   alpha = 1,
@@ -100,25 +94,3 @@ export function makeCubeViewsFromHue(
     ),
   );
 }
-
-/**
- * Canvas do losango do grid — só o topo, sem laterais.
- *
- * É o que desenha o chão vazio: sem uma malha visível, um mapa vazio é uma tela
- * preta e não há onde clicar com intenção.
- */
-export function makeDiamondCanvas(
-  geom: IsoCubeGeometry,
-  stroke: Rgba,
-  fill?: Rgba,
-): HTMLCanvasElement {
-  return toCanvas(rasterizeDiamond(geom, stroke, fill));
-}
-
-/** `#rrggbb` ou `rgba(...)` não; aqui a cor é estruturada, como no iso-core. */
-export function rgba(r: number, g: number, b: number, a = 255): Rgba {
-  return { r, g, b, a };
-}
-
-export { paletteFromHue } from '../../../../packages/iso-core/src/cube-raster.ts';
-export type { CubePalette, Rgba } from '../../../../packages/iso-core/src/cube-raster.ts';

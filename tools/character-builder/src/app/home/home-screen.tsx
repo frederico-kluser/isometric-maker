@@ -16,7 +16,7 @@
  * tela navega para o editor de mapa.
  */
 import { useRef, useState } from 'react';
-import { BoxIcon, FolderOpenIcon, Grid3x3Icon, UserRoundIcon } from 'lucide-react';
+import { FolderOpenIcon, Grid3x3Icon, UserRoundIcon } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { S } from '../../strings.ts';
 import { navigate, type Route } from '../router.ts';
@@ -100,13 +100,6 @@ export function HomeScreen() {
           title={S.inicio.world.title}
           description={S.inicio.world.description}
           cta={S.inicio.world.cta}
-        />
-        <HomeEntry
-          route="mundo3d"
-          icon={BoxIcon}
-          title="Editor de Mapa 3D"
-          description="Construa mapas em 3D com câmera livre. Coloque blocos mirando nas faces — estilo Minecraft."
-          cta="Abrir editor 3D"
         />
       </nav>
 

@@ -18,7 +18,6 @@ import { AppProviders } from './app/providers.tsx';
 import { AppShell } from './app/shell.tsx';
 import { HomeScreen } from './app/home/home-screen.tsx';
 import { useRoute } from './app/router.ts';
-import { MapEditor } from './map/editor/map-editor.tsx';
 import { MapEditor3D } from './map/3d/map-editor-3d.tsx';
 
 export function App() {
@@ -29,10 +28,8 @@ export function App() {
         <HomeScreen />
       ) : route === 'personagem' ? (
         <AppShell />
-      ) : route === 'mundo3d' ? (
-        <MapEditor3D />
       ) : (
-        <MapEditor />
+        <MapEditor3D />
       )}
     </AppProviders>
   );

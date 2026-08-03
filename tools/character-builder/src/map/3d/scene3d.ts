@@ -28,8 +28,7 @@
 import * as THREE from 'three';
 import type { MapData } from '../../../../../packages/iso-core/src/map.ts';
 import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts';
-import type { BlockDef } from '../scene.ts';
-import type { Cell3D } from '../editor/map-state.ts';
+import type { BlockDef, Cell3D } from './block-def.ts';
 import {
   createCubeMaterials,
   createCubeMesh,

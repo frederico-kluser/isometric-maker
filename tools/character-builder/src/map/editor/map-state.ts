@@ -11,12 +11,7 @@
  * não sabe de que ângulo está sendo olhado.
  */
 import type { BlockRleRun, MapData } from '../../../../../packages/iso-core/src/map.ts';
-
-export interface Cell3D {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
+import type { Cell3D } from '../3d/block-def.ts';
 
 // ------------------------------------------------------------------ coluna densa
 
@@ -115,6 +110,24 @@ export function countBlocks(map: MapData): number {
     for (const run of runs) if (run.block !== '') n += run.count;
   }
   return n;
+}
+
+/**
+ * Altura da coluna (primeiro z livre acima do topo).
+ *
+ * Veio de `pick3d.ts` (onda 2) — o editor 3D usa para assentar no topo da
+ * coluna sem depender da aritmética diagonal do picking antigo.
+ */
+export function columnHeight(map: MapData, x: number, y: number): number {
+  const runs = map.blocks[`${x}:${y}`];
+  if (!runs) return 0;
+  let total = 0;
+  let lastFilled = 0;
+  for (const run of runs) {
+    total += run.count;
+    if (run.block !== '') lastFilled = total;
+  }
+  return lastFilled;
 }
 
 /** Todas as células ocupadas — usado para enquadrar a câmera. */

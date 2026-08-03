@@ -47,19 +47,17 @@ import {
   type BlockCatalog,
 } from '../../../../../packages/iso-core/src/block-catalog.ts';
 import {
-  columnHeight as mapColumnHeight,
-} from '../pick3d.ts';
-import {
   pick3d,
   pickColumnTop as pickColumnTopRaycaster,
   type Pick3DCell,
   type Pick3DResult,
 } from './pick3d-raycaster.ts';
 import { createIsoScene3D, collectBlockMeshes, type IsoScene3D } from './scene3d.ts';
-import type { BlockDef } from '../scene.ts';
+import type { BlockDef } from './block-def.ts';
 import {
   canRedo,
   canUndo,
+  columnHeight as mapColumnHeight,
   countBlocks,
   initHistory,
   occupiedCells,

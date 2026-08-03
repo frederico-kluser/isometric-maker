@@ -30,8 +30,8 @@ import {
   diamondRow,
   type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
-import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from '../cube.ts';
-import type { BlockDef } from '../scene.ts';
+import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from './cube-canvas.ts';
+import type { BlockDef } from './block-def.ts';
 import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts';
 import { rotateDirectionIndex } from '../../../../../packages/iso-core/src/rotation.ts';
 

@@ -26,7 +26,7 @@ import {
   type BlockKind,
   type MaterialId,
 } from '../../../../../packages/iso-core/src/block-catalog.ts';
-import type { BlockDef, Facing } from '../scene.ts';
+import type { BlockDef, Facing } from '../3d/block-def.ts';
 
 interface WorldBlockSummary {
   readonly hash: string;

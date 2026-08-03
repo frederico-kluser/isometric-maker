@@ -1661,8 +1661,12 @@ export async function handle(
 				json(res, 404, { error: `personagem "${b.characterId}" não encontrado` });
 				return true;
 			}
-			const ch = s.characters[idx];
-			if (ch?.builtin) {
+			// `idx !== -1` já retornou acima, então o acesso nunca é undefined.
+			const ch = s.characters[idx]!;
+			// `builtin` não está no tipo Character (os presets foram removidos na
+			// onda anterior), mas pode existir num studio.json legado em disco —
+			// o cast preserva a proteção sem declarar campo novo no modelo.
+			if ((ch as { readonly builtin?: boolean }).builtin) {
 				badRequest(res, "personagens embutidos não podem ser deletados");
 				return true;
 			}

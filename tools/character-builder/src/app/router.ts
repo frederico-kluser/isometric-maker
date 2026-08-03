@@ -15,8 +15,13 @@
  */
 import { useSyncExternalStore } from 'react';
 
-/** As telas de primeiro nível. `inicio` é a raiz. */
-export const ROUTES = ['inicio', 'personagem', 'mundo', 'mundo3d'] as const;
+/**
+ * As telas de primeiro nível. `inicio` é a raiz.
+ *
+ * `mundo3d` deixou de ser rota própria na onda 2 (fim do editor 2D): existe um
+ * só editor de mapa, o 3D, e `#/mundo` é a rota canônica dele.
+ */
+export const ROUTES = ['inicio', 'personagem', 'mundo'] as const;
 export type Route = (typeof ROUTES)[number];
 
 /**
@@ -27,12 +32,15 @@ export const ROUTE_HASH: Record<Route, string> = {
   inicio: '#/',
   personagem: '#/personagem',
   mundo: '#/mundo',
-  mundo3d: '#/mundo3d',
 };
 
 const ROUTE_OF_PATH = new Map<string, Route>(
   ROUTES.map((r) => [ROUTE_HASH[r].slice(1), r]),
 );
+
+// Compat: quem salvou um favorito em #/mundo3d continua caindo no editor de
+// mapa, não na tela inicial.
+ROUTE_OF_PATH.set('mundo3d', 'mundo');
 
 /** Qualquer hash desconhecido cai na tela inicial — inclusive o hash vazio. */
 export function routeFromHash(hash: string): Route {
