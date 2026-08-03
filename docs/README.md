@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-02**: **48 arquivos em `docs/` — 33 ADRs e 15 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-03**: **51 arquivos em `docs/` — 35 ADRs e 16 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -43,6 +43,7 @@ A API que gera a arte. Ela **muda sem versionar**, então a prosa aqui é mínim
 | Arquivo | Descrição |
 |---|---|
 | [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) | A conta do cubo isométrico, os três erros clássicos de perspectiva e o molde encadeado nas duas técnicas de bloco |
+| [`colisao-solida.md`](03-mapa/colisao-solida.md) | Colisão sólida: caixa AABB de 0,65 célula, varredura por eixo com sliding, push-out MTV e a flag `solid` honrada |
 
 ## Plano de execução
 
@@ -59,7 +60,7 @@ Numeração reservada. A convenção 12 diz que doc de infra escrita antes de ex
 
 | Pasta | O que mora ali | Código correspondente |
 | --- | --- | --- |
-| `03-mapa/` | Projeção e coordenadas, o formato do mapa XYZ, autoladrilhamento | `packages/iso-core` + editor de mapa em `tools/character-builder/src/map/` — **código existe, doc parcial: [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) escrito** |
+| `03-mapa/` | Projeção e coordenadas, o formato do mapa XYZ, autoladrilhamento | `packages/iso-core` + editor de mapa em `tools/character-builder/src/map/` — **código existe, doc parcial: [`cubo-e-molde.md`](03-mapa/cubo-e-molde.md) e [`colisao-solida.md`](03-mapa/colisao-solida.md) escritos** |
 | `04-mecanicas/` | Movimento, colisão, degrau e salto por altura | `packages/iso-core` — **código existe, doc pendente** |
 | `05-runtime/` | Como o projeto exportado é carregado e executado | `tools/runtime` — **código existe, doc pendente** |
 | `06-editor/` | Arquitetura do editor, o formato do arquivo de projeto, strings e i18n | — |
@@ -117,6 +118,8 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0034`](./adr/0034-aplicativo-unificado-com-tela-inicial.md) | Um aplicativo só: map-builder fundido no character-builder, tela inicial e rotas por hash, tela inativa desmontada | vigente |
 | [`0035`](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md) | Molde de proporção como `init_image` (força 320), referência do usuário como `style_image` (força 50) | vigente |
 | [`0036`](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md) | Física jogável: corrida é o default, Shift anda, agachar não pula, gravidade contra o mapa com passo fixo | vigente |
+| [`0037`](./adr/0037-editor-3d-apenas.md) | O editor de mapa é 3D (Three.js): o editor 2D do PixiJS sai — 24 arquivos e ~6,3 mil linhas — e `#/mundo` vira a rota única | vigente |
+| [`0038`](./adr/0038-colisao-solida-aabb.md) | Colisão sólida: caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV; a flag `solid` do catálogo é honrada (água/lava não bloqueiam) | vigente |
 
 ## Skills
 
@@ -146,6 +149,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-02 | **Abandono do 3D: textura animada única** ([ADR 0032](./adr/0032-textura-animada-unica-abandono-3d.md)): as técnicas `chained` e `rotated` (4 vistas) saem em favor de UMA textura animada por bloco — `create-image-pixflux` gera a imagem base, um LLM escreve a ação da animação, e o `/animate-with-text-v3` produz os frames; número de frames configurável (4/8/16); a câmera continua girando (ADR 0030) mas a arte do bloco não muda com a perspectiva |
 | 2026-08-02 | **O projeto inteiro num arquivo só** ([ADR 0033](./adr/0033-pacote-de-projeto-autocontido.md)): mapa + personagem + blocos num JSON autocontido, com PNGs em base64 — exporta (POST /api/project/export) e restaura (POST /api/project/import) personagem e blocos; bloco ausente degrada para o cubo procedural |
 | 2026-08-02 | **Um aplicativo só** ([ADR 0034](./adr/0034-aplicativo-unificado-com-tela-inicial.md)): o map-builder é fundido no character-builder — tela inicial (`#/`), estúdio (`#/personagem`) e editor de mapa (`#/mundo`) num processo só, `npm run dev` na raiz; molde de proporção adulto/criança como referência de geração ([ADR 0035](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md)); física jogável no iso-core — marchas, agachar, gravidade e degrau na travessia ([ADR 0036](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md)) |
+| 2026-08-03 | **O editor vira 3D** ([ADR 0037](./adr/0037-editor-3d-apenas.md)): o editor 2D do PixiJS sai (24 arquivos, ~6,3 mil linhas), `#/mundo` é a rota única e `mundo3d` vira apelido; e a **colisão ganha corpo** ([ADR 0038](./adr/0038-colisao-solida-aabb.md)): caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV, com a flag `solid` do catálogo honrada; doc nova [`colisao-solida.md`](03-mapa/colisao-solida.md) |
 
 ## Referências
 
@@ -154,4 +158,4 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 - [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
 - [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-08-02
+**Última atualização:** 2026-08-03
