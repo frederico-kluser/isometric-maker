@@ -38,6 +38,13 @@ import {
   edgesAllowCross,
   type CollisionMap,
 } from './collision.ts';
+import {
+  PLAYER_HALF,
+  pressedCells,
+  resolveMovement,
+  type EntityBox,
+  type MovementResult,
+} from './collision-box.ts';
 import { fallStep, groundZAt, DEFAULT_FALL_SPEED } from './gravity.ts';
 import {
   advanceJump,
@@ -126,7 +133,16 @@ function applyHorizontal(
 // ------------------------------------------------------------------ resolução de colisão
 
 /**
- * Aceita ou recusa a travessia de célula que o movimento horizontal propôs.
+ * Aceita, recusa ou clampa o movimento horizontal que a caixa propôs.
+ *
+ * ## A colisão é por caixa, não por ponto
+ *
+ * O teste histórico era `map.hasBlock(Math.floor(pos))` — o centro do
+ * personagem contra a célula. Agora o corpo é uma {@link EntityBox} de meia
+ * largura `PLAYER_HALF` (0,325 → caixa ~0,65) e o movimento horizontal já vem
+ * resolvido por {@link resolveMovement}: varredura por eixo que clampa a face
+ * no primeiro sólido, com sliding natural (bloquear X não trava Y). Este
+ * ponto de resolução julga o resto: o chão, a aresta e o flag de bloqueio.
  *
  * ## Sair da beirada é cair
  *
@@ -137,12 +153,13 @@ function applyHorizontal(
  * editor onde o utilizador quer testar pulo entre blocos, isso é o oposto do
  * que ele pediu.
  *
- * A regra agora é: uma célula **sem bloco** e **sem suporte** é atravessável
- * desde que exista chão alcançável por baixo. A gravidade resolve a descida no
+ * A regra é: uma célula **sem bloco** e **sem suporte** é atravessável desde
+ * que exista chão alcançável por baixo. A gravidade resolve a descida no
  * passo seguinte, e o `z` continua discreto em todo o instante.
  *
  * Continua proibido:
- *   - entrar numa célula **ocupada por bloco** (bater numa parede);
+ *   - entrar numa célula **ocupada por bloco** (a caixa clampa na face — é o
+ *     `blockedX/blockedY` de {@link resolveMovement});
  *   - atravessar uma aresta com **parede**;
  *   - descer abaixo do plano de chão (`z < 0`);
  *   - entrar numa coluna onde **nenhuma** célula até ao chão é ocupável — o
@@ -151,33 +168,30 @@ function applyHorizontal(
  * **`canEnter` não mudou.** A pergunta "esta célula é ocupável e apoiada?"
  * continua a ser a mesma para `canStepUp`, `canStepDown` e `canCross`. A
  * permissão de queda entra aqui, no ponto de resolução, e só aqui.
+ *
+ * A aresta continua a ser julgada pela travessia do **centro**: uma parede é
+ * uma superfície sem espessura, e a recusa histórica (voltar à posição
+ * anterior) preserva-se — só os blocos, que têm volume, produzem o clamping
+ * de face.
  */
 function resolveCollision(
   map: CollisionMap,
   prevPos: { x: number; y: number },
   nextState: MovementState,
+  moved: MovementResult,
   z: number,
   airborne: boolean,
 ): { blocked: boolean; state: MovementState } {
-  const prevCellX = Math.floor(prevPos.x);
-  const prevCellY = Math.floor(prevPos.y);
-  const nextCellX = Math.floor(nextState.pos.x);
-  const nextCellY = Math.floor(nextState.pos.y);
-
-  if (prevCellX === nextCellX && prevCellY === nextCellY) {
-    return { blocked: false, state: nextState };
-  }
-
   const refuse = (): { blocked: boolean; state: MovementState } => ({
     blocked: true,
     state: { ...nextState, pos: prevPos, vel: { x: 0, y: 0 } },
   });
 
-  // Célula de destino ocupada por bloco → sempre bloqueado.
-  if (map.hasBlock(nextCellX, nextCellY, z)) return refuse();
-
   // Sair do mapa por baixo não é uma queda, é um buraco no modelo.
   if (z < 0) return refuse();
+
+  const nextCellX = Math.floor(moved.x);
+  const nextCellY = Math.floor(moved.y);
 
   // Sem suporte: permitido se houver chão por baixo para onde cair.
   if (!airborne && !canEnter(map, nextCellX, nextCellY, z)) {
@@ -189,12 +203,25 @@ function resolveCollision(
   }
 
   // Aresta. Só a pergunta das paredes: `canCross` recusaria também o destino
-  // sem suporte, que é exactamente o que acabámos de permitir.
-  const fromCell = { x: prevCellX, y: prevCellY, z };
+  // sem suporte, que é exactamente o que acabámos de permitir. A caixa não
+  // vê paredes — elas são superfícies sem volume —, portanto a travessia do
+  // centro continua a ser o juiz delas.
+  const fromCell = { x: Math.floor(prevPos.x), y: Math.floor(prevPos.y), z };
   const toCell = { x: nextCellX, y: nextCellY, z };
+  if ((fromCell.x !== toCell.x || fromCell.y !== toCell.y) &&
+      !edgesAllowCross(map, fromCell, toCell)) {
+    return refuse();
+  }
 
-  if (!edgesAllowCross(map, fromCell, toCell)) return refuse();
-
+  // Clamping de face: a caixa encostou num sólido. Fica na posição clampada
+  // (desliza no eixo livre) e zera a velocidade — `blocked` descreve a
+  // chamada, como sempre.
+  if (moved.blockedX || moved.blockedY) {
+    return {
+      blocked: true,
+      state: { ...nextState, pos: { x: moved.x, y: moved.y }, vel: { x: 0, y: 0 } },
+    };
+  }
   return { blocked: false, state: nextState };
 }
 
@@ -287,26 +314,60 @@ export function fixedStepWithMap(
     jump = advanceJump(jump, config.fixedDt, config.jumpDuration);
   }
 
-  // Movimento horizontal.
+  // Movimento horizontal — a intenção, que a colisão a seguir aceita, recusa
+  // ou clampa.
   const prevPos = state.pos;
   const moved = applyHorizontal({ ...state, z: newZ }, input, config);
 
-  // Degrau — acontece NA travessia da aresta, que é o instante em que a
-  // célula de destino passa a ser a célula do personagem.
+  // Colisão por caixa: resolve o movimento contra os sólidos ANTES do degrau,
+  // para que a face pressionada possa propor o degrau. A caixa de 0,65 encosta
+  // no degrau 0,325 célula antes de o centro cruzar a aresta; se o degrau
+  // esperasse pela travessia do centro, o personagem ficaria preso na parede.
+  // Durante o pulo, a caixa vive no z de destino (é lá que o corpo estará).
+  const zForCollision = isJumpComplete(jump) ? newZ : jump.zDest;
+  const airborne = !isJumpComplete(jump);
+  const dx = moved.pos.x - prevPos.x;
+  const dy = moved.pos.y - prevPos.y;
+  const box: EntityBox = { cx: prevPos.x, cy: prevPos.y, z: zForCollision, half: PLAYER_HALF };
+  const movedBox = resolveMovement(map, box, dx, dy);
+  const blockedByBox = movedBox.blockedX || movedBox.blockedY;
+
+  // Degrau — acontece NA travessia da aresta (comportamento histórico) e,
+  // quando a caixa está pressionada contra um sólido, na célula da face
+  // bloqueada. As duas portas existem porque um corpo de 0,65 encosta antes
+  // de o centro cruzar; sem a porta da face, nenhum degrau seria escalável.
   const nextCellX = Math.floor(moved.pos.x);
   const nextCellY = Math.floor(moved.pos.y);
   const crossing = nextCellX !== cellX || nextCellY !== cellY;
 
   let steppedZ = newZ;
-  if (crossing && isJumpComplete(jump) && !input.jump) {
-    steppedZ = stepZOnCross(
-      map,
-      { x: cellX, y: cellY, z: newZ },
-      nextCellX,
-      nextCellY,
-      input.stepUp,
-      input.stepDown,
-    );
+  if (isJumpComplete(jump) && !input.jump) {
+    if (crossing) {
+      steppedZ = stepZOnCross(
+        map,
+        { x: cellX, y: cellY, z: newZ },
+        nextCellX,
+        nextCellY,
+        input.stepUp,
+        input.stepDown,
+      );
+    }
+    if (steppedZ === newZ && blockedByBox && input.stepUp) {
+      for (const pressed of pressedCells(box, movedBox, dx, dy)) {
+        const stepped = stepZOnCross(
+          map,
+          { x: cellX, y: cellY, z: newZ },
+          pressed.x,
+          pressed.y,
+          true,
+          false,
+        );
+        if (stepped !== newZ) {
+          steppedZ = stepped;
+          break;
+        }
+      }
+    }
   }
 
   if (steppedZ !== newZ) {
@@ -322,11 +383,9 @@ export function fixedStepWithMap(
     };
   }
 
-  // Colisão. Durante o pulo, usa o z de destino para permitir pular sobre
-  // obstáculos.
-  const zForCollision = isJumpComplete(jump) ? newZ : jump.zDest;
-  const airborne = !isJumpComplete(jump);
-  const resolved = resolveCollision(map, prevPos, moved, zForCollision, airborne);
+  // Colisão. A caixa já resolveu os sólidos em `movedBox`; aqui ficam o chão,
+  // a aresta e o flag de bloqueio.
+  const resolved = resolveCollision(map, prevPos, moved, movedBox, zForCollision, airborne);
 
   const next = withJump(
     { ...resolved.state, falling, fallProgress, blocked: resolved.blocked },

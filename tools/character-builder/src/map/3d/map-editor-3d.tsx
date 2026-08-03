@@ -42,6 +42,10 @@ import {
 } from '../../../../../packages/iso-core/src/rotation.ts';
 import { buildExport } from '../../../../../packages/iso-core/src/map-instances.ts';
 import {
+  pushPlayerOutOfCell,
+  type PlayerCell,
+} from '../../../../../packages/iso-core/src/collision-box.ts';
+import {
   DEFAULT_BLOCKS,
   makeCatalog,
   type BlockCatalog,
@@ -118,6 +122,14 @@ export function MapEditor3D() {
   const [pickState, setPickState] = useState<Pick3DResult | null>(null);
   const [ready, setReady] = useState(false);
   const toasts = useMessages();
+
+  /**
+   * Personagem de teste — o modo teste (onda futura) escreve aqui. Enquanto
+   * existir, colocar um bloco sólido sobre ele empurra-o para fora (push-out),
+   * em vez de o deixar dentro da pedra. Hoje só o setter existe: nada lê a
+   * posição ainda.
+   */
+  const [, setTestPlayer] = useState<PlayerCell | null>(null);
 
   const map = history.present;
 
@@ -255,26 +267,42 @@ export function MapEditor3D() {
 
   const applyTool = useCallback((result: Pick3DResult) => {
     const { tool: t, selectedBlock: block } = stateRef.current;
-    setHistory((h) => {
-      const current = h.present;
-      let next: MapData = current;
-      if (t === 'remover') {
-        if (result.hit) next = removeBlock(current, result.hit);
-      } else if (t === 'pintar') {
-        if (result.hit) next = paintBlock(current, result.hit, block);
-        else next = placeBlock(current, result.placement, block);
-      } else if (t === 'colocar') {
-        // Colocar: usa a posição adjacente exata do raycaster (face normal)
-        // NÃO força o topo da coluna — o bloco vai para a face onde o mouse bateu
-        next = placeBlock(current, result.placement, block);
-      } else {
-        // Empilhar: o pickColumnTopRaycaster já resolveu o placement pela face
-        // atingida — face de cima → topo da coluna; face lateral → célula
-        // adjacente no mesmo nível (Minecraft-style). Aqui só aplicamos.
-        next = placeBlock(current, result.placement, block);
-      }
-      return pushHistory(h, next);
-    });
+    const current = stateRef.current.map;
+    let next: MapData = current;
+    if (t === 'remover') {
+      if (result.hit) next = removeBlock(current, result.hit);
+    } else if (t === 'pintar') {
+      if (result.hit) next = paintBlock(current, result.hit, block);
+      else next = placeBlock(current, result.placement, block);
+    } else if (t === 'colocar') {
+      // Colocar: usa a posição adjacente exata do raycaster (face normal)
+      // NÃO força o topo da coluna — o bloco vai para a face onde o mouse bateu
+      next = placeBlock(current, result.placement, block);
+    } else {
+      // Empilhar: o pickColumnTopRaycaster já resolveu o placement pela face
+      // atingida — face de cima → topo da coluna; face lateral → célula
+      // adjacente no mesmo nível (Minecraft-style). Aqui só aplicamos.
+      next = placeBlock(current, result.placement, block);
+    }
+    setHistory((h) => pushHistory(h, next));
+
+    // Push-out: colocar (ou pintar de sólido) um bloco sobre o personagem de
+    // teste empurra-o para fora — colocar bloco sobre personagem nunca o
+    // deixa dentro da pedra. Células de água/lava/folhagem não são sólidas e
+    // não empurram (o `solidAt` honra o catálogo).
+    const cell: Pick3DCell | null =
+      t === 'remover'
+        ? null
+        : t === 'pintar' && result.hit
+          ? result.hit
+          : result.placement;
+    if (cell) {
+      setTestPlayer((p) => {
+        if (!p) return p;
+        const pushed = pushPlayerOutOfCell(next, catalogRef.current, p, cell);
+        return pushed ?? p;
+      });
+    }
   }, []);
 
   const dragging = useRef(false);

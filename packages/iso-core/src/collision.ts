@@ -42,10 +42,19 @@ export interface CollisionCell {
  *
  * `BlockStore` e `EdgeStore` satisfazem esta interface, mas qualquer
  * objecto com `hasBlock` e `hasEdge` serve — facilita o teste.
+ *
+ * `solidAt` é a pergunta da colisão por caixa (`collision-box.ts`): "esta
+ * célula barra a passagem?", honrando o catálogo de materiais
+ * (`blocksMovement`). É opcional de propósito: os duplos de teste históricos
+ * só conhecem `hasBlock`, e sem `solidAt` a colisão por caixa cai para ele —
+ * todo bloco barra, que é o comportamento de sempre. Um adaptador real sobre
+ * o catálogo implementa `solidAt` via `blocksMovement` (ver
+ * `solidAtFromBlocks`).
  */
 export interface CollisionMap {
   hasBlock(x: number, y: number, z: number): boolean;
   hasEdge(x: number, y: number, z: number, lado: EdgeSide): boolean;
+  solidAt?(x: number, y: number, z: number): boolean;
 }
 
 // ------------------------------------------------------------------ canEnter

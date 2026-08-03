@@ -25,8 +25,8 @@
       "why": "the jump parabola is screen-only; collision always tests the integer model z"
     },
     {
-      "must_contain": "the position before the collision",
-      "why": "the body stops rather than sliding or tunnelling — sliding is an undecided behaviour"
+      "must_contain": "per axis, never diagonal",
+      "why": "sliding is decided since onda3: the box sweeps per axis (X first, then Y), so blocking one axis does not block the other — a straight wall hit clamps the face and zeroes the velocity"
     },
     {
       "must_contain": "Never write a fractional",

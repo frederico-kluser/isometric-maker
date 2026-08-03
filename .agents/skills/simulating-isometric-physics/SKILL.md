@@ -1,6 +1,6 @@
 ---
 name: simulating-isometric-physics
-description: Owns how bodies move and collide in this editor - continuous xy over a discrete integer Z, the support rule that decides whether a cell can be occupied, edges that block crossing, the step that climbs exactly one level, and the jump whose parabola exists only on screen. Use whenever moving a character, testing whether a cell or an edge can be crossed, climbing or descending a level, jumping, falling, replaying a deterministic input trace, or deciding whether to bring in a physics engine - including Portuguese phrasings like "o personagem atravessa a parede", "nao consegue subir o degrau", "cai pelo chao", "o pulo esta errado", "colisao diagonal", "o movimento nao e deterministico", "usar motor de fisica", "gravidade", "empurrar objeto". Triggers on canEnter, canCross, canStepUp, canStepDown, runTrace, visualOffsetY, colisao, degrau, pulo, suporte, aresta, determinismo, passo fixo.
+description: Owns how bodies move and collide in this editor - continuous xy over a discrete integer Z, the support rule that decides whether a cell can be occupied, edges that block crossing, the step that climbs exactly one level, the jump whose parabola exists only on screen, and the swept AABB box (0.65) that gives the character a body against solid blocks. Use whenever moving a character, testing whether a cell or an edge can be crossed, climbing or descending a level, jumping, falling, replaying a deterministic input trace - including Portuguese phrasings like "o personagem atravessa a parede", "nao consegue subir o degrau", "cai pelo chao", "o pulo esta errado", "colisao diagonal", "o movimento nao e deterministico", "usar motor de fisica", "gravidade", "empurrar objeto", "personagem dentro da pedra", "agua nao bloqueia". Triggers on canEnter, canCross, canStepUp, canStepDown, runTrace, colisao, degrau, pulo, suporte, aresta, determinismo, passo fixo, collision-box, solidAt, pushOut.
 metadata:
   type: knowledge
   verification_signal: cd packages/iso-core && npm test
@@ -28,15 +28,15 @@ offset — lives in **screen space only** and must never be written back into th
 boundary once and collision starts testing a position that does not exist.
 
 The logic clock is fixed at 1/60 s with a time accumulator; real `dt` is accumulated and consumed in
-discrete steps (`packages/iso-core/src/movement.ts:13@fa05a9d9`). `step(state, input, dt)` is pure:
+discrete steps (`packages/iso-core/src/movement.ts:13@cee4bc63`). `step(state, input, dt)` is pure:
 no DOM, no network, no PixiJS. Same input sequence, same result, on any machine — and that is
 verifiable, not aspirational, because `runTrace` exists to verify it
-(`packages/iso-core/src/trace.ts:213@741fa7ce`).
+(`packages/iso-core/src/trace.ts:213@5274631d`).
 
 ### The defaults, and the one that surprises
 
 `DEFAULT_CONFIG` is `speed: 4` units/s, `fixedDt: 1/60`, `jumpDuration: 0.5` s, `jumpHeight: 1`,
-`stepCooldown: 0.3` s (`packages/iso-core/src/movement.ts:80@fa05a9d9`).
+`stepCooldown: 0.3` s (`packages/iso-core/src/movement.ts:80@cee4bc63`).
 
 **`jumpHeight` is 1 — the same level a plain step already climbs.** By default the jump buys nothing
 in reach; it buys crossing a gap and clearing an edge. Anyone who reads "a jump is for what a step
@@ -53,7 +53,7 @@ get a body through a wall.
 
 ### `canEnter(map, x, y, z)` — can a body *be* here?
 
-A cell is enterable when **both** hold (`packages/iso-core/src/collision.ts:61@5720ac42`):
+A cell is enterable when **both** hold (`packages/iso-core/src/collision.ts:61@2866b21a`):
 
 1. It has no block — it is empty.
 2. It has support: at `z = 0` the ground is always support; at `z > 0` the cell at `z − 1` must have
@@ -65,16 +65,24 @@ nothing under it is **not** enterable — falling is a consequence of the rule, 
 ### `canCross(map, from, to)` — can a body *pass between* two cells?
 
 Crossing an edge needs the destination to be enterable **and** no wall on the edge between them
-(`packages/iso-core/src/collision.ts:142@5720ac42`).
+(`packages/iso-core/src/collision.ts:142@2866b21a`).
 
 **Diagonal movement tests BOTH cardinal edges that compose it. If either is blocked, the diagonal is
-refused** (`packages/iso-core/src/collision.ts:9@5720ac42`). This is the rule that prevents cutting
+refused** (`packages/iso-core/src/collision.ts:9@2866b21a`). This is the rule that prevents cutting
 a corner through the join of two perpendicular walls — visually the body would slip through a seam
 that has no opening. Testing one edge, or testing the destination only, reintroduces the bug.
+(The AABB box enforces the same no-corner-cutting rule in volume: the second axis' sweep sees the
+corner cell.)
 
 Walls live on edges, not in cells, and the editor may record a wall from **either** of the two cells
 that share it. Every edge query must therefore check both sides
-(`packages/iso-core/src/step-up.ts:49@b7c70ec1`). Checking one side finds half the walls.
+(`packages/iso-core/src/step-up.ts:49@df864f4c`). Checking one side finds half the walls.
+
+**The box sees blocks, not walls.** `resolveMovement` clamps only on `solidAt` cells; edge walls
+have no volume and are invisible to the sweep. They keep their historical judge: the center
+crossing, refused by reverting to the previous position (`edgesAllowCross` in
+`packages/iso-core/src/simulate.ts@f91ae6a3`). A wall in a doorway therefore still refuses the
+crossing exactly as before the box.
 
 ## The step: exactly one level, and why it bypasses `canCross`
 
@@ -82,10 +90,10 @@ that share it. Every edge query must therefore check both sides
   wall on the shared edge **at either level**.
 - **Down** when the destination floor is `z − 1` or lower, under the same conditions.
 - **`z + 2` or higher does not climb.** It needs two steps or a jump
-  (`packages/iso-core/src/step-up.ts:13@b7c70ec1`).
+  (`packages/iso-core/src/step-up.ts:13@df864f4c`).
 
 `canStepUp` and `canStepDown` reuse `canEnter` for walkability but check the edge **directly**,
-without `canCross` (`packages/iso-core/src/step-up.ts:83@b7c70ec1`). That is deliberate and worth
+without `canCross` (`packages/iso-core/src/step-up.ts:83@df864f4c`). That is deliberate and worth
 understanding before anyone "simplifies" it: `canCross` requires the destination *at the same z* to
 be enterable, which is never true when the destination has a support block at `from.z` — that block
 is precisely the step being climbed. Routing the step through `canCross` makes every staircase
@@ -93,6 +101,13 @@ unwalkable.
 
 A wall on the edge blocks the step in **both** directions, at both levels. A step is not a hole in a
 wall.
+
+**The step has two triggers in the simulation** (`packages/iso-core/src/simulate.ts@f91ae6a3`): the
+historical center crossing of the cell edge, and — since the character has a 0.65 box — the cell
+pressed by the blocked face (`pressedCells` in `collision-box.ts`). The box touches a one-level
+step 0.325 cell before the center crosses, so the crossing trigger alone would leave the character
+stuck at the wall. The pressed-face trigger only fires when the box was actually clamped and
+`stepUp` is held; it tries `stepZOnCross` on the pressed cell.
 
 ## The jump: three phases, and a parabola that is decoration
 
@@ -112,21 +127,47 @@ character mid-jump is not "between levels" as far as the map is concerned — it
 This is the single place where the screen/model boundary is most tempting to violate, because the
 sprite visibly occupies space the model says is empty.
 
-## When horizontal movement hits something, the body stops before it
+## Horizontal collision is a swept AABB box, not a point
 
-`runTrace` replays a sequence of `(duration, input)` frames against the movement engine with
-collision checked each step. On collision with a wall or an occupied cell, the character **stops at
-the position before the collision** — it does not slide, and it does not tunnel
-(`packages/iso-core/src/trace.ts:15@741fa7ce`).
+The collision used to be `map.hasBlock(Math.floor(pos))` — the character's **center** against the
+destination cell. Since onda3 the character has a body: an axis-aligned box of half width
+`PLAYER_HALF = 0.325` (~0.65 cell, narrower than a cell on purpose) that the engine sweeps per axis
+against solid cells (`packages/iso-core/src/collision-box.ts@fbb6bafd`).
 
-Sliding along a wall is a design decision that has **not** been made. If a task asks for it, that is
-a new behaviour and a new test, not a bug fix.
+`resolveMovement` moves X first, updates the box, then moves Y. **Blocking one axis does not block
+the other**: hitting a wall at an angle slides along its face. This is the project's sliding
+decision — per axis, never diagonal. A corner cannot be cut: the second axis' sweep runs with the
+box already advanced on the first, so it sees the corner cell and clamps there
+(`packages/iso-core/src/collision-box.ts`).
+
+Because the box is narrower than a cell, it stops with its face **0.325 cell before the center**
+reaches the wall — the visible difference from the old point test. Consequences:
+
+- **Blocking happens at face contact.** A straight walk into a wall clamps `cx` to
+  `boundary − half` and zeroes the velocity. The exact frame of the first block changed when the
+  box landed (the old center-crossing frame vs. the face-contact frame are both pinned in
+  `simulate.test.ts`).
+- **The step-up must fire at face contact too** — see the step section above.
+
+`solidAt(x, y, z)` is the question "does this cell block movement?" — `map.solidAt` when the map
+provides it, falling back to `hasBlock` (every block blocks, the historical behaviour). The
+catalog-aware implementation is `solidAtFromBlocks`, built on `blocksMovement`: **water, lava and
+foliage do not block** (`solid: false`, `kind: decoration`). The boolean `hasBlock` cannot tell
+water from stone; the box engine only honours the `solid` flag when the map (or the caller) gives
+it a catalog-aware `solidAt` (`packages/iso-core/src/collision-box.ts`).
+
+Push-out (`pushOut`, MTV in `collision-box.ts`) resolves the one invalid state the sweep refuses: a
+box already embedded in a solid (the sweep returns zero movement rather than pushing or letting it
+deepen). It pushes along the axis of least penetration, capped at 0.9 cell. The editor uses it
+after placing a block on the test character: placing a block on a character pushes the character
+out instead of burying it (`pushPlayerOutOfCell`).
 
 ## The engine is not wired to the map, and a comment says otherwise
 
 `CollisionMap` is the minimal interface the engine needs: `hasBlock(x,y,z)` and
-`hasEdge(x,y,z,lado)` (`packages/iso-core/src/collision.ts:48@5720ac42`). Its doc comment states
-that `BlockStore` and `EdgeStore` satisfy it (`packages/iso-core/src/collision.ts:43@5720ac42`).
+`hasEdge(x,y,z,lado)`, plus an optional `solidAt` for the box engine
+(`packages/iso-core/src/collision.ts:48@2866b21a`). Its doc comment states that `BlockStore` and
+`EdgeStore` satisfy it (`packages/iso-core/src/collision.ts:43@2866b21a`).
 
 **They do not.** `BlockStore` exposes `getBlock`, `setBlock`, `removeBlock`, `heightAt`, `forEach`
 and `toRle`. `EdgeStore` exposes `getEdge`, `setEdge` and `removeEdge`. Neither declares `hasBlock`
@@ -135,18 +176,19 @@ or `hasEdge`, and no adapter between them exists anywhere in the repository. Eve
 
 The consequences are specific, and they matter more than the missing method names:
 
-- **Collision has never run against real map data.** The suite is green and proves the rules; it does
-  not prove that the rules see the editor's blocks and walls. Wiring the two is unwritten work, not
-  a rename.
-- **The edge type is invisible to the engine.** `EdgeEntry` carries a `tipo`, and the editor writes
-  four values into it — `parede`, `porta`, `pilar`, `escada`
-  (`tools/character-builder/src/map/tools/wall.ts:23@027ac4e4`). `hasEdge` takes **no** `tipo` parameter, so
-  the moment a naive adapter is written, **every edge blocks equally**. A door becomes a wall.
-- **Two documented behaviours therefore do not exist.** The editor states that a `porta` "permite
-  passagem (não bloqueia colisão)" and that an `escada` "permite step-up independentemente da
-  altura" (`tools/character-builder/src/map/tools/wall.ts:10@027ac4e4`). The second one directly contradicts
-  the one-level rule above. **Neither is implemented in the model** — they are intentions recorded
-  at the tool layer, and the engine cannot honour them without a `tipo`-aware interface.
+- **The simulation has never run against real map data.** The suite is green and proves the rules;
+  it does not prove that the rules see the editor's blocks and walls. Wiring the two is unwritten
+  work, not a rename. One corner IS wired: the editor's push-out (`pushPlayerOutOfCell`) consumes
+  the real `MapData` through `enumerateBlocks` + `blocksMovement` — but that is the editor asking
+  the box, not the simulation running.
+- **The edge type is invisible to the engine.** `EdgeEntry` carries a `tipo`, and the map format
+  allows values like `parede`, `porta`, `pilar`, `escada`. `hasEdge` takes **no** `tipo` parameter,
+  so the moment a naive adapter is written, **every edge blocks equally**. A door becomes a wall.
+  (The tools that once wrote those values were removed with the 2D editor; the format still allows
+  them.)
+- **A `porta`/`escada` behaviour therefore does not exist.** Neither is implemented in the model —
+  they are strings recorded in the map file, and the engine cannot honour them without a
+  `tipo`-aware interface.
 
 When a task asks to connect the editor to collision, that is the design decision to surface first:
 does `hasEdge` gain a type, or does the adapter translate types into blocking and non-blocking? It
@@ -167,17 +209,19 @@ is not an implementation detail, and picking one silently locks in door behaviou
   trap — an occupant listed in a voxel whose geometry extends past it, so the first non-empty voxel
   is not the nearest hit — cannot occur here. If multi-cell footprints are ever allowed, that trap
   arrives with them and the traversal needs a containment test.
-- **No push, no slide, no friction, no mass — in the SIMULATION.** The **data** now exists and the
-  simulation ignores it: `packages/iso-core/src/block-catalog.ts` gives every material `solid`,
-  `friction`, `density`, `movementCost` and `harmful`, and `map-instances.ts` resolves each placed
-  block into a self-contained record carrying them. `collision.ts` still reads the block store
-  directly and consults none of it. Wiring them is a task, not a defect — and the numbers themselves
-  are **this project's choice, not measured or sourced**: only the densities have any relation to the
-  real world. Say so when quoting them.
-- **Grid-space AABB exists, and it is grid-space on purpose.** `aabbOf` returns cell coordinates,
-  half-open at the top so neighbours touch without overlapping. Collision in screen pixels would
-  solve in diamonds what was already a cube, and it is exactly where camera rotation would break
-  everything — the screen changes view, the world does not.
+- **No friction, no mass, no movement cost — in the SIMULATION.** The **data** exists:
+  `packages/iso-core/src/block-catalog.ts` gives every material `solid`, `friction`, `density`,
+  `movementCost` and `harmful`, and `map-instances.ts` resolves each placed block into a
+  self-contained record carrying them. **`solid` is now honoured** — the box engine asks
+  `blocksMovement` (via `solidAtFromBlocks`), so water, lava and foliage no longer block. The other
+  four properties are still ignored by the simulation. Wiring them is a task, not a defect — and the
+  numbers themselves are **this project's choice, not measured or sourced**: only the densities have
+  any relation to the real world. Say so when quoting them.
+- **Grid-space AABB exists, is consumed, and is grid-space on purpose.** `aabbOf` returns cell
+  coordinates, half-open at the top so neighbours touch without overlapping; the character box
+  (`entityAabb`) uses the same convention. Collision in screen pixels would solve in diamonds what
+  was already a cube, and it is exactly where camera rotation would break everything — the screen
+  changes view, the world does not.
 
 **On bringing in a 2D physics engine:** the honest position is that this has not been evaluated
 against sources. The structural obstacle is stated plainly — every 2D engine simulates a plane, and
@@ -195,8 +239,15 @@ should be labelled as such wherever it is repeated.
 - **Test both edges on a diagonal, and both sides of an edge.** Each shortcut passes obvious tests
   and fails at wall joins.
 - **Do not route the step through `canCross`.** It looks like deduplication and it breaks stairs.
-- **A behaviour that is absent is absent, not broken.** Sliding, ramps and pushing are new features
-  needing a decision, not defects to patch.
+- **Never re-add the boolean `hasBlock` test in front of the box.** The box sweep IS the block
+  collision; testing the destination cell with `hasBlock` on top of it is the old point test
+  resurrected, and it makes water block again. Ask `solidAt`, never `hasBlock`.
+- **The box is a volume; walls are surfaces.** Blocks clamp the face (swept, with sliding); edge
+  walls refuse the center crossing (revert). Give a wall volume and it becomes a block; give a block
+  a surface and the sweep stops working.
+- **A behaviour that is absent is absent, not broken.** Ramps and slopes are still absent (discrete
+  Z is the decision); sliding and push-out are decided. A task that changes one of the decided ones
+  is a behaviour change with new tests, not a bug fix.
 - **Never present the material numbers as measured.** Friction and movement cost are this project's
   starting point, in a table so that changing them is changing a table.
 - **`kind` and `material` are orthogonal.** What a block is made of (friction, density) is not what
@@ -209,7 +260,9 @@ should be labelled as such wherever it is repeated.
 - `packages/iso-core/src/block-catalog.ts` — the material table and the block kinds
 - `packages/iso-core/src/map-instances.ts` — the physics-ready view of the map
 - `packages/iso-core/src/movement.ts` — the fixed logic step and the determinism contract
-- `packages/iso-core/src/collision.ts` — `canEnter`, `canCross`, the diagonal rule
+- `packages/iso-core/src/collision.ts` — `canEnter`, `canCross`, the diagonal rule, `solidAt`
+- `packages/iso-core/src/collision-box.ts` — the swept AABB box, `resolveMovement`, `pushOut`
+- `packages/iso-core/src/simulate.ts` — `fixedStepWithMap`, the face-pressed step, `resolveCollision`
 - `packages/iso-core/src/step-up.ts` — the one-level step and why it avoids `canCross`
 - `packages/iso-core/src/jump.ts` — the three phases and the screen-only parabola
 - `packages/iso-core/src/trace.ts` — deterministic replay, the acceptance instrument

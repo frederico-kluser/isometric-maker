@@ -47,6 +47,8 @@ import {
 class FakeMap implements CollisionMap {
   readonly #blocks = new Set<string>();
   readonly #edges = new Set<string>();
+  /** Células que existem (`hasBlock`) mas não barram (`solidAt` false). */
+  readonly #nonSolid = new Set<string>();
 
   hasBlock(x: number, y: number, z: number): boolean {
     return this.#blocks.has(`${x}:${y}:${z}`);
@@ -54,6 +56,16 @@ class FakeMap implements CollisionMap {
 
   hasEdge(x: number, y: number, z: number, lado: EdgeSide): boolean {
     return this.#edges.has(`${x}:${y}:${z}:${lado}`);
+  }
+
+  solidAt(x: number, y: number, z: number): boolean {
+    return this.hasBlock(x, y, z) && !this.#nonSolid.has(`${x}:${y}:${z}`);
+  }
+
+  /** Marca uma célula como existente mas não-sólida (água, lava, folhagem). */
+  addNonSolid(x: number, y: number, z: number): this {
+    this.#nonSolid.add(`${x}:${y}:${z}`);
+    return this;
   }
 
   /** Empilha `count` blocos a partir de z=0. O topo sólido fica em `count`. */
@@ -224,6 +236,57 @@ describe('a parede continua a ser uma parede', () => {
   });
 });
 
+// ------------------------------------------------------------------ 2b. a caixa, não o ponto
+
+describe('a colisão é por caixa, não por ponto', () => {
+  it('andar contra um bloco pára com a face encostada, a meia-largura da fronteira', () => {
+    // O teste de ponto antigo parava o centro no cruzamento da aresta
+    // (x≈0,967); a caixa de 0,65 encosta na face do bloco em x=2,0 e o centro
+    // fica em 2,0 − 0,325 = 1,675.
+    const map = new FakeMap().addRow(0, 8, 0, 1).addColumn(2, 0, 2);
+
+    const state = runLive(map, 0.5, 0.5, 1, hold(dirInput(1, 0), 60));
+
+    assert.ok(Math.abs(state.pos.x - 1.675) < 1e-9, `x=${state.pos.x}`);
+    assert.strictEqual(state.blocked, true);
+    assert.strictEqual(cellX(state), 1);
+    assert.strictEqual(state.z, 1);
+  });
+
+  it('água (solidAt=false) não bloqueia mesmo com hasBlock verdadeiro', () => {
+    // A coluna (2,0) existe para o booleano histórico — e não barra para a
+    // caixa: o `solidAt` do mapa honra o catálogo.
+    const map = new FakeMap()
+      .addRow(0, 8, 0, 1)
+      .addColumn(2, 0, 1)
+      .addNonSolid(2, 0, 1);
+
+    const state = runLive(map, 0.5, 0.5, 1, hold(dirInput(1, 0), 60));
+
+    assert.strictEqual(state.blocked, false, 'a água não bloqueia o passo');
+    assert.strictEqual(cellX(state), 4, 'o personagem atravessou a água');
+    assert.strictEqual(state.z, 1);
+  });
+
+  it('bloquear X não trava Y — deslizar ao longo da parede', () => {
+    // Chão em duas linhas (o deslocamento diagonal sobe de linha) e uma parede
+    // de 2 blocos em x=2 nas duas linhas — para que a caixa não passe pelo fim
+    // dela. Andar para nordeste desliza ao longo da face: x clampa, y segue.
+    const map = new FakeMap()
+      .addRow(0, 8, 0, 1)
+      .addRow(0, 8, 1, 1)
+      .addColumn(2, 0, 2)
+      .addColumn(2, 1, 2);
+
+    const state = runLive(map, 0.5, 0.5, 1, hold(dirInput(1, 1), 30));
+
+    assert.ok(Math.abs(state.pos.x - 1.675) < 1e-6, `x=${state.pos.x}`);
+    assert.ok(state.pos.y > 0.9, `y=${state.pos.y}: o eixo livre continuou`);
+    assert.strictEqual(state.z, 1, 'continua no chão, não caiu');
+    assert.strictEqual(state.blocked, true, 'o passo bateu na parede');
+  });
+});
+
 // ------------------------------------------------------------------ 3. pular um vão
 
 describe('o pulo atravessa um vão', () => {
@@ -278,9 +341,13 @@ describe('o pulo não vence dois níveis', () => {
       if (state.blocked && primeiroBloqueio < 0) primeiroBloqueio = i;
     }
 
-    // x cruza 1,0 no passo 8 (0,5 + 8·4/60 = 1,033…); é aí que a travessia é
-    // proposta e recusada.
-    assert.strictEqual(primeiroBloqueio, 7, 'o bloqueio tem um quadro exacto');
+    // O teste histórico era do centro: x cruza 1,0 no passo 8
+    // (0,5 + 8·4/60 = 1,033…) e a travessia era recusada no passo 7. Com a
+    // caixa de meia largura 0,325, a FACE encosta na parede quando o centro
+    // passa de 0,675 — passo 2 (0,5 + 3·4/60 = 0,7). Bloquear mais cedo é a
+    // semântica da caixa: o corpo de 0,65 de largura toca a parede antes de o
+    // centro chegar à fronteira da célula.
+    assert.strictEqual(primeiroBloqueio, 2, 'o bloqueio tem um quadro exacto');
   });
 
   it('pular sobre um degrau de um nível aterra em cima dele (z=1)', () => {

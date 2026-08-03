@@ -161,12 +161,18 @@ test('traço 3 — subir dois degraus', () => {
 
 test('traço 4 — bloqueado na quina com parede', () => {
   // A parede N em (1,1,z=1) bloqueia o movimento de (1,1) para (1,2).
-  // Começamos em (1.5, 0.5, z=1) e vamos para norte.
+  // Começamos em (1.5, 1.5, z=1) — dentro de (1,1) — e vamos para norte.
+  //
+  // Nota: o início histórico era (1.5, 0.5, 1), dentro da coluna de 2 blocos
+  // em (1,0) — invisível para o teste de ponto antigo (só o destino contava),
+  // mas com a colisão por caixa o corpo nasce embutido no sólido e a varredura
+  // bloqueia no primeiro passo. O estado inicial passou a ser válido; a
+  // pergunta do teste — a parede da quina bloqueia — não mudou.
   const frames: TraceFrame[] = [
     { duration: 0.8, input: dirInput(0, 1) },
   ];
 
-  const result = runTrace(map, 1.5, 0.5, 1, frames);
+  const result = runTrace(map, 1.5, 1.5, 1, frames);
 
   const cell = cellOf(result.finalState);
   console.log(`  traço 4 final: cell=(${cell.x},${cell.y},${cell.z}) pos=(${result.finalState.pos.x.toFixed(4)},${result.finalState.pos.y.toFixed(4)}) blocked=${result.blocked} blockedAt=${result.blockedAt ? `(${result.blockedAt.x},${result.blockedAt.y},${result.blockedAt.z})` : 'nenhum'}`);
@@ -263,8 +269,8 @@ test('determinismo — traço bloqueado tem mesmo ponto de paragem', () => {
     { duration: 0.8, input: dirInput(0, 1) },
   ];
 
-  const r1 = runTrace(map, 1.5, 0.5, 1, frames);
-  const r2 = runTrace(map, 1.5, 0.5, 1, frames);
+  const r1 = runTrace(map, 1.5, 1.5, 1, frames);
+  const r2 = runTrace(map, 1.5, 1.5, 1, frames);
 
   assert.equal(r1.blocked, r2.blocked, 'blocked deveria ser igual');
   assert.equal(r1.blocked, true, 'deveria estar bloqueado');
