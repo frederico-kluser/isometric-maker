@@ -11,6 +11,10 @@
       "should_trigger": true
     },
     {
+      "query": "clique na face do cubo coloca o bloco ao lado",
+      "should_trigger": true
+    },
+    {
       "query": "pintar o terreno com autotile",
       "should_trigger": true
     },
@@ -19,11 +23,15 @@
       "should_trigger": true
     },
     {
-      "query": "exportar o projeto e o atlas nao foi encontrado",
+      "query": "exportar o projeto",
       "should_trigger": true
     },
     {
       "query": "como fazer o desfazer da edicao",
+      "should_trigger": true
+    },
+    {
+      "query": "empilhar um bloco em cima do outro",
       "should_trigger": true
     },
     {
@@ -33,20 +41,28 @@
     {
       "query": "qual backend de renderizacao escolher",
       "should_trigger": false
-    },
-    {
-      "query": "empilhar um bloco em cima do outro",
-      "should_trigger": true
     }
   ],
   "invariants": [
     {
-      "must_contain": "Never hit-test a sprite to find a cell",
-      "why": "isometric sprite bounding boxes overlap by design; hit-testing is wrong exactly at the diamond edges"
+      "must_contain": "Raycast, never walk the diagonal",
+      "why": "sprite hit-testing and the 2D diagonal walk are retired with the PixiJS editor; the 3D editor picks with the raycaster and the face normal decides the adjacent cell"
+    },
+    {
+      "must_contain": "Clicking the face of a cube places in the adjacent cell",
+      "why": "the Minecraft-style placement contract: face normal maps to the adjacent cell, ground plane falls to z=0"
     },
     {
       "must_contain": "the first hit is the nearest surface",
-      "why": "the walk must run top-down; bottom-up returns buried cells"
+      "why": "intersections are sorted by distance; the first hit is the cell the camera actually sees"
+    },
+    {
+      "must_contain": "Placement is never null",
+      "why": "the ground plane guarantees a fallback cell, so a tool always has somewhere to land a piece"
+    },
+    {
+      "must_contain": "A column has no holes",
+      "why": "height is maxZ+1; a tool that would leave a floating gap produces an invalid column, not a hole"
     },
     {
       "must_contain": "never a silent fallback",
@@ -57,16 +73,8 @@
       "why": "AB-371 is an open assumption; presenting it as settled launders a guess into a fact"
     },
     {
-      "must_contain": "fails with the filename",
-      "why": "a silently missing atlas produces a runtime that loads and draws nothing"
-    },
-    {
       "must_contain": "moving a block changes its id",
       "why": "the instance id is derived from the position, so a block is the contents of a cell and not an entity that walks; treating it as stable breaks any consumer that tracks blocks across edits"
-    },
-    {
-      "must_contain": "a placed door opens anything",
-      "why": "porta and escada have documented behaviour the model cannot honour; hasEdge takes no type"
     },
     {
       "must_contain": "These are absences, not defects",

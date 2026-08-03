@@ -1,6 +1,6 @@
 ---
 name: editing-isometric-maps
-description: Owns how this editor places pieces on an isometric map - picking as a downward walk along the grid diagonal instead of sprite hit-testing, the pure floor, stack and edge tools, the RLE column store that keeps no holes, autotiling driven by rules the API returned, and an export that fails loudly when an atlas is missing. Use whenever selecting or placing a bloco, a parede or a porta, painting terrain, stacking or removing a block, wiring a brush, computing a neighbour mask, or exporting the project - including Portuguese phrasings like "colocar a peca no mapa", "empilhar um bloco em cima do outro", "clicou na celula errada", "pintar o terreno", "faltou a peca do autotile", "exportar o projeto", "o atlas nao foi encontrado", "desfazer a edicao". Triggers on pick, pickWithHighlight, pintarChao, empilharBloco, colocarNaAresta, buildMask, autotile, missingMasks, BlockStore, EdgeStore, exportProject, tile_rules, RLE, brush, footprint.
+description: Owns how this editor places blocks on the isometric map, Three.js only: picking is Raycaster with the face-normal contract — click the face of a cube to place in the adjacent cell, click the ground plane to place at z=0 — backed by a pure MapData→MapData editing state (placeBlock, removeBlock, paintBlock, stackBlock, undo/redo), an RLE column store with no holes, autotile rules that survive in iso-core but never reached the UI, and the export contract buildExport. Use whenever selecting or placing a piece, painting terrain, stacking or removing a block, or exporting the map — including PT-BR phrasings like "colocar a peca no mapa", "empilhar um bloco em cima do outro", "clicou na celula errada", "clique na face do cubo", "pintar o terreno", "faltou a peca do autotile", "exportar o projeto", "desfazer a edicao". Triggers on pick3d, pickColumnTop, hitFace, face normal, ground plane, paintBlock, removeBlock, placeBlock, stackBlock, autotile, tile_rules, RLE, Cell3D, undo, redo, buildExport, MapData.
 metadata:
   type: knowledge
   verification_signal: cd tools/character-builder && npm test
@@ -14,31 +14,49 @@ Before wiring any tool that changes the map, before writing mouse-to-cell code, 
 an editing feature. Read the second half first if the request is about brushes, undo or layers: what
 exists and what does not is the load-bearing part.
 
-## Picking is arithmetic, not hit-testing
+## Picking is raycasting, not arithmetic — the face normal is the contract
 
-**Never hit-test sprites to find the cell under the cursor.** Isometric sprites are rectangles with
-transparent corners; their bounding boxes overlap by design, so hit-testing picks whichever sprite
-the scene graph happens to reach first. It is wrong at the diamond edges — exactly where the user
-aims.
+**Raycast, never walk the diagonal.** The 2D editor picked a cell by walking the grid diagonal from
+the top down; that arithmetic is retired with the PixiJS renderer. The 3D editor fires a ray from the
+camera through the cursor and intersects real meshes. Intersections come back sorted by distance, so
+**the first hit is the nearest surface** — the cell the camera actually sees, not whichever sprite the
+scene graph happens to reach first.
 
-The right method is a walk, and it works because of the identity owned by
-`projecting-isometric-geometry`: each Z level advances exactly `zStep/tileHeight` of a cell in both
-axes, which is half a cell in this geometry
-(`tools/character-builder/src/map/picking.ts:12@59f858fb`).
+The contract (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:31@7382effa`):
 
-The algorithm (`tools/character-builder/src/map/picking.ts:160@59f858fb`):
+- `hit` — the **occupied** cell under the cursor: the target of `remover` and `pintar`. `null` when
+  the cursor is over empty space.
+- `placement` — the **empty** cell where a new piece lands. **Placement is never null**: the ground
+  plane guarantees a fallback, so a tool always has a cell to write to.
+- `hitFace` — `'top' | 'side' | 'ground' | null`: what the ray actually hit, and the input the stack
+  tool uses to decide where a piece lands.
 
-1. Find `zMax`, the highest `z` holding blocks.
-2. For `z` from `zMax` down to 0: convert `(sx, sy, z)` to world, floor to a cell, and if that cell
-   has a block at `z`, return it.
-3. Nothing occupied → return `null`, meaning "no cell", which is a real answer and not an error.
+Two rules follow from the face normal (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:108@7382effa`):
 
-Top-down order is what makes it correct: the first hit is the nearest surface to the camera. Walking
-bottom-up returns cells buried under other cells.
+1. **Clicking the face of a cube places in the adjacent cell.** The hit's face normal — transformed
+   to world space and rounded to a cardinal direction — is added to the cube's cell. This is the
+   Minecraft-style contract: clicking the side of a block lands the new block *next to* it, not on it.
+2. **Clicking the ground plane places at z = 0.** Empty space falls to the floor, and `hit` stays
+   `null` — "no cell under the cursor" is a real answer, and `pintar` on empty ground places instead
+   of refusing.
 
-`pickWithHighlight` returns the picked cell **and** the floor cell below it
-(`tools/character-builder/src/map/picking.ts:218@59f858fb`), because highlighting only the picked cell leaves
-the user unable to see where a placement would land.
+The `empilhar` tool gets a narrower contract. `pickColumnTop`
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:188@7382effa`) keeps the exact placement
+when the ray hit a side face or the ground, but when the ray hits a **top** face it snaps the
+placement to the top of that column — stacking works even when the user is not aiming at the exact
+top face.
+
+Coordinate mapping: Three.js is Y-up. Map `(x, y, z)` lives in the world as `(x, z, y)` — map `y`
+becomes world `Z`, map `z` (height) becomes world `Y`. `worldToCell` does the inverse with
+`Math.round`, which is exact for unit cubes at integer positions
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:75@7382effa`).
+
+The meshes the ray tests against come from the scene: `collectBlockMeshes`
+(`tools/character-builder/src/map/3d/scene3d.ts:456@dddf5555`) returns every `Mesh` whose
+`userData.blockId` is set — blocks only, never the grid or the preview — and `findGroundPlane`
+(`tools/character-builder/src/map/3d/scene3d.ts:473@dddf5555`) finds the invisible raycast floor by
+name. The raycaster mechanics themselves (NDC conversion, `setFromCamera`, `intersectObjects`) are
+owned by `raycasting-threejs-blocks`; this skill owns what the editor does with the result.
 
 ## The map model constrains the editor, and that is the point
 
@@ -46,102 +64,139 @@ the user unable to see where a placement would land.
   (`packages/iso-core/src/map.ts:92@0a012d80`). **A column has no holes**: its height is the highest
   occupied `z` plus one (`packages/iso-core/src/map.ts:90@0a012d80`). A tool that would leave a
   floating gap is not expressing a hole — it is producing an invalid column.
-- **Edges are sparse.** Walls belong to edges, not cells, and either of the two cells sharing an edge
-  may record it.
 - **An object occupies exactly one cell.** The format forbids multi-cell sprites
   (`packages/iso-core/src/map.ts:34@0a012d80`) because they produce cyclic occlusion, which has no
   correct linear draw order. **Anything larger than one cell is sliced at authoring time.** A request
   for a 2×2 piece is a request to change the format, and it needs a decision.
+- **Edges are sparse and survive in the format, but nothing edits them.** Walls belonged to edges,
+  and either of the two cells sharing an edge may record it
+  (`packages/iso-core/src/map.ts:277@0a012d80`). The wall tooling was removed with the 2D editor;
+  `MapData` still carries `edges` for the runtime (`packages/iso-core/src/map.ts:71@0a012d80`), and
+  no editor tool touches them today.
 
-## Autotiling consumes rules; it never hardcodes a table
+## The editing state is a pure module, shared by every editor
 
-The neighbour mask is 4 bits — a bit set when the neighbour in that direction carries the **same
-terrain at the same `z`** (`tools/character-builder/src/map/autotile.ts:40@fc26feb1`). The piece is then looked
-up in the `tile_rules` the API returned. **Do not write the 16-entry table by hand**
-(`tools/character-builder/src/map/autotile.ts:12@fc26feb1`).
+`map/editor/map-state.ts` is the state machine. It is **pure**: no React, no Three, no DOM — every
+mutation is `MapData → MapData`
+(`tools/character-builder/src/map/editor/map-state.ts:4@3f5156b0`). Undo/redo is a snapshot stack
+(100 entries), not an inverse-command system, and **an identical map does not create an entry** —
+dragging the mouse over the same cell would otherwise generate dozens of empty undo steps
+(`tools/character-builder/src/map/editor/map-state.ts:159@3f5156b0`).
 
-**A combination with no matching piece is a visible error, never a silent fallback**
-(`tools/character-builder/src/map/autotile.ts:8@fc26feb1`). `missingMasks` exists so the editor can say
-*which* combinations the tileset failed to deliver
-(`tools/character-builder/src/map/autotile.ts:145@fc26feb1`). Substituting a nearby tile hides a tileset that
-was paid for and came back incomplete.
+The operations, and the semantics that surprise:
 
-**The bit order is a guess.** `bit0 = N, bit1 = L, bit2 = S, bit3 = O` is this repo's convention,
-recorded as open assumption AB-371. The whole `tile_rules` parser rests on five such assumptions,
-AB-370 through AB-374, because **the real fixture was never generated**
-(`packages/iso-core/src/tile-rules.ts:9@4c299d05`). The API declares `additionalProperties: true` on
-that payload, so the parser must reject fields it does not recognise rather than assume a shape
-(`packages/iso-core/src/tile-rules.ts:13@4c299d05`).
+| Operation | Semantics |
+|---|---|
+| `placeBlock` (`tools/character-builder/src/map/editor/map-state.ts:67@3f5156b0`) | Places at the exact cell. Intermediate levels become explicit air — that is what allows a bridge with a gap underneath. Negative `z` is refused by returning the map intact. |
+| `removeBlock` (`tools/character-builder/src/map/editor/map-state.ts:83@3f5156b0`) | Empties the cell; a column left as all air disappears from the map. |
+| `paintBlock` (`tools/character-builder/src/map/editor/map-state.ts:105@3f5156b0`) | Replaces the type of an already-occupied cell; an empty cell stays as it is. |
+| `stackBlock` | Places at the first empty `z` **above the current top**, never into a gap. |
 
-Treat every autotiling result as provisional until one real response has been captured. Writing a
-skill line, a test or a UI message that presents the bit order as settled would launder a guess into
-a fact.
+The camera rotation never appears in the document — `MapData` does not know the view angle
+(`tools/character-builder/src/map/editor/map-state.ts:9@3f5156b0`). The editor opens on an 8×8
+starter platform so there is always a floor to click
+(`tools/character-builder/src/map/editor/map-state.ts:196@3f5156b0`).
 
-## Export is a contract, and it fails by absence
+## The placement tools that exist — the editor is the tool layer
 
-`project.json` is **the contract with the runtime**, with paths relative to the project file
-(`tools/character-builder/src/map/export.ts:7@7b09f10b`). It is written atomically — temp file in the same
-directory, then rename.
+Four tools, and they are thin: `empilhar`, `colocar`, `pintar`, `remover`
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:93@e80414d9`). The component resolves the
+pointer to a `Pick3DResult` and feeds it to the map-state operations; nothing mutates in place and
+nothing writes to the screen from the tool layer (`tools/character-builder/src/map/3d/map-editor-3d.tsx:234@e80414d9`):
 
-Every referenced atlas is checked to exist on disk **before** success is declared, and a missing one
-**fails with the filename** (`tools/character-builder/src/map/export.ts:16@7b09f10b`). Exporting a project that
-silently omits an atlas produces a runtime that loads and then draws nothing, and the cause is three
-steps removed from the symptom.
+- `remover` → `removeBlock(hit)` when the cursor is over a block;
+- `pintar` → `paintBlock(hit)` on an occupied cell, `placeBlock(placement)` on empty ground;
+- `colocar` and `empilhar` → `placeBlock(placement)` — the difference is entirely in the picking:
+  `colocar` uses the exact adjacent cell from the face normal, `empilhar` uses `pickColumnTop` so a
+  top-face click stacks on the column top (`tools/character-builder/src/map/3d/map-editor-3d.tsx:258@e80414d9`).
 
-### Authoring format and export format are deliberately different
+The old pure tool modules (`map/tools/paint.ts`, `stack.ts`, `wall.ts`) are gone with the 2D editor;
+their semantics now live in map-state.ts and in the picking functions above.
 
-The map is authored as RLE columns — compact, hole-free, heavily tested. It is **exported** as a
-list of instances, where every placed block carries `id`, `x`, `y`, `z`, `kind` and `material`
-already resolved, next to a material table with the physical properties
-(`packages/iso-core/src/map-instances.ts`, `docs/adr/0027-exportacao-v2-instancias-e-materiais.md`).
+Preview and feedback are tool state, not validity: the preview cube sits on the placement cell and
+turns red only for `remover` (a destructive action), and the highlight marks the occupied cell under
+the cursor (`tools/character-builder/src/map/3d/map-editor-3d.tsx:204@e80414d9`,
+`tools/character-builder/src/map/3d/scene3d.ts:262@dddf5555`).
 
-Whoever writes physics should not have to decode RLE or carry the palette to find out whether a cell
-is solid. The redundancy — `kind` and `material` appear in the palette *and* in each instance — is
-deliberate and derived; it is never hand-edited.
-
-The instance id is `b:x:y:z`, derived from the position. A counter would need persisted state kept in
-sync with undo; a UUID would change every save and make the file undiffable. The consequence to know:
-**moving a block changes its id**, because a block is not an entity that walks — it is the contents
-of a cell.
+Dragging with the button held repeats the single-cell operation per pointer move — that is **not** a
+brush (`tools/character-builder/src/map/3d/map-editor-3d.tsx:300@e80414d9`). Wheel zoom is throttled
+to one step per 80 ms so a scroll burst does not saturate the React cycle
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:332@e80414d9`); middle button or shift+drag
+pans; `R` rotates, `1`–`4` pick a view, Ctrl+Z/Y undo and redo.
 
 ## The rendering module does not edit
 
-`scene.ts` is the renderer; `renderer.ts` is its superseded predecessor and still draws coloured
-rectangles. Edits belong to the tool layer. Two boot constraints must hold before the first
-`Assets.load`: nearest sampling with mipmaps off, and a whole-number stage scale. Sprites come from
-a pool so that painting does not allocate per frame.
+`scene3d.ts` is the renderer. `createIsoScene3D` builds the WebGLRenderer, the lights, the
+orthographic camera, the grid and the ground plane; the scene lives **outside React**, created once
+in a `useEffect` and updated by imperative calls to `render(state)`
+(`tools/character-builder/src/map/3d/scene3d.ts:127@dddf5555`). `render` takes the whole
+`Scene3DState` — map, preview, highlight, rotation — and draws it in one pass
+(`tools/character-builder/src/map/3d/scene3d.ts:56@dddf5555`).
 
-**Sprite scale must be uniform and the anchor declared.** Setting `width` and `height` separately
-scales the axes differently, the art's top diamond stops being 2:1 and blocks stop seaming — the
-symptom reads as "the generated art is wrong" and is not. `projecting-isometric-geometry` owns the
-arithmetic; `tools/character-builder/src/map/placement.ts` is the one implementation, with tests.
+`render` diffs meshes against the RLE map: it iterates the runs, creates a cube for every occupied
+cell that has no mesh yet, and removes meshes whose cells are gone
+(`tools/character-builder/src/map/3d/scene3d.ts:212@dddf5555`). A shared `BoxGeometry` is reused for
+every cube — nothing allocates geometry per block
+(`tools/character-builder/src/map/3d/scene3d.ts:404@dddf5555`) — and textures keep nearest filtering
+with mipmaps off so pixel art stays crisp. Procedural blocks fall back to the iso-core canonical
+cube geometry (`packages/iso-core/src/iso-cube.ts:222@2ad14e9b`).
 
-## The placement tools that exist, and the state they return
+The grid and the ground plane resize to cover the occupied area plus a margin, so there is always a
+clickable floor around the content (`tools/character-builder/src/map/3d/scene3d.ts:414@dddf5555`).
+Camera controls live in `controls3d.ts` — pan, integer zoom, and the four discrete views; the 280 ms
+rotation animation is driven separately from `render` so a state change does not burn an animation in
+flight (`tools/character-builder/src/map/3d/scene3d.ts:83@dddf5555`).
 
-Three modules under the editor's tool directory, all pure: each takes the current store and returns
-a **new** one plus a pt-BR message. Nothing mutates in place, and nothing writes to the screen —
-edits go through `iso-core` operations only (`tools/character-builder/src/map/tools/paint.ts:11@d704c95a`).
+**Never add an editing feature to the renderer.** Edits belong to the tool layer, and this module
+renders.
 
-| Tool | Operations | Semantics that surprise |
-|---|---|---|
-| floor | `pintarChao`, `apagarChao` | paints at `z = 0` and **replaces** an existing block rather than refusing (`tools/character-builder/src/map/tools/paint.ts:4@d704c95a`) |
-| stack | `empilharBloco`, `removerBloco`, `alturaColuna` | stacks at the first empty `z` **above the current top**, never into a gap; removes from the top only (`tools/character-builder/src/map/tools/stack.ts:8@b67dab5f`) |
-| edge | `colocarNaAresta`, `removerDaAresta`, `elementoNaAresta`, `arestaProxima` | `arestaProxima` switches the cursor into edge mode by proximity, which is why placing a wall does not need a separate tool selection |
+## Autotiling consumes rules; it never hardcoded a table — and it never reached the UI
 
-Both column rules follow from the store having no holes: stacking above the top and removing from the
-top are the only operations that keep a column contiguous.
+Domain knowledge, kept because the rules survive in iso-core even though the editor-side module is
+gone. Autotile was **never wired to the UI**: no brush paints with a neighbour mask, and the 2D
+editor's `autotile.ts` was removed with the rest of the PixiJS editor. The `tile_rules` parser lives
+on in `packages/iso-core/src/tile-rules.ts`, and any future autotile wiring must respect it.
 
-**Edges carry four element types** — `parede`, `porta`, `pilar`, `escada` — where a pillar sits on
-the **vertex**, not the edge (`tools/character-builder/src/map/tools/wall.ts:23@027ac4e4`). Two of those four
-have documented behaviour the model does not implement: a door is meant to allow passage and a stair
-is meant to allow a step regardless of height, but `CollisionMap.hasEdge` takes no type, so nothing
-can distinguish them. `simulating-isometric-physics` carries the full account. **Do not tell a user
-that a placed door opens anything.**
+The neighbour mask is 4 bits — a bit set when the neighbour in that direction carries the **same
+terrain at the same `z`** — and the piece is looked up in the `tile_rules` the API returned. **Do not
+write the 16-entry table by hand.** **A combination with no matching piece is a visible error —
+never a silent fallback**: substituting a nearby tile hides a tileset that was paid for and came
+back incomplete.
 
-The same three names — door, pillar, stair — are also identified in a returned tileset by a
-**heuristic over the terrain name**, recorded as open assumption AB-372
-(`packages/iso-core/src/tile-rules.ts:21@4c299d05`). The API may have a field that makes the
-heuristic obsolete.
+**The bit order is a guess.** `bit0 = N, bit1 = L, bit2 = S, bit3 = O` is this repo's convention,
+recorded as open assumption AB-371. The whole parser rests on assumptions AB-370 through AB-375
+(`packages/iso-core/src/tile-rules.ts:13@4c299d05`) because **the real fixture was never generated**
+(`packages/iso-core/src/tile-rules.ts:9@4c299d05`). The API declares `additionalProperties: true` on
+that payload, so the parser must reject fields it does not recognise rather than assume a shape.
+Treat every autotiling result as provisional until one real response has been captured.
+
+## Export is a contract — built in iso-core, not in the editor
+
+`buildExport` (`packages/iso-core/src/map-instances.ts:213@372c1f8c`) turns a `MapData` plus a
+catalog into the export document; the editor calls it with the tile geometry and downloads the
+result as `mapa.json` (`tools/character-builder/src/map/3d/map-editor-3d.tsx:417@e80414d9`).
+
+### Authoring format and export format are deliberately different
+
+The map is **authored as RLE columns** — compact, hole-free, heavily tested. It is **exported** as a
+list of instances, where every placed block carries `id`, `x`, `y`, `z`, `kind` and `material`
+already resolved, next to a material table with the physical properties
+(`docs/adr/0027-exportacao-v2-instancias-e-materiais.md`). Whoever writes physics should not have to
+decode RLE or carry the palette to find out whether a cell is solid. The redundancy — `kind` and
+`material` appear in the palette *and* in each instance — is deliberate and derived; it is never
+hand-edited.
+
+The instance id is `b:x:y:z`, derived from the position
+(`packages/iso-core/src/map-instances.ts:47@372c1f8c`). A counter would need persisted state kept in
+sync with undo; a UUID would change every save and make the file undiffable. The consequence to
+know: **moving a block changes its id**, because a block is not an entity that walks — it is the
+contents of a cell.
+
+**The old atlas check is gone, and that is a behaviour change.** The 2D editor's `export.ts`
+checked every referenced atlas on disk before declaring success and failed with the filename; that
+module was removed. `buildExport` is a pure function in iso-core — the browser editor cannot see the
+filesystem — so a missing asset surfaces only when the runtime loads, not at export time. Do not
+promise an editor-side absence check; the contract that remains is the instance format itself.
 
 ## What does not exist yet — say so instead of inventing it
 
@@ -154,12 +209,17 @@ heuristic obsolete.
   the real stores at all. The preview cube turns red for a destructive tool; that is tool state, not
   a validity check.
 - **Physics that consumes the material table.** `map-instances.ts` resolves every placed block to a
-  material with friction, density and movement cost, and `collision.ts` still reads the block store
-  directly and ignores all of it. The **data** exists; the wiring does not.
+  material with friction, density and movement cost
+  (`packages/iso-core/src/map-instances.ts:134@372c1f8c`), and the collision code still reads the
+  block store directly and ignores all of it. The **data** exists; the wiring does not.
+- **Autotiling wired to the UI.** The rules survive in iso-core; no brush consumes them.
+- **Edge editing.** Walls, doors and stairs have no editor tool since the 2D editor was removed.
+  `simulating-isometric-physics` carries the account of what the model does and does not honour for
+  doors and stairs.
 
 Two entries that used to live here are now implemented, and claiming otherwise wastes a task:
-**undo/redo** exists as a snapshot stack (`tools/character-builder/src/map/editor/map-state.ts`), and **camera
-rotation** exists in four views with an animated turn (`rotating-isometric-camera`).
+**undo/redo** exists as a snapshot stack (`tools/character-builder/src/map/editor/map-state.ts:141@3f5156b0`),
+and **camera rotation** exists in four views with an animated turn (`rotating-isometric-camera`).
 
 These are absences, not defects. **Do not invent a convention to fill one.** Propose it through
 `meta-skill-evolution` as a draft, or ask. A rule invented to make a table look complete is exactly
@@ -167,19 +227,23 @@ the failure this skill library exists to prevent.
 
 ## Rules
 
-- **Never hit-test a sprite to find a cell.** Walk the diagonal.
+- **Never pick a cell with arithmetic.** Raycast, and let the face normal decide the adjacent cell.
 - **Never hand-write the autotile table.** Consume `tile_rules`, and surface what is missing.
 - **Never present the mask bit order as settled.** It is AB-371, and it is a guess.
-- **Never let an export succeed with a missing atlas.** Fail with the filename.
 - **Never produce a column with a hole.** Height is derived from the top occupied level.
 - **Never add an editing feature to the renderer.** That module renders.
 
 ## References
 
-- `tools/character-builder/src/map/picking.ts` — the diagonal walk and the highlight pair
-- `tools/character-builder/src/map/autotile.ts` — mask, lookup, and the missing-combination report
-- `tools/character-builder/src/map/export.ts` — the runtime contract and failure by absence
-- `packages/iso-core/src/map.ts` — `BlockStore`, `EdgeStore`, the one-cell object rule
-- `packages/iso-core/src/tile-rules.ts` — the five open assumptions AB-370 to AB-374
-- `.agents/skills/projecting-isometric-geometry/SKILL.md` — the identity that makes picking cheap
+- `tools/character-builder/src/map/3d/pick3d-raycaster.ts` — hit, placement, and the face-normal contract
+- `tools/character-builder/src/map/3d/scene3d.ts` — the Three.js scene, the mesh diff, and the raycast targets
+- `tools/character-builder/src/map/3d/map-editor-3d.tsx` — the tool layer and pointer wiring
+- `tools/character-builder/src/map/3d/block-def.ts` — `BlockDef`, `Facing`, `Cell3D` (extracted from the old `scene.ts`)
+- `tools/character-builder/src/map/editor/map-state.ts` — pure `MapData → MapData` state and history
+- `tools/character-builder/src/map/editor/blocks-api.ts` — the palette; `BlockDef` (appearance) vs `BlockDefinition` (physics)
+- `packages/iso-core/src/map.ts` — `MapData`, RLE columns, the one-cell object rule
+- `packages/iso-core/src/tile-rules.ts` — the open assumptions AB-370 to AB-375
+- `packages/iso-core/src/map-instances.ts` — instances, ids, `buildExport`
+- `.agents/skills/raycasting-threejs-blocks/SKILL.md` — the raycaster mechanics behind the contract
+- `.agents/skills/rotating-isometric-camera/SKILL.md` — the four views and the animated turn
 - `.agents/skills/generating-pixellab-tilesets/SKILL.md` — where `tile_rules` comes from
