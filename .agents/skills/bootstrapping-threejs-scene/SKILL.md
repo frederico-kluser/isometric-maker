@@ -1,148 +1,110 @@
 ---
 name: bootstrapping-threejs-scene
-description: How to set up a Three.js WebGLRenderer scene inside a React component with Vite — renderer, camera, lights, render loop, resize, and cleanup.
+description: Carries how this editor boots its Three.js scene inside a React component - the WebGLRenderer created once against a React-owned canvas, the light rig, the orthographic camera, render-on-demand instead of a continuous loop, ResizeObserver for the panel, and the teardown order that keeps WebGL contexts from leaking. Use whenever creating or wiring the 3D viewport, adding lights or camera, handling resize, or tearing the scene down - including Portuguese phrasings like "criar a cena 3d", "montar o viewport 3d", "a cena 3d nao aparece", "adicionar luz na cena", "redimensionar o canvas 3d", "fechar a aba vaza memoria", "limpar a cena ao sair". Triggers on WebGLRenderer, OrthographicCamera, render loop, ResizeObserver, scene bootstrap, cena 3d, viewport 3d, createIsoScene3D.
 metadata:
   type: knowledge
-  domain: threejs
-  signals:
-    - three.js
-    - WebGLRenderer
-    - OrthographicCamera
-    - React + Three.js
-    - @types/three
-  related:
-    - creating-threejs-cubes
-    - raycasting-threejs-blocks
-    - controlling-threejs-camera
-  verification: src/map/3d/scene3d.ts compiles clean under tsc --noEmit
-  version_pin: three@0.185.1
+  verification_signal: cd tools/character-builder && npx tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck --target es2023 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --allowImportingTsExtensions --jsx react-jsx src/map/3d/scene3d.ts src/map/3d/controls3d.ts src/map/3d/cube3d.ts src/map/3d/pick3d-raycaster.ts src/map/3d/grid3d.ts
 ---
 
-# Bootstrapping Three.js Scene
+# Bootstrapping the Three.js scene
 
-Como criar uma cena Three.js dentro de um componente React com Vite + TypeScript.
+## When to use
 
-## Dependências
+Before writing the 3D viewport entry point, before adding anything that draws, before wiring resize
+or teardown, and before deciding where the scene object lives relative to React.
 
-```json
-{
-  "dependencies": {
-    "three": "0.185.1"
-  },
-  "devDependencies": {
-    "@types/three": "0.185.3"
-  }
-}
+## The scene is a side effect, not a component
+
+The canvas is a React element; the scene is not. No Three.js node passes through reconciliation: the
+scene is created once in a `useEffect` against the React-owned canvas and then updated by imperative
+calls. `map-editor-3d.tsx` creates it in one effect
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:153-176@e80414d9`) and destroys it in that same
+effect's cleanup (`tools/character-builder/src/map/3d/map-editor-3d.tsx:171-175@e80414d9`).
+
+## Renderer
+
+```typescript
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(BG_COLOR);
 ```
 
-**`@types/three` é necessário.** Three.js 0.185 NÃO empacota declarações `.d.ts` no build — o `import * as THREE from 'three'` falha no typecheck sem `@types/three`. O import funciona em runtime (ES module), mas o compilador não encontra os tipos.
+(`tools/character-builder/src/map/3d/scene3d.ts:131-137@dddf5555`)
 
-## Padrão canônico: React + Three.js
+- `antialias: false` — pixel art is nearest-sampled; antialiasing only blurs it.
+- `setPixelRatio(Math.min(dpr, 2))` — dpr above 2 doubles the fill rate for nothing.
+- shadows stay off: `shadowMap.enabled = false` (`tools/character-builder/src/map/3d/scene3d.ts:138@dddf5555`).
 
-```tsx
-import { useCallback, useEffect, useRef } from 'react';
-import * as THREE from 'three';
+## Light rig
 
-export function ThreeViewport() {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sceneRef = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.OrthographicCamera } | null>(null);
+One `AmbientLight` at 0.6 plus one `DirectionalLight` at 0.8 positioned at (10, 20, 5)
+(`tools/character-builder/src/map/3d/scene3d.ts:144-149@dddf5555`). This is the whole shading model —
+Lambert cube faces are lit by it (see `creating-threejs-cubes`).
 
-  // Criação — UMA VEZ, em onMounted
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const host = hostRef.current;
-    if (!canvas || !host) return;
-    let disposed = false;
+## Camera
 
-    // 1. Renderer
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x0b1020);
+The orthographic camera comes from `createEditorCamera` in `controls3d.ts`, created with the canvas
+size and added to the scene once (`tools/character-builder/src/map/3d/scene3d.ts:152-155@dddf5555`).
+Its geometry, pan, zoom and rotation are the subject of `controlling-threejs-camera`.
 
-    // 2. Scene
-    const scene = new THREE.Scene();
+## Render on demand — there is no loop
 
-    // 3. Luz
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-    sun.position.set(10, 20, 5);
-    scene.add(sun);
+The editor draws only when state changed. `renderer.render(scene, camera)` runs at the end of
+`render(state)` (`tools/character-builder/src/map/3d/scene3d.ts:284@dddf5555`), and the React side
+calls `render` once per state change (`tools/character-builder/src/map/3d/map-editor-3d.tsx:203-221@e80414d9`).
+A continuous `requestAnimationFrame` would spend GPU drawing identical frames; the only self-driven
+animation is the camera rotation tween, which starts and stops its own frames
+(`tools/character-builder/src/map/3d/scene3d.ts:306-351@dddf5555`).
 
-    // 4. Câmera ortográfica
-    const aspect = host.clientWidth / host.clientHeight;
-    const frustumSize = 15;
-    const camera = new THREE.OrthographicCamera(
-      -frustumSize * aspect, frustumSize * aspect,
-      frustumSize, -frustumSize,
-      0.1, 1000,
-    );
+## Resize via ResizeObserver on the container
 
-    sceneRef.current = { renderer, scene, camera };
+The canvas follows the editor panel, not the window. A `ResizeObserver` on the host element calls
+`resize(w, h)` (`tools/character-builder/src/map/3d/map-editor-3d.tsx:196-201@e80414d9`). Inside
+`resize`:
 
-    // 5. Render inicial
-    resize(renderer, camera, host.clientWidth, host.clientHeight);
-    renderer.render(scene, camera);
-
-    return () => {
-      disposed = true;
-      renderer.dispose();
-      scene.clear();
-    };
-  }, []);
-
-  // Resize via ResizeObserver
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const obs = new ResizeObserver(() => {
-      const s = sceneRef.current;
-      if (s) resize(s.renderer, s.camera, host.clientWidth, host.clientHeight);
-    });
-    obs.observe(host);
-    return () => obs.disconnect();
-  }, []);
-
-  return (
-    <div ref={hostRef} className="relative flex-1">
-      <canvas ref={canvasRef} className="block size-full" />
-    </div>
-  );
-}
-
-function resize(renderer: THREE.WebGLRenderer, camera: THREE.OrthographicCamera, w: number, h: number) {
-  if (w === 0 || h === 0) return;
-  renderer.setSize(w, h, false);
-  const aspect = w / h;
-  const fs = 15;
-  camera.left = -fs * aspect;
-  camera.right = fs * aspect;
-  camera.top = fs;
-  camera.bottom = -fs;
-  camera.updateProjectionMatrix();
-}
+```typescript
+renderer.setSize(width, height, false);
+const aspect = width / height;
+camera.left = -frustumSize * aspect;
+camera.right = frustumSize * aspect;
+camera.updateProjectionMatrix();
 ```
 
-## Regras
+(`tools/character-builder/src/map/3d/scene3d.ts:354-364@dddf5555`)
 
-1. **O canvas é um elemento React, a cena NÃO.** Nenhum nó Three.js passa por reconciliação. A cena é criada uma vez e atualizada por chamadas imperativas.
+The third `false` argument stops the renderer from overwriting the canvas CSS size — React styles
+own the layout.
 
-2. **`renderer.dispose()` no cleanup.** Sem isso, cada navegação vaza um contexto WebGL. A ordem é: `dispose()` → `scene.clear()` → remover canvas.
+## Teardown order
 
-3. **`ResizeObserver` no container, não `window.resize`.** O canvas segue o painel do editor, não a janela.
+`destroy()` runs: cancel any running rotation animation, `renderer.dispose()`, remove the block
+meshes and dispose the cube caches, `scene.clear()`, then remove the canvas from the DOM
+(`tools/character-builder/src/map/3d/scene3d.ts:367-381@dddf5555`). The React cleanup calls
+`destroy()` on unmount (`tools/character-builder/src/map/3d/map-editor-3d.tsx:171-175@e80414d9`). Without `renderer.dispose()` every navigation
+leaks a WebGL context until the browser reclaims it.
 
-4. **Sem render loop contínuo.** O editor só desenha quando o estado muda. Um `requestAnimationFrame` contínuo gastaria GPU desenhando frames idênticos.
+## Types: `@types/three` is required
 
-5. **`renderer.setPixelRatio(Math.min(dpr, 2))`.** Pixel art não se beneficia de dpr > 2, e dpr 3 (celulares) dobra o fill-rate à toa.
+`three@0.185.1` ships no `.d.ts` files — the package's `package.json` has no `types` field and the
+build contains only `build/three.module.js`, so `import * as THREE` fails typecheck without
+`@types/three`. Both are caret ranges, not exact pins:
+`"three": "^0.185.1"` (`tools/character-builder/package.json:27@3264b988`) and
+`"@types/three": "^0.185.3"` (`tools/character-builder/package.json:34@3264b988`).
 
-6. **`setSize(w, h, false)`** — o terceiro parâmetro `false` impede que o renderer sobrescreva o CSS do canvas.
+## The half-cube offset
 
-## Armadilha: `@types/three` é necessário
+`BoxGeometry(1, 1, 1)` is centered at the origin, so a block's base sits at y − 0.5. Meshes are
+positioned at `y + HALF_CUBE` (`tools/character-builder/src/map/3d/scene3d.ts:95-96@dddf5555`), and
+the raycaster must subtract it back — see `raycasting-threejs-blocks`.
 
-A pesquisa web afirmou que "tipos são bundled desde r152" — isso NÃO é verdade para Three.js 0.185.1. O pacote npm não inclui arquivos `.d.ts` e o campo `"types"` está ausente do `package.json`. Instale `@types/three` como devDependency.
+## What is not verified
 
-## Referências
+No automated test exercises the 3D scene; the claims above rest on typechecking the modules and
+reading the wiring in `map-editor-3d.tsx`. Context-leak counts were never measured.
 
-- [`src/map/3d/scene3d.ts`](../../tools/character-builder/src/map/3d/scene3d.ts) — implementação completa no editor
-- [`src/map/3d/controls3d.ts`](../../tools/character-builder/src/map/3d/controls3d.ts) — câmera e controles
+## References
+
+- `tools/character-builder/src/map/3d/scene3d.ts` — the scene implementation
+- `tools/character-builder/src/map/3d/map-editor-3d.tsx` — the React wiring
+- `tools/character-builder/src/map/3d/controls3d.ts` — camera and controls (`controlling-threejs-camera`)
 - [Three.js WebGLRenderer docs](https://threejs.org/docs/#api/en/renderers/WebGLRenderer)

@@ -1,0 +1,32 @@
+{
+  "skill": "bootstrapping-threejs-scene",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "como criar a cena 3d no editor", "should_trigger": true },
+    { "query": "a cena 3d nao aparece no viewport", "should_trigger": true },
+    { "query": "adicionar luz na cena threejs", "should_trigger": true },
+    { "query": "redimensionar o canvas 3d", "should_trigger": true },
+    { "query": "limpar a cena ao sair", "should_trigger": true },
+    { "query": "colocar um bloco com textura na parede", "should_trigger": false },
+    { "query": "quanto custa gerar um sprite na pixellab", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "No Three.js node passes through reconciliation",
+      "why": "the scene lives outside React by design; reintroducing reconciliation breaks the whole boot shape"
+    },
+    {
+      "must_contain": "renderer.dispose()",
+      "why": "teardown without dispose leaks WebGL contexts on every navigation"
+    },
+    {
+      "must_contain": "no `types` field",
+      "why": "the reason @types/three is required is that three ships no declarations; dropping the reason invites removing the dependency"
+    },
+    {
+      "must_contain": "HALF_CUBE",
+      "why": "the half-cube offset is the contract the raycaster depends on"
+    }
+  ],
+  "check_provenance": true
+}

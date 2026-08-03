@@ -1,0 +1,31 @@
+{
+  "skill": "creating-threejs-cubes",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "aplicar textura na face do cubo", "should_trigger": true },
+    { "query": "criar cubo 3d", "should_trigger": true },
+    { "query": "o cubo fica preto", "should_trigger": true },
+    { "query": "rotacionar a textura junto com a camera", "should_trigger": true },
+    { "query": "mover a camera com o mouse", "should_trigger": false },
+    { "query": "quanto custa a geracao de um sprite", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "the array index IS the",
+      "why": "the BoxGeometry group order is the whole contract; a material put at the wrong index shows art on the wrong side"
+    },
+    {
+      "must_contain": "pinned to +X, +Z and +Y",
+      "why": "the cube mesh is static; the pinned faces are why rotating textures with the camera was removed"
+    },
+    {
+      "must_contain": "dead code",
+      "why": "blockFaceToBoxGroup still rotates the mapping but nothing calls it; reintroducing it re-breaks the pinned faces"
+    },
+    {
+      "must_contain": "depthWrite: false",
+      "why": "the preview must not write depth or it shadows the next frame's raycast"
+    }
+  ],
+  "check_provenance": true
+}

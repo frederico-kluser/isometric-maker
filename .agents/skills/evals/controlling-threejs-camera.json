@@ -1,0 +1,31 @@
+{
+  "skill": "controlling-threejs-camera",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "girar a camera em 90 graus", "should_trigger": true },
+    { "query": "mover a camera com o mouse", "should_trigger": true },
+    { "query": "dar zoom no editor 3d", "should_trigger": true },
+    { "query": "a camera nao acompanha o mouse", "should_trigger": true },
+    { "query": "colocar um bloco com textura na parede", "should_trigger": false },
+    { "query": "quanto custa gerar um sprite na pixellab", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "camera moves in the view plane",
+      "why": "pan is defined by the camera matrix columns; moving in the ground plane instead is the classic OrbitControls mistake"
+    },
+    {
+      "must_contain": "The caller keeps zoom integer",
+      "why": "fractional zoom misaligns the pixel-art grid; the integer contract is load-bearing"
+    },
+    {
+      "must_contain": "meshes do NOT rotate with the camera",
+      "why": "only the camera orbits; rotating the meshes would put the pinned textures on the wrong faces"
+    },
+    {
+      "must_contain": "35.264",
+      "why": "the true-isometric angle vs the 2:1 dimetric 30 degrees is the number that keeps the look consistent with the 2D editor"
+    }
+  ],
+  "check_provenance": true
+}

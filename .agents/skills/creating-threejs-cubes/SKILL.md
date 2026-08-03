@@ -1,136 +1,94 @@
 ---
 name: creating-threejs-cubes
-description: How to create BoxGeometry cubes with per-face textures or solid colors — material array, texture loading, procedural fallback, and the face order contract.
+description: Carries how block cubes are built in this editor - the six BoxGeometry material groups in cubemap order, the material-array contract for per-face texture or solid color, nearest-filtered textures with sRGB color space, the procedural canvas fallback from the cube rasterizer, the shared unit geometry, and why the cube meshes never rotate even when the camera does. Use whenever creating or texturing 3D blocks, mapping sprite art onto a cube face, or fixing a cube that looks wrong - including Portuguese phrasings like "criar cubo 3d", "textura em cada face do cubo", "o cubo fica preto", "textura esticada na face", "rotacionar a textura junto com a camera", "por que o topo do cubo esta escuro". Triggers on BoxGeometry, material array, MeshLambertMaterial, CanvasTexture, NearestFilter, cubo 3d, textura face.
 metadata:
   type: knowledge
-  domain: threejs
-  signals:
-    - BoxGeometry
-    - MeshStandardMaterial
-    - MeshLambertMaterial
-    - texture per face
-    - CanvasTexture
-    - cube
-  related:
-    - bootstrapping-threejs-scene
-    - raycasting-threejs-blocks
-  verification: src/map/3d/cube3d.ts compiles clean under tsc --noEmit
-  version_pin: three@0.185.1
+  verification_signal: cd tools/character-builder && npx tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck --target es2023 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --allowImportingTsExtensions --jsx react-jsx src/map/3d/scene3d.ts src/map/3d/controls3d.ts src/map/3d/cube3d.ts src/map/3d/pick3d-raycaster.ts src/map/3d/grid3d.ts
 ---
 
-# Creating Three.js Cubes with Per-Face Textures
+# Creating Three.js cubes with per-face materials
 
-Como criar cubos 3D (BoxGeometry) com texturas ou cores diferentes em cada face, usando material array.
+## When to use
 
-## Ordem das faces no BoxGeometry
+Before creating a block mesh, before mapping art onto a cube, and before changing the material
+setup — face-order mistakes here put art on the wrong side of the block.
 
-O `BoxGeometry` do Three.js cria 6 grupos de material, um por face, nesta ordem:
+## The face order contract
 
-| Índice | Face | Eixo | Direção |
-|--------|------|------|---------|
-| 0 | right | +X | leste |
-| 1 | left | -X | oeste |
-| 2 | top | +Y | cima |
-| 3 | bottom | -Y | baixo |
-| 4 | front | +Z | sul (frente) |
-| 5 | back | -Z | norte (trás) |
+`BoxGeometry` creates six material groups, one per face, in cubemap order — the array index IS the
+face:
 
-Esta ordem É a convenção cubemap `px, nx, py, ny, pz, nz` e é estável desde r125.
+| Index | Face | Axis |
+|---|---|---|
+| 0 | right | +X |
+| 1 | left | −X |
+| 2 | top | +Y |
+| 3 | bottom | −Y |
+| 4 | front | +Z |
+| 5 | back | −Z |
 
-## Material array — o contrato
+This order is fixed in the geometry and encoded once in `BOX_GROUP`
+(`tools/character-builder/src/map/3d/cube3d.ts:89-96@49482c8a`).
 
-```typescript
-import * as THREE from 'three';
+## Material array — the contract
 
-// 6 materiais, um por face
-const materials: THREE.Material[] = [
-  new THREE.MeshLambertMaterial({ color: 0x888888 }), // right (+X)
-  new THREE.MeshLambertMaterial({ color: 0x666666 }), // left  (-X)
-  new THREE.MeshLambertMaterial({ color: 0xcccccc }), // top   (+Y) — mais clara
-  new THREE.MeshLambertMaterial({ color: 0x555555 }), // bottom (-Y)
-  new THREE.MeshLambertMaterial({ color: 0x777777 }), // front (+Z)
-  new THREE.MeshLambertMaterial({ color: 0x777777 }), // back  (-Z)
-];
+A mesh gets six `MeshLambertMaterial`s in that order; the index decides which face the material
+covers (`tools/character-builder/src/map/3d/cube3d.ts:444-458@49482c8a`). Lambert, not Standard:
+the microfacet BRDF of `MeshStandardMaterial` buys nothing on flat 1×1×1 blocks under one ambient
+and one directional light, and it costs more per fragment (`tools/character-builder/src/map/3d/cube3d.ts:341-368@49482c8a` uses Lambert
+throughout).
 
-const geometry = new THREE.BoxGeometry(1, 1, 1);
-const cube = new THREE.Mesh(geometry, materials);
-scene.add(cube);
-```
+Every material is a draw call. Under ~100 cubes that is fine; beyond that, merge into
+`InstancedMesh` with an atlas — not done here, and not needed for the current maps.
 
-**Cada material gera um draw call.** Para < 100 cubos isso é aceitável. Para muitos cubos, considerar InstancedMesh com atlas de textura.
+## Textures: nearest filter, sRGB, no mipmaps
 
-## Textura por face
+Pixel art must not be smoothed. Every texture — loaded or procedural — is configured with
+`NearestFilter` for min and mag, `generateMipmaps = false`, and `colorSpace = SRGBColorSpace`
+(`tools/character-builder/src/map/3d/cube3d.ts:139-158@49482c8a` for loaded textures,
+`tools/character-builder/src/map/3d/cube3d.ts:54-61@49482c8a` for canvas textures).
 
-```typescript
-const loader = new THREE.TextureLoader();
+## Procedural fallback: canvas → texture
 
-async function loadFaceTexture(url: string): Promise<THREE.Texture> {
-  return new Promise((resolve) => {
-    loader.load(url, (tex) => {
-      tex.magFilter = THREE.NearestFilter;   // pixel art
-      tex.minFilter = THREE.NearestFilter;
-      tex.generateMipmaps = false;
-      tex.colorSpace = THREE.SRGBColorSpace; // obrigatório desde r152
-      resolve(tex);
-    });
-  });
-}
+Blocks without art get solid HSL colors, and their cube faces come from the cube rasterizer in
+`src/map/cube.ts` — `makeCubeCanvasFromHue` and `makeCubeViewsFromHue`
+(`tools/character-builder/src/map/cube.ts:73@4db79a20`, `tools/character-builder/src/map/cube.ts:89@4db79a20`)
+— rasterized with the canonical 48px geometry from iso-core
+(`packages/iso-core/src/iso-cube.ts:222@2ad14e9b`). The rasterizer lives in the character-builder,
+not in iso-core; iso-core owns only the geometry math.
 
-// Exemplo: textura na face frontal, cor nas demais
-const faceTex = await loadFaceTexture('/assets/block_north.png');
-const materials = [
-  new THREE.MeshLambertMaterial({ color: 0x777777 }),  // right
-  new THREE.MeshLambertMaterial({ color: 0x555555 }),  // left
-  new THREE.MeshLambertMaterial({ color: 0xcccccc }),  // top
-  new THREE.MeshLambertMaterial({ color: 0x555555 }),  // bottom
-  new THREE.MeshLambertMaterial({ map: faceTex }),     // front — textura!
-  new THREE.MeshLambertMaterial({ color: 0x777777 }),  // back
-];
-```
+## Shared geometry
 
-## Textura procedural (Canvas → Three.js)
+One `BoxGeometry(1, 1, 1)` is shared by every cube mesh — each mesh allocates only its six materials
+(`tools/character-builder/src/map/3d/cube3d.ts:44@49482c8a`,
+`tools/character-builder/src/map/3d/cube3d.ts:468-473@49482c8a`).
 
-Para cubos sem arte gerada, rasteriza-se um canvas 2D e usa-se como textura:
+## The texture-rotation trap
 
-```typescript
-function canvasTexture(canvas: HTMLCanvasElement): THREE.Texture {
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-```
+The cube mesh does NOT rotate when the camera rotates — only the camera orbits (`setCameraRotation`,
+see `controlling-threejs-camera`). The "north" sprite's three faces (top, left, right after dewarp)
+are pinned to +X, +Z and +Y, and the −X, −Z, −Y faces get solid color
+(`tools/character-builder/src/map/3d/cube3d.ts:341-368@49482c8a`). Rotating the textures to follow
+the camera was tried and removed: it swaps art as if the MESH turned, and because the mesh is static
+it ends up showing the wrong face. The `rotation` parameter remains on the signature but is ignored
+(`tools/character-builder/src/map/3d/cube3d.ts:346@49482c8a`). A leftover `blockFaceToBoxGroup` still rotates the mapping, but nothing
+calls it — it is dead code (`tools/character-builder/src/map/3d/cube3d.ts:112-122@49482c8a`).
 
-O canvas vem do rasterizador do `iso-core` (`makeCubeCanvasFromHue`, `makeCubeViewsFromHue`).
+## Preview and highlight
 
-## Mapeamento BlockDef → faces 3D
+The placement preview is a semi-transparent box with `depthTest: true` and `depthWrite: false` — it
+must not write depth, or it would shadow the raycast in the next frame
+(`tools/character-builder/src/map/3d/cube3d.ts:485-498@49482c8a`). The selection outline is
+`EdgesGeometry` plus `LineSegments` (`tools/character-builder/src/map/3d/cube3d.ts:507-519@49482c8a`).
 
-O `BlockDef` do editor 2D tem `faceUrls` com 4 direções cardinais (north/east/south/west). No Three.js com a câmera na rotação 0 (sul):
+## What is not verified
 
-| BlockDef face | BoxGeometry face | Índice |
-|---------------|------------------|--------|
-| north | front (+Z) | 4 |
-| east | right (+X) | 0 |
-| south | back (-Z) | 5 |
-| west | left (-X) | 1 |
+The "under 100 cubes" draw-call threshold is a rule of thumb, not a measurement. Whether
+`InstancedMesh` is ever needed has not been decided.
 
-Quando a câmera gira (rotação 1/2/3), as texturas rodam junto: `(facing - rotation) mod 4`.
+## References
 
-## Geometria compartilhada
-
-Criar uma `BoxGeometry` por cubo aloca 24 vértices e 36 índices por instância. Para o editor, uma geometria compartilhada (`new THREE.BoxGeometry(1, 1, 1)`) reutilizada em todos os meshes elimina esse custo — cada mesh só aloca seus 6 materiais.
-
-## Iluminação
-
-Usar `MeshLambertMaterial` (não `MeshStandardMaterial`):
-- Lambert é mais barato (sem microfacet BRDF)
-- A diferença visual em cubos de 1 unidade com luz ambiente + directional é insignificante
-- Não requer `environmentMap` para parecer correto
-
-## Referências
-
-- [`src/map/3d/cube3d.ts`](../../tools/character-builder/src/map/3d/cube3d.ts) — implementação completa
+- `tools/character-builder/src/map/3d/cube3d.ts` — the cube factory
+- `tools/character-builder/src/map/cube.ts` — the isometric cube rasterizer
+- `packages/iso-core/src/iso-cube.ts` — the canonical cube geometry
 - [Three.js BoxGeometry docs](https://threejs.org/docs/#api/en/geometries/BoxGeometry)
-- [Three.js Material Array](https://threejs.org/manual/en/textures.html) — "Different Textures on Each Face"

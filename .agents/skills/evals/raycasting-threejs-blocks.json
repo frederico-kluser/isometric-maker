@@ -1,0 +1,35 @@
+{
+  "skill": "raycasting-threejs-blocks",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "clicar no bloco para colocar outro", "should_trigger": true },
+    { "query": "o bloco assenta no lugar errado", "should_trigger": true },
+    { "query": "colocar bloco no chao vazio", "should_trigger": true },
+    { "query": "remover bloco com o mouse", "should_trigger": true },
+    { "query": "qual a versao do pixellab no spec", "should_trigger": false },
+    { "query": "girar a camera em 90 graus", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "the Y inversion is mandatory",
+      "why": "forgetting the negated Y flips picking vertically with no error to search for"
+    },
+    {
+      "must_contain": "transformDirection(mesh.matrixWorld)",
+      "why": "face.normal is local space; skipping the world transform breaks placement the day a mesh rotates"
+    },
+    {
+      "must_contain": "the half-cube offset",
+      "why": "block positions carry the y + 0.5 centering offset; the raycaster must subtract it back"
+    },
+    {
+      "must_contain": "readonly Object3D[]",
+      "why": "intersectObjects takes a mutable array; the cast is the documented trap"
+    },
+    {
+      "must_contain": "ground-plane",
+      "why": "the plane is found by name; renaming it silently breaks empty-space placement"
+    }
+  ],
+  "check_provenance": true
+}

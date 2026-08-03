@@ -1,152 +1,95 @@
 ---
 name: controlling-threejs-camera
-description: Pan, zoom, and discrete 90° rotation for an OrthographicCamera in an isometric editor — without OrbitControls.
+description: Carries how this editor's orthographic camera moves - pan in the view plane from the camera matrix columns, integer zoom through camera.zoom, discrete 90-degree yaw rotation across four views with no OrbitControls, and the pixel-to-world conversion that keeps panning correct at any zoom. Use whenever wiring camera input, panning, zooming or rotating the 3D view - including Portuguese phrasings like "mover a camera", "arrastar o mapa 3d", "dar zoom no editor 3d", "girar a camera em 90 graus", "a camera nao acompanha o mouse", "zoom fracionario desalinha a grade", "trocar orbitcontrols por controle proprio". Triggers on pan, zoom, yaw, OrthographicCamera, setCameraRotation, ELEVATION, mover camera, girar camera.
 metadata:
   type: knowledge
-  domain: threejs
-  signals:
-    - OrthographicCamera
-    - pan
-    - zoom
-    - rotation
-    - isometric
-    - camera controls
-  related:
-    - bootstrapping-threejs-scene
-    - rotating-isometric-camera
-  verification: src/map/3d/controls3d.ts compiles clean under tsc --noEmit
-  version_pin: three@0.185.1
+  verification_signal: cd tools/character-builder && npx tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck --target es2023 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --allowImportingTsExtensions --jsx react-jsx src/map/3d/scene3d.ts src/map/3d/controls3d.ts src/map/3d/cube3d.ts src/map/3d/pick3d-raycaster.ts src/map/3d/grid3d.ts
 ---
 
-# Controlling Three.js Camera (Isometric Editor)
+# Controlling the Three.js camera
 
-Como implementar pan, zoom e rotação discreta de 90° para uma OrthographicCamera num editor isométrico, sem usar OrbitControls.
+## When to use
 
-## Câmera isométrica
+Before wiring mouse or touch input to the 3D view, before changing how the camera moves or turns,
+and before reaching for OrbitControls.
 
-Posição da câmera para visual 2:1 dimétrico (o mesmo estilo do editor 2D):
+## The camera
 
-```typescript
-import * as THREE from 'three';
+The editor uses a real `OrthographicCamera`, not a perspective one. The frustum size is the
+`DEFAULT_DISTANCE` (15), with left/right derived from the viewport aspect
+(`tools/character-builder/src/map/3d/controls3d.ts:43-65@af9fd54d`).
 
-const ELEVATION = Math.PI / 6;   // 30° do horizonte → proporção ~2:1 no chão
-const BASE_YAW = Math.PI / 4;    // 45°
-const DISTANCE = 15;
-
-function setCameraRotation(camera: THREE.OrthographicCamera, rotation: 0|1|2|3): void {
-  const yaw = BASE_YAW + rotation * (Math.PI / 2);
-  
-  camera.position.x = DISTANCE * Math.cos(ELEVATION) * Math.sin(yaw);
-  camera.position.y = DISTANCE * Math.sin(ELEVATION);
-  camera.position.z = DISTANCE * Math.cos(ELEVATION) * Math.cos(yaw);
-  
-  camera.lookAt(0, 0, 0);
-}
-```
-
-**30° vs 35.264°:** O ângulo de 35.264° (atan(1/√2)) é o isométrico VERDADEIRO — todos os 3 eixos têm o mesmo foreshortening, e um quadrado no chão projeta como losango √3:1. O visual clássico 2:1 (2 pixels de largura para 1 de altura no losango) requer 30° de elevação.
-
-## Pan
-
-Pan move a câmera no plano perpendicular à direção de visão:
+## Position: elevation 30°, yaw in 90° steps
 
 ```typescript
-function panCamera(camera: THREE.OrthographicCamera, dx: number, dy: number): void {
-  // Vetores right e up da câmera no plano de visão
-  const right = new THREE.Vector3(
-    camera.matrix.elements[0]!,
-    camera.matrix.elements[1]!,
-    camera.matrix.elements[2]!,
-  );
-  const up = new THREE.Vector3(
-    camera.matrix.elements[4]!,
-    camera.matrix.elements[5]!,
-    camera.matrix.elements[6]!,
-  );
-  
-  camera.position.addScaledVector(right, -dx);
-  camera.position.addScaledVector(up, dy);
-}
+const yaw = BASE_YAW + rotation * (Math.PI / 2);
+camera.position.x = dist * Math.cos(ELEVATION) * Math.sin(yaw);
+camera.position.y = dist * Math.sin(ELEVATION);
+camera.position.z = dist * Math.cos(ELEVATION) * Math.cos(yaw);
+camera.lookAt(0, 0, 0);
 ```
 
-### Convertendo pixels de tela para world units
+(`tools/character-builder/src/map/3d/controls3d.ts:73-85@af9fd54d`), with `ELEVATION = Math.PI / 6`
+(`tools/character-builder/src/map/3d/controls3d.ts:25@af9fd54d`) and `BASE_YAW = Math.PI / 4` (`tools/character-builder/src/map/3d/controls3d.ts:31@af9fd54d`).
+
+**30° is dimetric, not true isometric.** True isometry uses atan(1/√2) ≈ 35.264°, where all three
+axes foreshorten equally. 30° produces the 2:1 diamond look the 2D editor already has
+(`tools/character-builder/src/map/3d/scene3d.ts:10-11@dddf5555`).
+
+## Pan: the camera moves in the view plane
+
+Pan shifts the camera perpendicular to the view direction, using the camera matrix columns — column
+0 is `right`, column 4 is `up`:
 
 ```typescript
-function pixelDeltaToWorld(
-  camera: THREE.OrthographicCamera,
-  pixelDx: number,
-  pixelDy: number,
-  viewportW: number,
-  viewportH: number,
-): { dx: number; dy: number } {
-  const frustumHeight = (camera.top - camera.bottom) / camera.zoom;
-  const frustumWidth = (camera.right - camera.left) / camera.zoom;
-  
-  return {
-    dx: (pixelDx / viewportW) * frustumWidth,
-    dy: (pixelDy / viewportH) * frustumHeight,
-  };
-}
+const right = new THREE.Vector3();
+const up = new THREE.Vector3();
+right.setX(camera.matrix.elements[0]!);
+right.setY(camera.matrix.elements[1]!);
+right.setZ(camera.matrix.elements[2]!);
+up.setX(camera.matrix.elements[4]!);
+up.setY(camera.matrix.elements[5]!);
+up.setZ(camera.matrix.elements[6]!);
+camera.position.addScaledVector(right, -dx);
+camera.position.addScaledVector(up, dy);
 ```
 
-## Zoom
+(`tools/character-builder/src/map/3d/controls3d.ts:92-118@af9fd54d`)
 
-`camera.zoom` multiplica o frustum sem alterar left/right/top/bottom:
+Screen pixels become world units through `pixelDeltaToWorld`, which divides the frustum by the
+viewport size and by `camera.zoom` (`tools/character-builder/src/map/3d/controls3d.ts:151-165@af9fd54d`).
 
-```typescript
-function zoomCamera(camera: THREE.OrthographicCamera, factor: number): void {
-  camera.zoom = Math.max(0.25, Math.min(8, factor));
-  camera.updateProjectionMatrix();
-}
-```
+## Zoom: integer steps for pixel art
 
-**Zoom inteiro para pixel art.** Fracionário desalinha a grade e produz shimmering. O editor usa passos discretos: 1×, 2×, 3×, 4×.
+`camera.zoom` scales the frustum without touching left/right/top/bottom. The implementation clamps
+to [0.25, 8] and refreshes the projection matrix
+(`tools/character-builder/src/map/3d/controls3d.ts:126-132@af9fd54d`). The caller keeps zoom integer —
+fractional zoom misaligns the grid and shimmers pixel art; that contract lives in the caller, not in
+this function (`tools/character-builder/src/map/3d/controls3d.ts:123-124@af9fd54d`).
 
-## Rotação discreta (4 vistas)
+## Rotation: discrete, four views — the camera orbits, cubes do not
 
-O editor suporta 4 vistas separadas por 90° de yaw, como o editor 2D:
+The four views are 90° yaw steps: 0 = south looking north, 1 = east looking west, 2 = north looking
+south, 3 = west looking east. `setCameraRotation` turns instantly
+(`tools/character-builder/src/map/3d/controls3d.ts:73-85@af9fd54d`); `animateRotation` tweens the camera position along the same circle
+over 280 ms with a cubic ease (`tools/character-builder/src/map/3d/scene3d.ts:306-351@dddf5555`).
+The cube meshes do NOT rotate with the camera — only the camera orbits (see
+`creating-threejs-cubes`).
 
-- Rotação 0: câmera ao **sul**, olhando para norte
-- Rotação 1: câmera ao **leste**, olhando para oeste
-- Rotação 2: câmera ao **norte**, olhando para sul
-- Rotação 3: câmera ao **oeste**, olhando para leste
+## Why not OrbitControls
 
-A rotação é imediata (sem animação). O `lookAt` sempre aponta para o centro do conteúdo.
+OrbitControls orbits a point with continuous rotation — built for 3D inspection. This editor needs
+discrete 90° steps, integer zoom and a fixed behavior set; a hand-written control (~60 lines) is
+simpler than configuring OrbitControls into those non-default behaviors
+(`tools/character-builder/src/map/3d/controls3d.ts:1-6@af9fd54d`).
 
-## Criação da câmera
+## What is not verified
 
-```typescript
-function createEditorCamera(viewportW: number, viewportH: number): THREE.OrthographicCamera {
-  const aspect = viewportW / viewportH;
-  const fs = 15; // frustum size — metade da altura visível em world units
-  
-  const camera = new THREE.OrthographicCamera(
-    -fs * aspect, fs * aspect,  // left, right
-    fs, -fs,                    // top, bottom
-    0.1, 1000,                  // near, far
-  );
-  
-  setCameraRotation(camera, 0); // rotação inicial
-  camera.zoom = 1;
-  camera.updateProjectionMatrix();
-  
-  return camera;
-}
-```
+The 280 ms duration and the cubic ease are visual choices, never measured. The claim that
+OrbitControls would need more configuration is engineering judgment, not a benchmark.
 
-## Armadilha: por que não usar OrbitControls?
+## References
 
-`OrbitControls` foi feito para câmeras de inspeção 3D (órbita esférica ao redor de um ponto). Num editor isométrico:
-
-1. A rotação é **discreta** (90°), não contínua
-2. O pan é **no plano do chão**, não no plano da tela
-3. O zoom é **inteiro** (pixel art)
-4. O comportamento de "scroll para zoom, botão do meio para pan, R para girar" é fixo
-
-Implementar controle próprio (~60 linhas) é mais simples que configurar OrbitControls para todos esses comportamentos não-padrão.
-
-## Referências
-
-- [`src/map/3d/controls3d.ts`](../../tools/character-builder/src/map/3d/controls3d.ts) — implementação completa
+- `tools/character-builder/src/map/3d/controls3d.ts` — the camera implementation
+- `tools/character-builder/src/map/3d/scene3d.ts` — where pan/zoom/rotation are exposed to React
 - [Three.js OrthographicCamera docs](https://threejs.org/docs/#api/en/cameras/OrthographicCamera)
-- [Isometric camera with THREE.js — SO](https://stackoverflow.com/questions/23450588) — resposta canônica de WestLangley
