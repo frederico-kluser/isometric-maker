@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="pt-BR" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>EXPLAINER — Migração 3D e Colisão Sólida</title>
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+      integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous">
+<style>
+  [id] { scroll-margin-top: 5rem; }
+  pre { position: relative; margin-bottom: 1rem; }
+  pre code.hljs { padding-right: 4rem; border-radius: var(--bs-border-radius); font-size: .875rem; }
+  .copy-btn { position: absolute; top: .5rem; right: .5rem; opacity: .4; transition: opacity .15s; }
+  pre:hover .copy-btn, .copy-btn:focus-visible { opacity: 1; }
+  .tab-pane:focus-visible { outline: 0; box-shadow: 0 0 0 .2rem rgba(var(--bs-emphasis-color-rgb), .15); }
+  @media print {
+    .nav-tabs, .copy-btn { display: none !important; }
+    .tab-content > .tab-pane { display: block !important; opacity: 1 !important; page-break-inside: avoid; }
+    .tab-pane::before { content: attr(data-print-title); display: block; font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
+  }
+</style>
+</head>
+<body class="bg-body">
+<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>isometric-maker</span>
+    <span class="navbar-text small text-body-secondary d-none d-md-inline">Ondas 1–5 · 9 agentes · 2026-08-03</span>
+  </div>
+</nav>
+<main class="container py-4" style="max-width: 60rem">
+  <header class="mb-4">
+    <h1 class="display-6 fw-semibold">Migração para editor 3D, colisão sólida e molde adulto</h1>
+    <p class="lead text-body-secondary">Remoção completa do modo sprite 2D, engine de colisão AABB com cubos intransponíveis, e personagem baseado no molde adulto em 8 direções.</p>
+    <div class="d-flex flex-wrap gap-2">
+      <span class="badge text-bg-secondary">5 ondas</span>
+      <span class="badge text-bg-secondary">9 agentes</span>
+      <span class="badge text-bg-success">13 PASS gate.sh</span>
+    </div>
+  </header>
+  <ul class="nav nav-tabs mb-3" id="tabs" role="tablist">
+    <li class="nav-item" role="presentation"><button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview" type="button" role="tab" aria-controls="pane-overview" aria-selected="true">Visão Geral</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda1" data-bs-toggle="tab" data-bs-target="#pane-onda1" type="button" role="tab" aria-controls="pane-onda1" aria-selected="false">Onda 1 · Fundação</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda2" data-bs-toggle="tab" data-bs-target="#pane-onda2" type="button" role="tab" aria-controls="pane-onda2" aria-selected="false">Onda 2 · Remoção 2D</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda3" data-bs-toggle="tab" data-bs-target="#pane-onda3" type="button" role="tab" aria-controls="pane-onda3" aria-selected="false">Onda 3 · Colisão</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda4" data-bs-toggle="tab" data-bs-target="#pane-onda4" type="button" role="tab" aria-controls="pane-onda4" aria-selected="false">Onda 4 · Personagem</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda5" data-bs-toggle="tab" data-bs-target="#pane-onda5" type="button" role="tab" aria-controls="pane-onda5" aria-selected="false">Onda 5 · Docs</button></li>
+  </ul>
+  <div class="tab-content" id="tabContent">
+    <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0" data-print-title="Visão Geral">
+      <div class="alert alert-info"><i class="bi bi-info-circle me-1"></i><strong>Tarefa original:</strong> remover por completo o modo de construção de mapa em sprites, suportar apenas 3D, melhorar a engine com cubos sólidos, deletar sprite de personagem e usar molde adulto como referência em 8 direções e todas as ações.</div>
+      <h5 class="mt-4">O que foi entregue</h5>
+      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Onda</th><th>Agentes</th><th>O que fez</th><th>Status</th></tr></thead><tbody>
+        <tr><td>1 · Fundação</td><td>2</td><td>Pesquisa AABB collision + auditoria de 9+ skills</td><td><span class="badge text-bg-success">OK</span></td></tr>
+        <tr><td>2 · Remoção 2D</td><td>3</td><td>24 arquivos deletados (~6200 linhas), tipos migrados, rotas consolidadas, pixi.js removido, skills reescritos</td><td><span class="badge text-bg-success">OK</span></td></tr>
+        <tr><td>3 · Colisão</td><td>1</td><td>Swept AABB per-axis, caixa 0.65, flag solid, push-out MTV, 504 testes</td><td><span class="badge text-bg-success">OK</span></td></tr>
+        <tr><td>4 · Personagem</td><td>1</td><td>13 sprites deletados, molde adulto default, 364 testes</td><td><span class="badge text-bg-success">OK</span></td></tr>
+        <tr><td>5 · Docs</td><td>2</td><td>ADR 0037+0038, doc colisão, catalog.md+router atualizados</td><td><span class="badge text-bg-success">OK</span></td></tr>
+      </tbody></table></div>
+      <h5 class="mt-4">Gate final</h5>
+      <pre><code class="language-text">═══ gate.sh ═══
+PASS: 13  FAIL: 0  AUXILIAR: 3
+VEREDITO: PASS
+
+iso-core          · 504/504 testes
+character-builder · 364/364 testes + typecheck
+pixellab-pipeline · 76/76 testes + typecheck
+runtime           · typecheck OK
+docs              · 54 docs conformes
+skills            · lint 0 erros, evals 34/34
+pixi pin          · 2 fontes OK
+ledger            · OK</code></pre>
+      <h5 class="mt-4">Commits (9)</h5>
+      <ol class="small">
+        <li><code>onda2-remove-2d</code> — remove 2D sprite map editor, keep only 3D</li>
+        <li><code>onda2-skill-maps</code> — rewrite editing-isometric-maps for 3D</li>
+        <li><code>onda2-skills-threejs</code> — formalize 4 Three.js skills</li>
+        <li><code>onda2-skills-threejs</code> — fix cube-canvas.ts path</li>
+        <li><code>onda4-character</code> — delete mannequin sprites, adult mold default</li>
+        <li><code>onda3-solid-collision</code> — AABB swept per-axis collision with push-out</li>
+        <li><code>onda5-adrs-docs</code> — ADR 0037 + 0038 + collision doc</li>
+        <li><code>onda5-skills-catalog</code> — update catalog, project-router, routing-pixijs-work</li>
+        <li><code>fix(pin)</code> — remove character-builder from pixi pin check</li>
+      </ol>
+      <h5 class="mt-4">Decisões autônomas</h5>
+      <ul class="small">
+        <li><strong>Caixa da entidade:</strong> half=0.325 (total ~0.65) — tunneling impossível com passo 0.067</li>
+        <li><strong>Sliding de parede:</strong> existe (separação por eixo)</li>
+        <li><strong>Família PixiJS:</strong> re-escopada para runtime, não retirada</li>
+        <li><strong>Zero dinheiro gasto</strong> — 0 chamadas à API PixelLab</li>
+      </ul>
+    </div>
+    <div class="tab-pane fade" id="pane-onda1" role="tabpanel" aria-labelledby="tab-onda1" tabindex="0" data-print-title="Onda 1 · Fundação">
+      <h5>Pesquisa de colisão AABB</h5>
+      <p>Recomendação: <strong>Swept AABB com separação por eixo + push-out MTV</strong> — a combinação Minecraft/voxel-engine.</p>
+      <div class="table-responsive"><table class="table table-sm small"><thead><tr><th>Abordagem</th><th>Complexidade</th><th>Adequação</th></tr></thead><tbody>
+        <tr><td>Swept AABB per-axis</td><td>Média</td><td><span class="badge text-bg-success">Alta</span></td></tr>
+        <tr><td>Push-out MTV</td><td>Baixa</td><td><span class="badge text-bg-success">Alta</span> — caso editor</td></tr>
+        <tr><td>Motor de física</td><td>Alta</td><td><span class="badge text-bg-danger">Baixa</span></td></tr>
+      </tbody></table></div>
+      <p class="small">Descoberta: <code>GridAabb</code>/<code>aabbOf</code>/<code>aabbOverlaps</code>/<code>blocksMovement</code> já existiam em <code>map-instances.ts</code> — nunca consumidos.</p>
+      <h5 class="mt-4">Auditoria de skills</h5>
+      <ul class="small">
+        <li><code>pixi.js</code> importado APENAS por <code>scene.ts</code> e <code>renderer.ts</code></li>
+        <li>4 skills Three.js: 12 erros de lint (frontmatter, PT-BR, sem citações)</li>
+        <li>Código morto: <code>map/tools/</code>, <code>export.ts</code>, <code>autotile.ts</code>, <code>picking.ts</code></li>
+        <li>Família PixiJS: re-escorpar para runtime</li>
+      </ul>
+    </div>
+    <div class="tab-pane fade" id="pane-onda2" role="tabpanel" aria-labelledby="tab-onda2" tabindex="0" data-print-title="Onda 2 · Remoção 2D">
+      <h5>3 agentes paralelos</h5>
+      <p>Remoção de código 2D + reescrita de skill + formalização Three.js.</p>
+      <h6>24 arquivos deletados (~6200 linhas)</h6>
+      <pre><code class="language-text">map/editor/map-editor.tsx    map/actor.ts          map/pick3d.ts
+map/scene.ts                 map/autotile.ts       map/export.ts
+map/renderer.ts              map/camera.ts         map/collision-map.ts
+map/app.ts                   map/picking.ts        map/components/compass.tsx
+map/cube.ts                  map/placement.ts      map/tools/{paint,stack,wall}.ts
++ 6 test files correspondentes</code></pre>
+      <h6>Tipos extraídos</h6>
+      <p><code>BlockDef</code>, <code>Facing</code>, <code>Cell3D</code> → <code>map/3d/block-def.ts</code>. Canvas helpers → <code>map/3d/cube-canvas.ts</code>. <code>pixi.js</code> removido de <code>package.json</code>.</p>
+      <h6>Skills</h6>
+      <p><code>editing-isometric-maps</code>: 39 citações, picking Raycaster, render scene3d.ts. 4 skills Three.js: 0 erros lint, 60 citações, 4 eval suites.</p>
+    </div>
+    <div class="tab-pane fade" id="pane-onda3" role="tabpanel" aria-labelledby="tab-onda3" tabindex="0" data-print-title="Onda 3 · Colisão sólida">
+      <h5>collision-box.ts — Swept AABB per-axis</h5>
+      <pre><code class="language-typescript">export const PLAYER_HALF = 0.325;  // caixa total ~0.65
+export function resolveMovement(map, box, dx, dy, solidAt): ResolvedMove
+export function pushOut(map, box, solidAt): EntityBox | null
+export function solidAtFromBlocks(columns): SolidAtFn  // honra flag solid</code></pre>
+      <p>Move X → clampa → atualiza caixa → move Y. Sliding natural. Degrau por face (pressedCells). Push-out MTV (max 0.9). Água/lava/folhagem não bloqueiam.</p>
+      <div class="alert alert-success small"><strong>Gate:</strong> 504/504 iso-core (+31 collision-box) · typecheck limpo</div>
+    </div>
+    <div class="tab-pane fade" id="pane-onda4" role="tabpanel" aria-labelledby="tab-onda4" tabindex="0" data-print-title="Onda 4 · Personagem">
+      <h5>13 sprites deletados</h5>
+      <p><code>packages/game-assets/manequim/</code> removido. Molde <code>adulto.png</code> e <code>crianca.png</code> preservados.</p>
+      <h5>Molde adulto como default</h5>
+      <p><code>seedStudio()</code> com <code>mold: "adulto"</code>. Derivados herdam molde. ADR 0035 já definia <code>init_image</code> 320.</p>
+      <h5>8 direções + 5 poses</h5>
+      <p><code>generateDirections8</code> via v3. Poses: parado, caminhando, correndo, pulando, atacando.</p>
+      <div class="alert alert-success small"><strong>Gate:</strong> 364/364 testes · zero chamadas PixelLab</div>
+    </div>
+    <div class="tab-pane fade" id="pane-onda5" role="tabpanel" aria-labelledby="tab-onda5" tabindex="0" data-print-title="Onda 5 · Documentação">
+      <h5>ADRs</h5>
+      <p><strong>ADR 0037:</strong> Editor 3D apenas — remoção do modo sprite 2D.<br>
+      <strong>ADR 0038:</strong> Colisão sólida AABB com swept per-axis e push-out MTV.</p>
+      <h5>Docs</h5>
+      <p><code>docs/03-mapa/colisao-solida.md</code> em PT-BR. <code>docs/README.md</code> atualizado (54 docs).</p>
+      <h5>Skills</h5>
+      <p>Catalog.md: seção Three.js. Project-router: 4 mapeamentos. <code>routing-pixijs-work</code>: re-escopado. <code>check-pixi-pin.mjs</code>: 2 fontes.</p>
+    </div>
+  </div>
+  <footer class="border-top pt-3 mt-5 text-body-secondary small">
+    <p>Gerado pelo orquestrador deep-orchestrator. <strong>Última atualização:</strong> 2026-08-03.</p>
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-kOsK60qEjNMDEjR+E4JQqQG55eWpBOuqwFRY7LE3vNY3ZuYy5w6kIFXhK5HxryO5"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+        integrity="sha384-nYrDQMqAyBEjFnGFJwpLwXZJGjgawVe1FXGwPcj/B5dXf6YvLHSsPOF1WpE2s7yq"
+        crossorigin="anonymous"></script>
+<script>
+hljs.highlightAll();
+document.querySelectorAll('pre code').forEach(function(b) {
+  var btn = document.createElement('button');
+  btn.className = 'copy-btn btn btn-sm btn-outline-secondary';
+  btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+  btn.title = 'Copiar';
+  btn.addEventListener('click', function() {
+    var t = b.textContent || '';
+    function ok() { btn.innerHTML = '<i class="bi bi-check-lg"></i>'; setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(ok).catch(function() {
+        var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); ok(); } catch(e) { btn.innerHTML = '<i class="bi bi-x-lg"></i>'; }
+        document.body.removeChild(ta);
+      });
+    } else {
+      var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); ok(); } catch(e) { btn.innerHTML = '<i class="bi bi-x-lg"></i>'; }
+      document.body.removeChild(ta);
+    }
+  });
+  b.parentNode.insertBefore(btn, b);
+});
+(function() {
+  var hash = window.location.hash;
+  if (!hash) return;
+  var target = document.querySelector(hash);
+  if (!target || !target.classList.contains('tab-pane')) return;
+  var tabBtn = document.querySelector('[data-bs-target="' + hash + '"]');
+  if (tabBtn) { var tab = new bootstrap.Tab(tabBtn); tab.show(); target.scrollIntoView(); }
+  window.addEventListener('shown.bs.tab', function(e) {
+    history.replaceState(null, '', '#' + e.target.getAttribute('aria-controls'));
+  });
+})();
+</script>
+</body>
+</html>
