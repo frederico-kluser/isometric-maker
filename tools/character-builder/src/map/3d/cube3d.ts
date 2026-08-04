@@ -26,12 +26,10 @@
 import * as THREE from 'three';
 import {
   CANONICAL_CUBE,
-  type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
 import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from './cube-canvas.ts';
 import type { BlockDef } from './block-def.ts';
 import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts';
-import { rotateDirectionIndex } from '../../../../../packages/iso-core/src/rotation.ts';
 
 // ------------------------------------------------------------------ constantes
 
@@ -163,174 +161,47 @@ function fallbackColorTexture(hue: number): THREE.Texture {
 
 // ------------------------------------------------------------------ extração de faces do sprite
 
-/**
- * Carrega uma imagem a partir de URL. Devolve null em falha.
- */
-function loadImage(url: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
+// ------------------------------------------------------------------ materiais com sprite único
 
 /**
- * RECORTA as 3 faces visíveis de um sprite isométrico em texturas retangulares,
- * SEM de-warp — cada face é um retângulo do sprite copiado 1:1, na posição e
- * orientação originais, sem reamostragem.
+ * Materiais com UMA textura (a sprite inteira) nas 3 faces visíveis.
  *
- * O sprite (ex.: `faceUrls.north`, 48×53 para o CANONICAL_CUBE) já mostra o
- * cubo inteiro em projeção 2:1: o topo é um losango W×H no alto e as laterais
- * são paralelogramos de `cubeHeight` linhas. As três regiões são recortadas
- * direto do sprite:
- *
- *   - **Topo**: o bounding box do losango — W colunas × H linhas (as primeiras
- *     `tileHeight` linhas do sprite, largura cheia).
- *   - **Direita**: a metade direita do sprite abaixo do topo — colunas
- *     W/2..W−1, linhas `tileHeight`..fim (a face SE do cubo).
- *   - **Esquerda**: a metade esquerda abaixo do topo — colunas 0..W/2−1,
- *     linhas `tileHeight`..fim (a face SW do cubo).
- *
- * As texturas ficam retangulares; o mapeamento UV do BoxGeometry estica cada
- * uma para a face quadrada correspondente, sem transformação de pixels na
- * origem. A amostragem é nearest-neighbor (pixel art, `imageSmoothingEnabled =
- * false`). Os pixels transparentes (margens do losango, cantos, áreas fora da
- * silhueta) são preenchidos com a cor da face — a mesma do cubo procedural —
- * porque o MeshLambertMaterial com `transparent: false` (default) renderizaria
- * transparência como preto opaco.
+ * A mesma sprite isométrica cobre as faces +X (direita), +Z (frente) e +Y
+ * (topo). As faces ocultas (−X, −Z, −Y) recebem cor sólida. O cubo não gira
+ * — só a câmera orbita.
  */
-function cropFaces(
-  sourceImage: HTMLImageElement,
-  geom: IsoCubeGeometry,
-  hue: number,
-): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } {
-  const { spriteHeight: h, tileWidth, tileHeight } = geom;
-  const half = tileWidth / 2;
-
-  // Cores de preenchimento — as mesmas das faces procedurais (cube-raster.ts):
-  // topo mais claro (0.62), laterais mais escuras (0.47), saturação 0.45.
-  const topFill = `hsl(${hue} 45% 62%)`;
-  const sideFill = `hsl(${hue} 45% 47%)`;
-
-  /**
-   * Copia o retângulo (x, y, cw×ch) do sprite para um canvas novo, 1:1,
-   * preenchendo antes o fundo com a cor da face.
-   */
-  function cropRect(
-    x: number,
-    y: number,
-    cw: number,
-    ch: number,
-    fill: string,
-  ): HTMLCanvasElement {
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas 2d indisponível para recorte de face');
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = fill;
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.drawImage(sourceImage, x, y, cw, ch, 0, 0, cw, ch);
-    return canvas;
-  }
-
-  // O topo ocupa as primeiras `tileHeight` linhas do sprite; as laterais ficam
-  // ABAIXO dele. Recortar das linhas iniciais incluiria a metade do losango do
-  // topo na parede.
-  const top = cropRect(0, 0, tileWidth, tileHeight, topFill);
-  const right = cropRect(half, tileHeight, half, h - tileHeight, sideFill);
-  const left = cropRect(0, tileHeight, half, h - tileHeight, sideFill);
-
-  return { top, left, right };
-}
-
-/**
- * Extrai as faces de uma URL de sprite e devolve 3 texturas.
- * Devolve null se a imagem não carregar.
- */
-async function extractFacesFromUrl(
-  url: string,
-  geom: IsoCubeGeometry,
-  hue: number,
-): Promise<{ top: THREE.Texture; left: THREE.Texture; right: THREE.Texture } | null> {
-  const img = await loadImage(url);
-  if (!img) return null;
-  try {
-    const faces = cropFaces(img, geom, hue);
-    // canvasTexture para todas as texturas recortadas: nearest, sem mipmaps, sRGB.
-    return {
-      top: canvasTexture(faces.top),
-      left: canvasTexture(faces.left),
-      right: canvasTexture(faces.right),
-    };
-  } catch {
-    return null; // fallthrough → procedural se o crop falhar
-  }
-}
-
-// ------------------------------------------------------------------ mapeamento de faces extraídas para BoxGeometry
-
-/**
- * Cria os 6 materiais a partir das 3 faces recortadas de UM sprite.
- *
- * O sprite "north" é a vista sul do cubo (ADR 0029: "north → south é fixo"),
- * desenhada na projeção 2:1: a metade direita do sprite é a face SE do cubo
- * e a metade esquerda é a face SW. No Three.js, o eixo x do mapa vira +X e o
- * eixo y do mapa vira +Z (`scene3d.ts`), e a câmera na rotação 0 está ao sul
- * (posição +X, +Z) — vê exatamente as faces +X (à direita) e +Z (à esquerda).
- * Logo:
- *
- *   sprite 'right' (face SE) → BoxGeometry +X (índice 0)
- *   sprite 'left'  (face SW) → BoxGeometry +Z (índice 4)
- *   sprite 'top'   (topo)    → BoxGeometry +Y (índice 2)
- *
- * O cubo do mapa NÃO gira — só a câmera orbita (`setCameraRotation`), e o
- * `createCubeMaterials` usa sempre o sprite "north". Por isso as texturas
- * ficam PRESAS a essas três faces para qualquer rotação, e as faces −X, −Z e
- * −Y (sem arte neste sprite) recebem cor sólida. A remapeação por rotação que
- * existia aqui trocava as texturas como se o MESH girasse com a câmera — como
- * o mesh é estático, ela punha a arte na face errada (ex.: a arte SW na face
- * +X visível na rotação 0, e a face +Z visível sem arte).
- *
- * O parâmetro `rotation` permanece por compatibilidade de assinatura.
- */
-function materialsFromExtractedFaces(
-  faces: { top: THREE.Texture; left: THREE.Texture; right: THREE.Texture },
-  rotation: Rotation,
+function materialsWithSingleSprite(
+  tex: THREE.Texture,
   hue: number,
 ): CubeMaterials {
-  void rotation; // o cubo não gira — as texturas são fixas às faces
-
   const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
   const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
 
+  const spriteMat = new THREE.MeshLambertMaterial({ map: tex });
   const hidden = new THREE.MeshLambertMaterial({ color: hiddenColor });
-  const topMat = new THREE.MeshLambertMaterial({ map: faces.top });
-  const rightMat = new THREE.MeshLambertMaterial({ map: faces.right });
-  const leftMat = new THREE.MeshLambertMaterial({ map: faces.left });
   const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
 
   // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
   const mats: THREE.Material[] = [
-    rightMat,  // +X  (right) — face SE do sprite, à direita na vista sul
-    hidden,    // −X  (left)  — sem arte no sprite "north"
-    topMat,    // +Y  (top)   — losango do topo
+    spriteMat, // +X  (right) — sprite inteira
+    hidden,    // −X  (left)  — oculta
+    spriteMat, // +Y  (top)   — sprite inteira
     bottomMat, // −Y  (bottom)
-    leftMat,   // +Z  (front) — face SW do sprite, à esquerda na vista sul
-    hidden,    // −Z  (back)  — sem arte no sprite "north"
+    spriteMat, // +Z  (front) — sprite inteira
+    hidden,    // −Z  (back)  — oculta
   ];
 
   return { materials: mats, hasTexture: true };
 }
 
 /**
+
+/**
  * Cria os 6 materiais para um cubo a partir de um BlockDef.
  *
  * Estratégia:
- * 1. Se tem `faceUrls` (v2: 4 faces), recorta as 3 faces do sprite e mapeia
+ * 1. Se tem `faceUrls` (v2: 4 faces), carrega o sprite "north" como UMA
+ *    textura única e aplica a mesma sprite nas 3 faces visíveis (+X, +Z, +Y)
  * 2. Se tem `spritesheetUrl` (v3: textura animada), usa o primeiro frame em
  *    todas as faces laterais
  * 3. Se não tem arte, usa cor procedural com matiz
@@ -338,16 +209,14 @@ function materialsFromExtractedFaces(
 export async function createCubeMaterials(
   block: BlockDef,
 ): Promise<CubeMaterials> {
-  // Face URLs (v2: 4 faces por direção) — recorta topo/esquerda/direita do sprite
+  // Face URLs (v2: 4 faces por direção) — sprite único nas 3 faces visíveis
   if (block.faceUrls) {
-    // Usa o sprite "north" (vista sul, ADR 0029). As 3 faces dele ficam
-    // presas às faces +X/+Z/+Y do cubo; girar a câmera mostra outras faces
-    // do mesmo cubo, sem trocar os materiais (ver materialsFromExtractedFaces).
-    const faces = await extractFacesFromUrl(block.faceUrls.north, CANONICAL_CUBE, block.hue ?? 210);
-    if (faces) {
-      return materialsFromExtractedFaces(faces, 0, block.hue ?? 210);
+    try {
+      const tex = await loadTexture(block.faceUrls.north);
+      return materialsWithSingleSprite(tex, block.hue ?? 210);
+    } catch {
+      // fallthrough → procedural se o carregamento falhar
     }
-    // fallthrough → procedural se extração falhar
   }
 
   // v3: textura (animada ou estática)
