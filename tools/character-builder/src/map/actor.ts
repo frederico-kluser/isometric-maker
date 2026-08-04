@@ -124,11 +124,18 @@ export interface ActorVisual {
  * O ângulo da seta usa a mesma numeração do sprite exibido: `directionIndex`
  * é direção de TELA (0=sul, 1=sudoeste, ...), e `sul` no plano XZ do mundo é
  * π/4 — mesma origem de `directionIndexFromAngle`.
+ *
+ * A seta vive no mundo 3D, e `directionIndex` é direção de TELA — os dois só
+ * coincidem na vista 0. `cameraTurn` desfaz o giro da câmera: cada giro de
+ * 90° (cameraYaw = BASE_YAW + cameraTurn·π/2, controls3d.ts) desloca o
+ * "sul" de tela por −cameraTurn·π/2 no plano XZ, e subtrair isso reconverte
+ * a direção de tela para o ângulo de mundo correto nas quatro vistas.
  */
 export function buildActorVisual(
   directionIndex: number,
   floorY: number,
   jumpProgress: number,
+  cameraTurn = 0,
 ): ActorVisual {
   const idx =
     ((directionIndex % DIRECTION_COUNT) + DIRECTION_COUNT) % DIRECTION_COUNT;
@@ -138,7 +145,9 @@ export function buildActorVisual(
     shadowOpacity: opacity,
     shadowRadius: SHADOW_RADIUS,
     floorY,
-    directionAngle: normalizeAngle(SOUTH_ANGLE + idx * STEP),
+    directionAngle: normalizeAngle(
+      SOUTH_ANGLE + idx * STEP - cameraTurn * (Math.PI / 2),
+    ),
   };
 }
 

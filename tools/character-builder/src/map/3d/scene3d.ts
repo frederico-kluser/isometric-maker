@@ -266,6 +266,10 @@ export async function createIsoScene3D(
       depthWrite: false, // nada desenha abaixo do piso — não poluir o depth
     });
     const shadow = new THREE.Mesh(sharedShadowGeometry(), shadowMat);
+    // CircleGeometry nasce no plano XY (normal +Z) — sem a rotação o disco
+    // ficaria em pé como uma moeda. O mesmo giro que grid3d.ts aplica nos
+    // planos do chão (rotation.x = -π/2) deita a sombra no plano XZ.
+    shadow.rotation.x = -Math.PI / 2;
     shadow.renderOrder = 9; // abaixo do sprite
     scene.add(shadow);
     sprite.userData.actorShadow = shadow;
@@ -297,7 +301,10 @@ export async function createIsoScene3D(
     }
   };
 
-  const updateActor = (actor: ActorSprite | null): void => {
+  const updateActor = (
+    actor: ActorSprite | null,
+    cameraTurn: Rotation,
+  ): void => {
     if (!actor) {
       if (actorSprite) {
         detachActorVisualMeshes(actorSprite);
@@ -323,7 +330,7 @@ export async function createIsoScene3D(
     sprite.position.set(actor.x, actor.y + ACTOR_HEIGHT / 2, actor.z);
     // Sombra e seta mudam a cada quadro (pulo e direção) — precisa rodar
     // ANTES do early-return de URL, senão congelariam entre trocas de quadro.
-    updateActorVisual(sprite, actor);
+    updateActorVisual(sprite, actor, cameraTurn);
     if (actor.url === actorUrl) return;
     actorUrl = actor.url;
     const cached = actorTextures.get(actor.url);
@@ -455,8 +462,10 @@ export async function createIsoScene3D(
       scene.add(highlightMesh);
     }
 
-    // Ator do modo teste
-    updateActor(state.actor ?? null);
+    // Ator do modo teste — o turn da câmera entra aqui porque a seta é um
+    // mesh no MUNDO: o ângulo dela precisa compensar o giro para continuar
+    // apontando para onde o sprite parece olhar na vista atual.
+    updateActor(state.actor ?? null, state.rotation);
 
     // Desenha
     renderer.render(scene, camera);
@@ -791,15 +800,21 @@ const renderContexts = new WeakMap<
  *
  * Campos ausentes de `ActorSprite` caem para defaults seguros: direção sul,
  * piso na altura dos pés e pulo completo (sombra plena).
+ *
+ * `cameraTurn` é o turn atual da câmera (0-3): sem ele a seta apontaria para
+ * o sul de TELA como se o mundo nunca girasse — certa só na vista 0. O turn
+ * corrige o ângulo da seta, que vive no plano XZ do mundo.
  */
 export function updateActorVisual(
   sprite: THREE.Sprite,
   actor: ActorSprite,
+  cameraTurn: Rotation,
 ): void {
   const visual = buildActorVisual(
     actor.directionIndex ?? 0,
     actor.floorY ?? actor.y,
     actor.jumpProgress ?? 1,
+    cameraTurn,
   );
 
   const shadow = sprite.userData.actorShadow as THREE.Mesh | undefined;

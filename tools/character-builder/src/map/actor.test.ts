@@ -459,3 +459,36 @@ test('seta: índice fora de 0..7 dá a volta, como a numeração de direções',
     buildActorVisual(0, 0, 1).directionAngle,
   );
 });
+
+test('seta: cada giro da câmera desloca o ângulo de mundo do sul de tela', () => {
+  // O "sul" de tela (índice 0) é π/4 no mundo só na vista 0. Cada giro de
+  // 90° da câmera o desloca por −π/2 no plano XZ — sem a compensação a seta
+  // apontaria errado nas vistas 1, 2 e 3.
+  assert.equal(buildActorVisual(0, 0, 1, 0).directionAngle, Math.PI / 4, 'vista 0');
+  assert.equal(buildActorVisual(0, 0, 1, 1).directionAngle, (7 * Math.PI) / 4, 'vista 1');
+  assert.equal(buildActorVisual(0, 0, 1, 2).directionAngle, (5 * Math.PI) / 4, 'vista 2');
+  assert.equal(buildActorVisual(0, 0, 1, 3).directionAngle, (3 * Math.PI) / 4, 'vista 3');
+});
+
+test('seta: quatro giros da câmera voltam ao ângulo original', () => {
+  for (let i = 0; i < 8; i += 1) {
+    assert.equal(
+      buildActorVisual(i, 0, 1, 4).directionAngle,
+      buildActorVisual(i, 0, 1, 0).directionAngle,
+      `índice ${i}`,
+    );
+  }
+});
+
+test('seta: com o giro da câmera, o ângulo ainda reconverte para o índice de tela', () => {
+  for (const turn of [0, 1, 2, 3] as const) {
+    for (let i = 0; i < 8; i += 1) {
+      const angle = buildActorVisual(i, 0, 1, turn).directionAngle;
+      assert.equal(
+        directionIndexFromAngle(angle + turn * (Math.PI / 2)),
+        i,
+        `índice ${i} na vista ${turn}`,
+      );
+    }
+  }
+});

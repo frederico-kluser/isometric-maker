@@ -20,6 +20,7 @@
  * - Colocação: face normal → célula adjacente (Minecraft-style)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 import {
   Grid3x3Icon,
   HammerIcon,
@@ -76,7 +77,12 @@ import {
   type Pick3DCell,
   type Pick3DResult,
 } from './pick3d-raycaster.ts';
-import { createIsoScene3D, collectBlockMeshes, type IsoScene3D } from './scene3d.ts';
+import {
+  createIsoScene3D,
+  collectBlockMeshes,
+  spawnParticles,
+  type IsoScene3D,
+} from './scene3d.ts';
 import type { BlockDef } from './block-def.ts';
 import {
   canRedo,
@@ -324,22 +330,51 @@ export function MapEditor3D() {
     const { tool: t, selectedBlock: block } = stateRef.current;
     const current = stateRef.current.map;
     let next: MapData = current;
+    // Célula onde a operação mexeu — as partículas explodem nela (R9).
+    let affected: Pick3DCell | null = null;
     if (t === 'remover') {
-      if (result.hit) next = removeBlock(current, result.hit);
+      if (result.hit) {
+        next = removeBlock(current, result.hit);
+        affected = result.hit;
+      }
     } else if (t === 'pintar') {
-      if (result.hit) next = paintBlock(current, result.hit, block);
-      else next = placeBlock(current, result.placement, block);
+      if (result.hit) {
+        next = paintBlock(current, result.hit, block);
+        affected = result.hit;
+      } else {
+        next = placeBlock(current, result.placement, block);
+        affected = result.placement;
+      }
     } else if (t === 'colocar') {
       // Colocar: usa a posição adjacente exata do raycaster (face normal)
       // NÃO força o topo da coluna — o bloco vai para a face onde o mouse bateu
       next = placeBlock(current, result.placement, block);
+      affected = result.placement;
     } else {
       // Empilhar: o pickColumnTopRaycaster já resolveu o placement pela face
       // atingida — face de cima → topo da coluna; face lateral → célula
       // adjacente no mesmo nível (Minecraft-style). Aqui só aplicamos.
       next = placeBlock(current, result.placement, block);
+      affected = result.placement;
     }
     setHistory((h) => pushHistory(h, next));
+
+    // Partículas no bloco colocado/removido (R9). O guard `next !== current`
+    // é o sinal de mudança real: placeBlock/removeBlock devolvem a MESMA
+    // referência num no-op, e sem isso cada clique sobre célula já ocupada
+    // explodiria partículas em vão (e o laço rAF das partículas é
+    // render-on-demand — o custo extra só deve existir quando algo mudou).
+    if (next !== current && affected) {
+      const s3d = scene3dRef.current;
+      if (s3d) {
+        // Mapa x,y,z → mundo 3D: X = x, Y = z (altura) + meio cubo (centro
+        // do bloco), Z = y — a mesma convenção do render() em scene3d.ts.
+        spawnParticles(
+          s3d.scene,
+          new THREE.Vector3(affected.x, affected.z + 0.5, affected.y),
+        );
+      }
+    }
 
     // Push-out: colocar (ou pintar de sólido) um bloco sobre o personagem de
     // teste empurra-o para fora — colocar bloco sobre personagem nunca o
