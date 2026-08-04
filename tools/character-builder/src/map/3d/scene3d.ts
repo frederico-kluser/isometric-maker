@@ -567,3 +567,41 @@ export function findGroundPlane(scene: THREE.Scene): THREE.Mesh | null {
   });
   return found;
 }
+
+// ------------------------------------------------------------------ stubs Onda 2
+// Estes stubs existem como contrato entre os agentes 2.1 e 2.2.
+// Cada agente preenche o seu sem tocar no stub do outro.
+
+/**
+ * Atualiza a sombra e o indicador de direção do ator.
+ * PREENCHER: onda2-actor-shadow (agente 2.1).
+ */
+export function updateActorVisual(
+  _sprite: THREE.Sprite,
+  _actor: ActorSprite,
+): void {
+  // stub — preenchido pelo agente 2.1
+}
+
+/**
+ * Configura shadowMap, luzes e piso visível.
+ * PREENCHER: onda2-cube-shadows (agente 2.2).
+ */
+export function configureShadowSystem(
+  _renderer: THREE.WebGLRenderer,
+  _sun: THREE.DirectionalLight,
+  _groundPlane: THREE.Mesh,
+): void {
+  // stub — preenchido pelo agente 2.2
+}
+
+/**
+ * Dispara partículas ao colocar/remover bloco.
+ * PREENCHER: onda2-cube-shadows (agente 2.2).
+ */
+export function spawnParticles(
+  _scene: THREE.Scene,
+  _position: THREE.Vector3,
+): void {
+  // stub — preenchido pelo agente 2.2
+}
