@@ -48,12 +48,12 @@
 
   <header class="mb-4">
     <h1 class="display-6 fw-semibold">Sprites 3D: sprite única nas faces do cubo</h1>
-    <p class="lead text-body-secondary">A mesma sprite isométrica aplicada como textura única nas 3 faces visíveis do cubo (+X, +Z, +Y) — sem recortes, sem dewarp, sem separação por face.</p>
+    <p class="lead text-body-secondary">Sprite isométrica única esticada sobre as 3 faces visíveis do cubo via <strong>UV mapping customizado</strong> no BoxGeometry — cada face sampleia a região correta da sprite, sem recortes e sem duplicação.</p>
     <div class="d-flex flex-wrap gap-2">
       <span class="badge text-bg-secondary">Three.js</span>
       <span class="badge text-bg-secondary">cube3d.ts</span>
       <span class="badge text-bg-secondary">2026-08-04</span>
-      <span class="badge text-bg-success">onda2</span>
+      <span class="badge text-bg-success">onda3 · UV mapping</span>
     </div>
   </header>
 
@@ -83,75 +83,70 @@
     <!-- TAB 1 -->
     <div class="tab-pane fade show active" id="pane-visao-geral" role="tabpanel"
          aria-labelledby="tab-visao-geral" tabindex="0" data-print-title="Visão geral">
-      <h2 class="h4">Abordagem final</h2>
-      <p>Blocos com arte gerada (PixelLab v2, <code>faceUrls</code>) têm sprites isométricos que mostram as 3 faces visíveis do cubo numa única imagem (projeção 2:1, 48×53 px).</p>
-      <p><strong>A sprite é carregada como UMA textura e aplicada nas 3 faces visíveis do <code>BoxGeometry</code>:</strong></p>
+      <h2 class="h4">Abordagem final: UV mapping customizado</h2>
+      <p>Blocos com arte gerada (PixelLab v2, <code>faceUrls</code>) têm sprites isométricos (48×53 px) que mostram as 3 faces visíveis do cubo. A sprite é carregada como <strong>UMA textura</strong> e aplicada nas faces +X, +Z, +Y — mas com <strong>UVs customizados</strong> para que cada face sampleie apenas a sua região:</p>
+
       <table class="table table-sm">
-        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Textura</th></tr></thead>
+        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Região UV (u, v)</th><th>Parte do sprite</th></tr></thead>
         <tbody>
-          <tr><td>Direita (SE)</td><td>+X (índice 0)</td><td>Sprite inteira</td></tr>
-          <tr><td>Topo</td><td>+Y (índice 2)</td><td>Sprite inteira</td></tr>
-          <tr><td>Esquerda (SW)</td><td>+Z (índice 4)</td><td>Sprite inteira</td></tr>
-          <tr><td>Ocultas</td><td>−X, −Z, −Y</td><td>Cor sólida HSL</td></tr>
+          <tr><td>Direita (SE)</td><td>+X (grupo 0)</td><td>u=[0.5, 1], v=[29/53, 1]</td><td>Metade direita, abaixo do topo</td></tr>
+          <tr><td>Topo</td><td>+Y (grupo 2)</td><td>u=[0, 1], v=[29/53, 1]</td><td>Topo (bounding box do losango)</td></tr>
+          <tr><td>Esquerda (SW)</td><td>+Z (grupo 4)</td><td>u=[0, 0.5], v=[29/53, 1]</td><td>Metade esquerda, abaixo do topo</td></tr>
+          <tr><td>Ocultas</td><td>−X, −Z, −Y</td><td>UV padrão (não usado)</td><td>Cor sólida HSL</td></tr>
         </tbody>
       </table>
-      <p><strong>A mesma sprite</strong> — sem recortes, sem dewarp, sem separação em 3 texturas. Cada face visível mostra a sprite isométrica completa.</p>
 
-      <h3 class="h5 mt-4">O que foi removido</h3>
-      <ul>
-        <li><code>dewarpFaces</code> — 105 linhas de projeção inversa pixel a pixel (onda 1: substituída por crop)</li>
-        <li><code>cropFaces</code> — 65 linhas de recorte em 3 regiões (onda 2: substituída por sprite única)</li>
-        <li><code>extractFacesFromUrl</code> — carregamento + crop + 3 canvas textures</li>
-        <li><code>materialsFromExtractedFaces</code> — mapeamento de 3 texturas para 6 faces</li>
-        <li><code>loadImage</code> — carregamento de Image para canvas</li>
-      </ul>
+      <p><strong>Como funciona:</strong> <code>createSpriteGeometry()</code> clona o <code>BoxGeometry</code> compartilhado e reescreve o atributo UV dos vértices de cada face visível. A função <code>remapFaceUv()</code> encontra os 4 vértices únicos de cada grupo de material e aplica a transformação de UV. A geometria customizada é cacheada e reutilizada por todos os cubos com sprite.</p>
 
-      <h3 class="h5 mt-4">Impacto</h3>
-      <div class="row g-3">
-        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−257</div><small class="text-body-secondary">linhas totais removidas</small></div></div></div>
-        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">1</div><small class="text-body-secondary">textura por cubo</small></div></div></div>
-        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2">401</div><small class="text-body-secondary">testes passando</small></div></div></div>
+      <h3 class="h5 mt-4">Evolução da solução</h3>
+      <div class="table-responsive">
+      <table class="table table-sm">
+        <thead><tr><th>Onda</th><th>Abordagem</th><th>Problema</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>dewarp (projeção inversa)</td><td>105 linhas, complexo, 3 texturas separadas</td></tr>
+          <tr><td>1 (fix)</td><td>crop (3 recortes)</td><td>3 texturas separadas, bugs de transparência e regiões</td></tr>
+          <tr><td>2</td><td>Sprite única em cada face</td><td>Cada face mostrava a sprite INTEIRA (3 lados em miniatura)</td></tr>
+          <tr><td class="text-success"><strong>3</strong></td><td class="text-success"><strong>UV mapping customizado</strong></td><td class="text-success"><strong>Uma textura, cada face mostra sua região ✓</strong></td></tr>
+        </tbody>
+      </table>
       </div>
     </div>
 
     <!-- TAB 2 -->
     <div class="tab-pane fade" id="pane-como-fazer" role="tabpanel"
          aria-labelledby="tab-como-fazer" tabindex="0" data-print-title="Código final">
-      <h2 class="h4">createCubeMaterials — caminho faceUrls</h2>
-      <pre><code class="language-ts">// Face URLs (v2: 4 faces por direção) — sprite único nas 3 faces visíveis
-if (block.faceUrls) {
-  try {
-    const tex = await loadTexture(block.faceUrls.north);
-    return materialsWithSingleSprite(tex, block.hue ?? 210);
-  } catch {
-    // fallthrough → procedural se o carregamento falhar
-  }
-}</code></pre>
+      <h2 class="h4">createSpriteGeometry — UV mapping</h2>
+      <pre><code class="language-ts">const SPRITE_UV = {
+  uFold: (CANONICAL_CUBE.tileWidth / 2) / CANONICAL_CUBE.spriteWidth,  // 0.5
+  vRoofBottom: 1 - CANONICAL_CUBE.tileHeight / CANONICAL_CUBE.spriteHeight, // 29/53
+} as const;
 
-      <h2 class="h4 mt-4">materialsWithSingleSprite</h2>
-      <pre><code class="language-ts">function materialsWithSingleSprite(
-  tex: THREE.Texture,
-  hue: number,
-): CubeMaterials {
-  const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
-  const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
+function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
+  const cached = spriteGeometryCache.get(geom);
+  if (cached) return cached;
 
-  const spriteMat = new THREE.MeshLambertMaterial({ map: tex });
-  const hidden = new THREE.MeshLambertMaterial({ color: hiddenColor });
-  const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
+  const geo = sharedBox.clone(); // nunca muta a geometria compartilhada
 
-  // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
-  return {
-    materials: [
-      spriteMat, // +X  — sprite inteira
-      hidden,    // −X  — oculta
-      spriteMat, // +Y  — sprite inteira
-      bottomMat, // −Y  — fundo
-      spriteMat, // +Z  — sprite inteira
-      hidden,    // −Z  — oculta
-    ],
-    hasTexture: true,
-  };
+  // +X (right): metade direita, faixa das laterais
+  remapFaceUv(geo, BOX_GROUP.right, (u, v) => [
+    SPRITE_UV.uFold + u * (1 - SPRITE_UV.uFold),
+    v * SPRITE_UV.vRoofBottom,
+  ]);
+
+  // +Z (front): metade esquerda, faixa das laterais
+  remapFaceUv(geo, BOX_GROUP.front, (u, v) => [
+    u * SPRITE_UV.uFold,
+    v * SPRITE_UV.vRoofBottom,
+  ]);
+
+  // +Y (top): largura cheia, faixa do topo
+  remapFaceUv(geo, BOX_GROUP.top, (u, v) => [
+    u,
+    SPRITE_UV.vRoofBottom + v * (1 - SPRITE_UV.vRoofBottom),
+  ]);
+
+  spriteGeometryCache.set(geom, geo);
+  return geo;
 }</code></pre>
     </div>
 
@@ -175,16 +170,29 @@ if (block.faceUrls) {
       </div>
 
       <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold text-success">Onda 2 — sprite única (commit <code>c346332</code>)</div>
+        <div class="card-header fw-semibold">Onda 2 — sprite única (commit <code>c346332</code>)</div>
         <div class="card-body">
-          <p>Removeu completamente o conceito de "recortar em 3 partes". A sprite isométrica é carregada como <strong>uma textura</strong> via <code>loadTexture</code> (que já existia no módulo) e aplicada diretamente nas 3 faces visíveis.</p>
-          <p><strong>Diferença fundamental:</strong> em vez de 3 texturas separadas (uma por face), a <strong>mesma</strong> textura cobre +X, +Z e +Y. Cada face mostra a sprite isométrica completa — a mesma imagem nos 3 lados visíveis do cubo.</p>
+          <p>Removeu o conceito de "recortar em 3 partes". A sprite é carregada como <strong>uma textura</strong> e aplicada nas 3 faces visíveis.</p>
+          <p><strong>Problema:</strong> Com UVs padrão do BoxGeometry, cada face mostrava a sprite isométrica COMPLETA — o cubo parecia ter 3 cópias da mesma sprite, cada uma com os 3 lados em miniatura.</p>
+        </div>
+      </div>
+
+      <div class="card bg-body-tertiary mb-3">
+        <div class="card-header fw-semibold text-success">Onda 3 — UV mapping (commit <code>a1a1f59</code>) ✓ SOLUÇÃO FINAL</div>
+        <div class="card-body">
+          <p><strong>Resolve o problema da onda 2.</strong> Implementa <code>createSpriteGeometry()</code> que clona o BoxGeometry e reescreve os UVs das faces +X, +Z, +Y:</p>
+          <ul>
+            <li>+X: u=[0.5,1], v=[29/53,1] → metade direita da sprite</li>
+            <li>+Z: u=[0,0.5], v=[29/53,1] → metade esquerda da sprite</li>
+            <li>+Y: u=[0,1], v=[29/53,1] → topo da sprite</li>
+          </ul>
+          <p><code>remapFaceUv()</code> percorre os grupos de material do BoxGeometry indexado, encontra os 4 vértices únicos de cada face e aplica a transformação. Geometria cacheada; campo opcional <code>geometry</code> em <code>CubeMaterials</code> evita alterar <code>scene3d.ts</code>.</p>
         </div>
       </div>
 
       <div class="alert alert-info mt-3">
         <i class="bi bi-info-circle me-1"></i>
-        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Assets atuais são v3 (<code>baseUrl</code>/<code>spritesheetUrl</code>) e usam <code>materialsWithSingleTexture</code> — que já aplica uma textura a todas as faces laterais. A mudança unifica o comportamento: tanto v2 quanto v3 agora usam textura única.
+        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Assets atuais são v3 (<code>baseUrl</code>/<code>spritesheetUrl</code>) e usam <code>materialsWithSingleTexture</code>.
       </div>
     </div>
 
@@ -192,7 +200,7 @@ if (block.faceUrls) {
 
   <footer class="text-body-secondary small border-top mt-5 pt-3">
     <strong>Arquivo:</strong> <code>tools/character-builder/src/map/3d/cube3d.ts</code> ·
-    <strong>Commits:</strong> <code>5c200da</code> (onda1) · <code>c346332</code> (onda2) ·
+    <strong>Commits:</strong> <code>5c200da</code> (onda1) · <code>c346332</code> (onda2) · <code>a1a1f59</code> (onda3) ·
     <strong>Data:</strong> 2026-08-04 ·
     <strong>Testes:</strong> 401/401 pass.
   </footer>
