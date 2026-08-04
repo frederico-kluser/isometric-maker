@@ -571,6 +571,9 @@ export function MapEditor3D() {
           // y dos pés = nível z do iso-core + arco visual do pulo (o sinal
           // inverte: visualOffsetY é em coordenada de tela, Y cresce para
           // baixo lá e para cima aqui).
+          // A sombra não sobe com o sprite: floorY é o z do iso-core SEM o
+          // offset do pulo, e directionIndex é a direção de TELA já
+          // reindexada pela rotação da câmera (vIdx).
           s3d.render({
             map: stateRef.current.map,
             rotation: stateRef.current.rotation,
@@ -581,6 +584,9 @@ export function MapEditor3D() {
               x: next.pos.x,
               y: next.z - visualOffsetY(next.jump.progress, 1),
               z: next.pos.y,
+              directionIndex: vIdx,
+              jumpProgress: next.jump.progress,
+              floorY: next.z,
             },
           });
         }

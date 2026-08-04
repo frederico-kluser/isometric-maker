@@ -95,6 +95,53 @@ export function directionNameFor(index: number): DirectionName {
   return DIRECTION_NAMES[i]!;
 }
 
+// ------------------------------------------------------------------ visual do ator (sombra + seta)
+
+/** Raio da sombra do personagem em unidades de mundo (~proporcional ao corpo). */
+export const SHADOW_RADIUS = 0.3;
+
+/** Dados visuais da sombra e da seta de direção — puros, sem Three.js. */
+export interface ActorVisual {
+  /** Opacidade da sombra, 0..1 — 1 no chão, 0 no ápice do pulo. */
+  readonly shadowOpacity: number;
+  /** Raio da sombra em unidades de mundo. */
+  readonly shadowRadius: number;
+  /** Nível do piso onde a sombra assenta (z do iso-core, sem o pulo). */
+  readonly floorY: number;
+  /** Ângulo da seta no plano XZ do mundo, em radianos, no sentido da direção de tela. */
+  readonly directionAngle: number;
+}
+
+/**
+ * Dados visuais da sombra e da seta de direção para um estado do personagem.
+ *
+ * A opacidade acompanha a **altura** da parábola do pulo, não o relógio do
+ * pulo: no chão (progresso 0 e 1) a sombra é plena e no ápice (0.5) some.
+ * `1 - progress` literal erraria duas vezes — apagaria a sombra do
+ * personagem parado (em pé, `NO_JUMP` tem progresso 1.0) e não a devolveria
+ * no pouso.
+ *
+ * O ângulo da seta usa a mesma numeração do sprite exibido: `directionIndex`
+ * é direção de TELA (0=sul, 1=sudoeste, ...), e `sul` no plano XZ do mundo é
+ * π/4 — mesma origem de `directionIndexFromAngle`.
+ */
+export function buildActorVisual(
+  directionIndex: number,
+  floorY: number,
+  jumpProgress: number,
+): ActorVisual {
+  const idx =
+    ((directionIndex % DIRECTION_COUNT) + DIRECTION_COUNT) % DIRECTION_COUNT;
+  const height = 4 * jumpProgress * (1 - jumpProgress);
+  const opacity = Math.min(1, Math.max(0, 1 - height));
+  return {
+    shadowOpacity: opacity,
+    shadowRadius: SHADOW_RADIUS,
+    floorY,
+    directionAngle: normalizeAngle(SOUTH_ANGLE + idx * STEP),
+  };
+}
+
 // ------------------------------------------------------------------ entrada
 
 /** Teclas de direção pressionadas agora, em intenção de TELA. */

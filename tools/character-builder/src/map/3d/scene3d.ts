@@ -49,6 +49,7 @@ import {
   setCameraRotation,
   zoomCamera,
 } from './controls3d.ts';
+import { buildActorVisual, SHADOW_RADIUS } from '../actor.ts';
 
 // ------------------------------------------------------------------ tipos
 
@@ -80,6 +81,18 @@ export interface ActorSprite {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /**
+   * Índice de direção de TELA (0-7, 0=sul) — a mesma numeração do sprite
+   * exibido. A seta no chão aponta para onde o sprite parece olhar.
+   */
+  readonly directionIndex?: number;
+  /** Progresso do pulo (0-1); a sombra some com a altura da parábola. */
+  readonly jumpProgress?: number;
+  /**
+   * Nível do piso (z do iso-core) onde a sombra assenta — SEM o offset
+   * visual do pulo, senão a sombra subiria junto com o sprite.
+   */
+  readonly floorY?: number;
 }
 
 export interface IsoScene3D {
@@ -113,6 +126,16 @@ const GRID_MARGIN = 4;
 const HALF_CUBE = 0.5;
 /** Altura do personagem em unidades de mundo (~1.5 blocos). */
 const ACTOR_HEIGHT = 1.6;
+/**
+ * Altura da sombra acima do piso real (floorY + 0.01). Não pode ser 0: sem
+ * o deslocamento a sombra brigaria por z com o chão onde o ator pisa.
+ */
+const SHADOW_EPS = 0.01;
+/** A seta de direção fica um pouco acima da sombra — sem briga de z entre elas. */
+const ARROW_EPS = 0.02;
+/** Cor e opacidade da seta de direção — sutil, não poluir a cena. */
+const DIRECTION_ARROW_COLOR = 0xffd04d;
+const DIRECTION_ARROW_OPACITY = 0.6;
 
 // ------------------------------------------------------------------ animação
 
@@ -209,9 +232,54 @@ export async function createIsoScene3D(
     sprite.scale.set(ACTOR_HEIGHT * aspect, ACTOR_HEIGHT, 1);
   };
 
+  /**
+   * Cria a sombra e a seta de direção do ator, adiciona à cena e pendura as
+   * referências no `userData` do sprite — é de lá que `updateActorVisual`
+   * (função de módulo, sem acesso à cena) as atualiza.
+   */
+  const attachActorVisualMeshes = (sprite: THREE.Sprite): void => {
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false, // nada desenha abaixo do piso — não poluir o depth
+    });
+    const shadow = new THREE.Mesh(sharedShadowGeometry(), shadowMat);
+    shadow.renderOrder = 9; // abaixo do sprite
+    scene.add(shadow);
+    sprite.userData.actorShadow = shadow;
+
+    const arrowMat = new THREE.MeshBasicMaterial({
+      color: DIRECTION_ARROW_COLOR,
+      transparent: true,
+      opacity: DIRECTION_ARROW_OPACITY,
+      // Plano no chão: a face visível depende do lado da câmera — barato
+      // demais num triângulo de 3 vértices para valer a pena acertar o winding.
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const arrow = new THREE.Mesh(sharedArrowGeometry(), arrowMat);
+    arrow.renderOrder = 10;
+    scene.add(arrow);
+    sprite.userData.actorArrow = arrow;
+  };
+
+  /** Remove e descarta a sombra e a seta do ator (geometrias são compartilhadas). */
+  const detachActorVisualMeshes = (sprite: THREE.Sprite): void => {
+    for (const key of ['actorShadow', 'actorArrow'] as const) {
+      const mesh = sprite.userData[key] as THREE.Mesh | undefined;
+      if (mesh) {
+        scene.remove(mesh);
+        (mesh.material as THREE.Material).dispose();
+      }
+      delete sprite.userData[key];
+    }
+  };
+
   const updateActor = (actor: ActorSprite | null): void => {
     if (!actor) {
       if (actorSprite) {
+        detachActorVisualMeshes(actorSprite);
         scene.remove(actorSprite);
         actorSprite = null;
       }
@@ -227,10 +295,14 @@ export async function createIsoScene3D(
       // Desenha depois dos cubos (o depth test ainda oculta o que está atrás).
       actorSprite.renderOrder = 10;
       scene.add(actorSprite);
+      attachActorVisualMeshes(actorSprite);
     }
     const sprite = actorSprite;
     // O sprite é centrado na origem: desloca meio corpo para os pés no chão.
     sprite.position.set(actor.x, actor.y + ACTOR_HEIGHT / 2, actor.z);
+    // Sombra e seta mudam a cada quadro (pulo e direção) — precisa rodar
+    // ANTES do early-return de URL, senão congelariam entre trocas de quadro.
+    updateActorVisual(sprite, actor);
     if (actor.url === actorUrl) return;
     actorUrl = actor.url;
     const cached = actorTextures.get(actor.url);
@@ -449,6 +521,7 @@ export async function createIsoScene3D(
   const destroy = (): void => {
     cancelRotationAnim();
     if (actorSprite) {
+      detachActorVisualMeshes(actorSprite);
       scene.remove(actorSprite);
       actorSprite = null;
     }
@@ -494,6 +567,42 @@ function sharedBoxGeometry(): THREE.BoxGeometry {
     _sharedBox = new THREE.BoxGeometry(1, 1, 1);
   }
   return _sharedBox;
+}
+
+/**
+ * Geometria compartilhada da sombra do ator — um disco no plano XZ.
+ * O raio vem de actor.ts (`SHADOW_RADIUS`): o mesmo valor que
+ * `buildActorVisual` devolve, para o dado puro e o render nunca divergirem.
+ */
+let _sharedShadowGeo: THREE.CircleGeometry | null = null;
+function sharedShadowGeometry(): THREE.CircleGeometry {
+  if (!_sharedShadowGeo) {
+    _sharedShadowGeo = new THREE.CircleGeometry(SHADOW_RADIUS, 24);
+  }
+  return _sharedShadowGeo;
+}
+
+/**
+ * Geometria compartilhada da seta de direção — um triângulo no plano XZ com
+ * a ponta em +X local. `updateActorVisual` gira o mesh em Y para a ponta
+ * apontar o ângulo da direção de tela.
+ */
+let _sharedArrowGeo: THREE.BufferGeometry | null = null;
+function sharedArrowGeometry(): THREE.BufferGeometry {
+  if (!_sharedArrowGeo) {
+    const length = 0.18; // ponta à base
+    const halfW = 0.07; // meia-largura da base
+    const positions = new Float32Array([
+      length, 0, 0, // ponta
+      -halfW, 0, halfW, // base, canto +Z
+      -halfW, 0, -halfW, // base, canto -Z
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+    _sharedArrowGeo = geo;
+  }
+  return _sharedArrowGeo;
 }
 
 /**
@@ -574,13 +683,46 @@ export function findGroundPlane(scene: THREE.Scene): THREE.Mesh | null {
 
 /**
  * Atualiza a sombra e o indicador de direção do ator.
- * PREENCHER: onda2-actor-shadow (agente 2.1).
+ *
+ * Consome os dados puros de `buildActorVisual` (actor.ts) e aplica nos
+ * meshes pendurados no `userData` do sprite por `attachActorVisualMeshes`
+ * (dentro de createIsoScene3D — a função de módulo não tem a cena, o sprite
+ * carrega as referências):
+ *
+ * - **Sombra**: disco escuro assentado no piso REAL (`floorY`, o z do
+ *   iso-core sem o offset visual do pulo) + `SHADOW_EPS` — o deslocamento
+ *   mínimo que evita z-fight com o chão onde o ator pisa. Opacidade
+ *   proporcional à altura da parábola do pulo.
+ * - **Seta**: triângulo no chão, um pouco acima da sombra, com a ponta no
+ *   ângulo da direção de tela (`directionIndex`, 0=sul) projetado no plano
+ *   XZ do mundo.
+ *
+ * Campos ausentes de `ActorSprite` caem para defaults seguros: direção sul,
+ * piso na altura dos pés e pulo completo (sombra plena).
  */
 export function updateActorVisual(
-  _sprite: THREE.Sprite,
-  _actor: ActorSprite,
+  sprite: THREE.Sprite,
+  actor: ActorSprite,
 ): void {
-  // stub — preenchido pelo agente 2.1
+  const visual = buildActorVisual(
+    actor.directionIndex ?? 0,
+    actor.floorY ?? actor.y,
+    actor.jumpProgress ?? 1,
+  );
+
+  const shadow = sprite.userData.actorShadow as THREE.Mesh | undefined;
+  if (shadow) {
+    shadow.position.set(actor.x, visual.floorY + SHADOW_EPS, actor.z);
+    (shadow.material as THREE.MeshBasicMaterial).opacity = visual.shadowOpacity;
+  }
+
+  const arrow = sprite.userData.actorArrow as THREE.Mesh | undefined;
+  if (arrow) {
+    arrow.position.set(actor.x, visual.floorY + SHADOW_EPS + ARROW_EPS, actor.z);
+    // A ponta do triângulo local +X precisa apontar para (cos α, 0, sin α);
+    // a rotação em Y de −α faz exatamente isso (R_y(θ)·(1,0,0) = (cos θ, 0, −sin θ)).
+    arrow.rotation.y = -visual.directionAngle;
+  }
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   ACTION_FALLBACK,
   DIRECTION_NAMES,
   actionFor,
+  buildActorVisual,
   directionIndexFromAngle,
   directionNameFor,
   frameUrl,
@@ -393,4 +394,68 @@ test('andar para fora da plataforma cai até o chão', () => {
   );
   assert.equal(state.z, 0, 'sem coluna embaixo, cai até o plano de chão');
   assert.ok(state.pos.x > 2, `deveria ter saído da plataforma, parou em ${state.pos.x}`);
+});
+
+// ------------------------------------------------------------------ visual do ator (sombra + seta)
+
+test('sombra: plena no chão, some no ápice do pulo e volta no pouso', () => {
+  assert.equal(buildActorVisual(0, 0, 0).shadowOpacity, 1, 'início do pulo, ainda no chão');
+  assert.equal(buildActorVisual(0, 0, 0.5).shadowOpacity, 0, 'ápice — a sombra some');
+  assert.equal(buildActorVisual(0, 0, 1).shadowOpacity, 1, 'pousou — a sombra volta');
+});
+
+test('sombra: em pé o personagem TEM sombra — opacidade não pode vir do relógio do pulo', () => {
+  // NO_JUMP (personagem parado) tem progress = 1.0; a fórmula "1 − progress"
+  // apagaria a sombra de quem está parado.
+  assert.equal(buildActorVisual(0, 0, 1).shadowOpacity, 1);
+});
+
+test('sombra: opacidade acompanha a ALTURA da parábola, simétrica em torno de 0.5', () => {
+  const p = buildActorVisual(0, 0, 0.25).shadowOpacity;
+  const q = buildActorVisual(0, 0, 0.75).shadowOpacity;
+  assert.equal(p, q, 'subir e descer na mesma altura têm a mesma sombra');
+});
+
+test('sombra: progresso fora de [0,1] fica preso no intervalo válido', () => {
+  for (const p of [-1, 2, 3]) {
+    const v = buildActorVisual(0, 0, p).shadowOpacity;
+    assert.ok(v >= 0 && v <= 1, `progresso ${p} deu opacidade ${v}`);
+  }
+});
+
+test('a sombra assenta no piso informado — o z do iso-core, sem o offset do pulo', () => {
+  assert.equal(buildActorVisual(0, 3, 1).floorY, 3);
+  assert.equal(buildActorVisual(2, 0, 0.5).floorY, 0);
+});
+
+test('o raio da sombra é proporcional ao personagem (~0.3 unidade)', () => {
+  assert.equal(buildActorVisual(0, 0, 1).shadowRadius, 0.3);
+});
+
+test('seta: sul (índice 0) é π/4 e cada índice soma π/4', () => {
+  assert.equal(buildActorVisual(0, 0, 1).directionAngle, Math.PI / 4);
+  assert.equal(buildActorVisual(1, 0, 1).directionAngle, Math.PI / 2, 'sudoeste');
+  assert.equal(buildActorVisual(4, 0, 1).directionAngle, (5 * Math.PI) / 4, 'norte');
+});
+
+test('seta: dá a volta — sudeste (índice 7) é o mesmo ângulo de sul, menos um setor', () => {
+  assert.equal(buildActorVisual(7, 0, 1).directionAngle, 0);
+});
+
+test('seta: o ângulo reconverte para o índice de direção original (round-trip)', () => {
+  for (let i = 0; i < 8; i += 1) {
+    const angle = buildActorVisual(i, 0, 1).directionAngle;
+    assert.equal(directionIndexFromAngle(angle), i, `índice ${i} → ângulo ${angle}`);
+  }
+});
+
+test('seta: índice fora de 0..7 dá a volta, como a numeração de direções', () => {
+  assert.equal(
+    buildActorVisual(-1, 0, 1).directionAngle,
+    buildActorVisual(7, 0, 1).directionAngle,
+  );
+  assert.equal(
+    buildActorVisual(8, 0, 1).directionAngle,
+    buildActorVisual(0, 0, 1).directionAngle,
+  );
 });
