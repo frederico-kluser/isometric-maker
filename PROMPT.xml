@@ -1,0 +1,358 @@
+<task xmlns="urn:isometric-maker:v2">
+
+  <identity>
+    <project>isometric-maker</project>
+    <role>Editor isométrico local 3D — Three.js + iso-core + PixelLab</role>
+    <base-commit>0910182</base-commit>
+    <base-commit-title>Merge branch 'delete' (2026-08-02 18:25:49 -0300)</base-commit-title>
+    <base-commit-description>
+      Último commit com os DOIS mapas funcionando lado a lado:
+      - #/mundo → MapEditor (2D PixiJS): sprites isométricos, sombra, picking
+        diagonal, modo teste completo com personagem andando, depth-sort com
+        actor interleaved entre blocos, highlight de célula, preview verde/vermelho
+      - #/mundo3d → MapEditor3D (Three.js): cubos BoxGeometry, raycaster,
+        câmera ortográfica, grid+ground-plane, 4 vistas discretas
+    </base-commit-description>
+  </identity>
+
+  <recovery-step priority="ABSOLUTE-FIRST">
+    <title>ANTES DE TUDO: Recuperar o código de sombra, personagem e depth-sort do editor 2D</title>
+    <description>
+      O editor 2D (MapEditor, scene.ts) tinha implementações completas que o 3D
+      NÃO tem. Recuperar esse código do commit 0910182 e portar para o 3D:
+
+      1. SOMBRA DO PERSONAGEM — scene.ts:136 (ActorDraw com offsetY do pulo),
+         scene.ts:548-562 (placeActor: cellToScreen + chao + spriteBox com
+         anchor X=width/2 Y=height), scene.ts:649-670 (depth-sort com actor
+         interleaved ENTRE os blocos, não por cima)
+
+      2. DEPTH-SORT COM ACTOR INTERLEAVED — O personagem NÃO é uma camada por
+         cima: ele entra na mesma ordenação dos blocos, pela chave de
+         profundidade da célula em que está. Desenhá-lo depois de tudo o faria
+         aparecer na frente de paredes que deveriam escondê-lo; desenhá-lo antes
+         o esconderia atrás do chão em que pisa.
+
+      3. HIGHLIGHT DA CÉLULA — scene.ts:673-677 (overlay com highlightTexture
+         na célula sob o cursor)
+
+      4. PREVIEW VERDE/VERMELHO — scene.ts:680-690 (preview com cor diferente
+         para ação válida vs destrutiva)
+
+      5. PRELOAD DE TEXTURAS DO ATOR — scene.ts:279-287 (preloadActor: carrega
+         URLs em paralelo, ignora falhas, cache por URL)
+
+      6. ACTOR.TS COMPLETO — Já foi restaurado (commit dd6a55c). Contém:
+         - worldDirectionFromKeys(): WASD+rotação → vetor mundo (unrotatePoint)
+         - viewDirectionIndex(): facing+turn → índice 0-7 da vista
+         - directionNameFor(): índice → nome ('south','south-west',...)
+         - actionFor(): MovementState → ação (parado/caminhando/correndo/pulando/agachado)
+         - frameUrl(): ação+direção+tick → URL do frame (com fallback chain)
+         - ACTION_FALLBACK: cadeia de degradação por ação
+
+      7. COLLISION-MAP.TS — Já restaurado (commit dd6a55c). buildCollisionMap()
+         e spawnZAt().
+
+      8. MAP-EDITOR.TSX (2D) MODO TESTE — O enterTestMode original (linhas
+         420-530) carregava /api/studio, montava ActorFrames, preloadActor,
+         criava CollisionMap, inicializava MovementState com spawnZAt, e rodava
+         ticker no Pixi. Portar esta lógica COMPLETA para o map-editor-3d.tsx.
+
+      O COMMIT 0910182 TEM TUDO ISSO FUNCIONANDO. Use git show 0910182:path
+      para ler cada arquivo. NÃO adivinhe — LEIA o código original.
+    </description>
+    <files-to-recover>
+      <file path="tools/character-builder/src/map/scene.ts" commit="0910182">
+        Inteiro: placeActor(), render() com depth-sort+actor interleaved,
+        preloadActor(), highlight, preview verde/vermelho, pool de sprites
+      </file>
+      <file path="tools/character-builder/src/map/editor/map-editor.tsx" commit="0910182">
+        Modo teste completo: enterTestMode (420-530), ticker (475-523),
+        exitTestMode (535-558), teclado WASD+Shift+Ctrl+Space (637-670),
+        botão Testar/Editar na barra superior
+      </file>
+      <file path="tools/character-builder/src/map/actor.ts" commit="0910182">
+        Já restaurado. Conferir: actionFor, frameUrl, viewDirectionIndex,
+        directionNameFor, worldDirectionFromKeys, ACTION_FALLBACK, DIRECTION_NAMES
+      </file>
+      <file path="tools/character-builder/src/map/collision-map.ts" commit="0910182">
+        Já restaurado. Conferir: buildCollisionMap, spawnZAt
+      </file>
+    </files-to-recover>
+  </recovery-step>
+
+  <context>
+
+    <overview>
+      Editor de jogos isométricos local, single-user, sem servidor (ADR 0010).
+      O usuário cria personagens via wizard (PixelLab API v3), gera blocos de
+      terreno (tilesets), e monta mapas 3D com cubos sólidos. O runtime exporta
+      o jogo como JSON autocontido com PNGs em base64.
+    </overview>
+
+    <architecture>
+      <layer name="iso-core" path="packages/iso-core/src/">
+        Motor puro de geometria e física: projeção dimétrica 2:1, cubo canônico
+        48px (CANONICAL_CUBE), grid RLE sem buracos (map.ts), colisão celular
+        (collision.ts: canEnter/canCross/edgesAllowCross), varredura AABB por
+        eixo (collision-box.ts: EntityBox half=0.325, swept X→Y, pushOut MTV),
+        gravidade (gravity.ts: groundZAt/fallStep), degrau de 1 nível
+        (step-up.ts), pulo balístico (jump.ts), movimento contínuo XY + Z
+        discreto (movement.ts: step/stepWithMap), replay determinístico
+        (trace.ts: runTrace). 504 testes.
+      </layer>
+      <layer name="editor-3d" path="tools/character-builder/src/map/3d/">
+        Editor de mapa Three.js: scene3d.ts (WebGLRenderer, OrthographicCamera,
+        DirectionalLight+AmbientLight, render-on-demand, grid+ground-plane,
+        ActorSprite billboard), cube3d.ts (BoxGeometry compartilhada, material
+        array 6 faces, NearestFilter, procedural fallback via cube-canvas.ts),
+        controls3d.ts (pan via colunas da matrix, zoom inteiro, rotação discreta
+        90° 4 vistas, sem OrbitControls), pick3d-raycaster.ts (NDC Y-invertido,
+        Raycaster contra block meshes, face.normal→célula adjacente, ground
+        plane para espaço vazio), grid3d.ts (GridHelper + plano invisível),
+        block-def.ts (BlockDef/Facing/Cell3D), map-editor-3d.tsx (UI completa).
+      </layer>
+      <layer name="personagem" path="tools/character-builder/src/map/">
+        actor.ts: actionFor(), frameUrl(), viewDirectionIndex(),
+        directionNameFor(), worldDirectionFromKeys(), ACTION_FALLBACK.
+        collision-map.ts: buildCollisionMap(), spawnZAt().
+        Sprites: packages/game-assets/manequim/ (13 PNGs + mannequin.json).
+        Molde adulto: packages/game-assets/moldes/adulto.png (256×256).
+        Molde criança: packages/game-assets/moldes/crianca.png (256×256).
+      </layer>
+      <layer name="personagem-server" path="tools/character-builder/server/">
+        Wizard: generateSouthFromText (/create-image-bitforge, molde adulto
+        como init_image força 320), generateDirections8 (/create-character-v3
+        modo reference_image, 8 direções), animate-character (ações: parado,
+        caminhando, correndo, pulando, atacando). mold.ts: MOLD_INIT_STRENGTH,
+        readMoldPngB64, withMoldNegative.
+      </layer>
+      <layer name="runtime" path="tools/runtime/src/">
+        Motor do jogo exportado: PixiJS 8.19.0, carrega project.json, renderiza
+        sprites isométricos, física via iso-core.
+      </layer>
+    </architecture>
+
+    <map-editor-3d state="current">
+      <working>
+        - Cubos BoxGeometry(1,1,1) com textura por face ou cor sólida procedural
+        - Câmera ortográfica com yaw 45° e elevação ~30° (visual similar ao 2:1)
+        - Picking por Raycaster: face normal → célula adjacente (Minecraft-style)
+        - 4 ferramentas: empilhar, colocar, pintar, remover
+        - 4 vistas discretas (0°/90°/180°/270°) com rotação animada 280ms
+        - Zoom inteiro (1×, 2×, 3×, 4×)
+        - Undo/redo via snapshot stack (map-state.ts)
+        - Exportação via buildExport (map-instances.ts) + project.json com base64
+        - Modo teste BÁSICO: WASD + Shift/Ctrl/Space, sprite billboard,
+          colisão via stepWithMap + buildCollisionMap (restaurado 2026-08-03)
+        - Colisão sólida: swept AABB per-axis, caixa 0.65, pushOut MTV,
+          flag solid do catálogo honrada (água/lava/folhagem não bloqueiam)
+        - ActorSprite: THREE.Sprite billboard com cache de texturas
+      </working>
+      <missing>
+        <item priority="critical">Física de CONTATO real: o cubo é um sólido
+          rígido. O personagem NUNCA pode estar dentro dele. Se um bloco for
+          colocado onde o personagem está, o personagem é empurrado para fora
+          (push-out já existe). Se o personagem tentar andar para dentro de um
+          cubo, ele PARA na superfície — sem deslizar para dentro, sem clipping,
+          sem atravessar. A colisão é de CORPO RÍGIDO: a caixa do personagem
+          (0.65×0.65×1.0) NUNCA intersecta a caixa de nenhum cubo sólido
+          (1.0×1.0×1.0). Corrigir: (a) sweeping contínuo entre posição
+          anterior e nova; (b) push-out em TODO passo de movimento; (c) cantos
+          internos sem glitching; (d) arestas testadas contra a caixa, não contra
+          o centro; (e) EPSILON ~0.001 para estabilidade.</item>
+        <item priority="critical">Personagem andando nas 8 DIREÇÕES com sprite
+          correto no modo teste 3D. Os sprites existem em
+          packages/game-assets/manequim/directions/. actor.ts já tem a lógica.
+          O modo teste 3D precisa CONSUMIR viewDirectionIndex e
+          directionNameFor corretamente no ticker.</item>
+        <item priority="critical">Personagem com TODAS as AÇÕES: parado,
+          caminhando, correndo, pulando, agachado (e atacando se existir).
+          actor.ts actionFor() mapeia MovementState→ação. O modo teste 3D
+          precisa: (a) carregar frames de TODAS as ações do /api/studio;
+          (b) trocar ação conforme gait/airborne/falling; (c) animar frames
+          a cada tick; (d) fallback chain (correndo→caminhando→parado→
+          direções estáticas).</item>
+        <item priority="critical">SOMBRA do personagem: o editor 2D tinha
+          o personagem desenhado com anchor no pé (anchorY=texture.height),
+          cellToScreen + chao (zStep + tileHeight/2 + offsetY do pulo).
+          No 3D, implementar: (a) shadowMap no renderer com DirectionalLight
+          castShadow; (b) OU plano escuro semitransparente sob o personagem
+          (sombra circular/elíptica) — mais leve e consistente com pixel art.
+          Ver scene.ts:548-562 do commit 0910182 para a lógica original.</item>
+        <item priority="critical">DEPTH-SORT COM ACTOR INTERLEAVED: no 2D,
+          o personagem era desenhado ENTRE os blocos por depthAt(cell).
+          No 3D, o depth buffer do Three.js resolve automaticamente a ordem
+          para cubos, mas o ActorSprite (billboard) precisa de depthTest=true
+          e depthWrite=false para ficar atrás de paredes e na frente do chão.
+          Verificar se o ActorSprite atual está configurado corretamente.</item>
+        <item priority="high">Highlight da célula sob o cursor: wireframe ou
+          losango colorido na célula ativa, como o editor 2D fazia com
+          highlightTexture + overlayPool (scene.ts:673-677).</item>
+        <item priority="high">Preview verde (válido) / vermelho (inválido):
+          o cubo semitransparente de preview deve trocar de cor conforme a
+          colocação é válida ou não (scene.ts:680-690).</item>
+        <item priority="medium">Sombra DOS CUBOS: ativar shadowMap no renderer,
+          DirectionalLight com castShadow, ground plane receiveShadow.
+          Cubos projetam sombra uns nos outros e no chão.</item>
+        <item priority="medium">Indicador de direção do personagem: seta ou
+          marcação visual no modo teste.</item>
+        <item priority="medium">Partículas ao colocar/remover bloco.</item>
+        <item priority="low">Água/lava com transparência e animação.</item>
+        <item priority="low">Grid visualmente melhorado: highlight da célula
+          ativa com cor diferenciada no GridHelper.</item>
+      </missing>
+    </map-editor-3d>
+
+    <character-system state="current">
+      <working>
+        - Wizard: geração da sul via /create-image-bitforge + molde adulto
+        - 8 direções via /create-character-v3 (modo reference_image)
+        - Poses: parado (template), caminhando/correndo/pulando/atacando (animate)
+        - Sprites do manequim: 13 PNGs + mannequin.json (restaurados)
+        - actor.ts: ação, direção, frames, fallback chain
+        - collision-map.ts: adaptador MapData→CollisionMap (restaurado)
+      </working>
+      <missing>
+        <item priority="critical">Sprites de AÇÕES não foram gerados para o
+          manequim com molde adulto. É preciso gerar (via PixelLab) todas as
+          ações com o molde adulto como referência, nas 8 direções, para que
+          o modo teste possa exibir o personagem completo.</item>
+      </missing>
+    </character-system>
+
+    <physics state="current">
+      <working>
+        - collision-box.ts: swept AABB per-axis, EntityBox half=0.325
+        - resolveMovement(): move X→clampa, move Y→clampa, sliding de parede
+        - pushOut(): MTV, max 0.9 células
+        - solidAtFromBlocks(): honra flag solid
+        - stepWithMap(): integração completa com MovementState
+        - 504 testes no iso-core
+      </working>
+      <missing>
+        <item priority="critical">Refinar para contato PERFEITO (ver R1 acima):
+          sweeping contínuo, push-out em todo passo, cantos, arestas, epsilon.
+        </item>
+      </missing>
+    </physics>
+
+  </context>
+
+  <objective>
+    Transformar o editor 3D no editor de mapa DEFINITIVO, com física de contato
+    perfeita (nada entra nos cubos), personagem completo (8 direções × todas as
+    ações) andando no mapa com sombra, e TODOS os refinamentos visuais que o
+    editor 2D tinha e o 3D ainda não.
+  </objective>
+
+  <requirements>
+
+    <requirement id="R0" priority="absolute-first">
+      <title>RECUPERAR o código do editor 2D antes de implementar</title>
+      <body>Ler TODOS os arquivos listados em recovery-step do commit 0910182.
+        NÃO implementar nada antes de entender como o 2D fazia:
+        - placeActor() com anchor no pé e offsetY do pulo
+        - depth-sort com actor interleaved entre blocos
+        - preloadActor() com cache de texturas
+        - highlight e preview verde/vermelho
+        - enterTestMode completo com /api/studio + ActorFrames + ticker
+        Portar essas funcionalidades para o editor 3D (Three.js).
+      </body>
+    </requirement>
+
+    <requirement id="R1" priority="critical">
+      <title>Física de contato perfeita — cubos são IMPENETRÁVEIS</title>
+      <body>Refinar collision-box.ts: (a) sweeping contínuo entre posição
+        anterior e nova (não apenas destino); (b) push-out automático em TODO
+        passo de movimento; (c) resolução de cantos internos sem glitching;
+        (d) arestas testadas contra a caixa, não contra o centro; (e) EPSILON
+        de ~0.001 para estabilidade numérica sem vibração.
+      </body>
+    </requirement>
+
+    <requirement id="R2" priority="critical">
+      <title>Personagem nas 8 direções com sprite correto no modo teste 3D</title>
+      <body>Integrar viewDirectionIndex + directionNameFor no ticker do
+        map-editor-3d.tsx. Os sprites existem em
+        packages/game-assets/manequim/directions/.
+      </body>
+    </requirement>
+
+    <requirement id="R3" priority="critical">
+      <title>Personagem com TODAS as ações no modo teste 3D</title>
+      <body>Carregar frames de todas as ações do /api/studio. Usar actionFor()
+        para escolher ação. Animar frames a cada tick. Fallback chain:
+        ação→degradação→direções estáticas.
+      </body>
+    </requirement>
+
+    <requirement id="R4" priority="critical">
+      <title>Sombra do personagem no chão</title>
+      <body>Portar a lógica de placeActor do 2D (anchor no pé, chao =
+        zStep + tileHeight/2 + offsetY). No 3D: plano escuro semitransparente
+        sob o personagem OU shadowMap com DirectionalLight.
+      </body>
+    </requirement>
+
+    <requirement id="R5" priority="critical">
+      <title>Depth-sort com actor interleaved entre cubos</title>
+      <body>Garantir que o ActorSprite 3D tem depthTest=true e depthWrite=false
+        para que paredes na frente escondam o personagem e o chão não.
+      </body>
+    </requirement>
+
+    <requirement id="R6" priority="high">
+      <title>Highlight da célula sob o cursor</title>
+      <body>Wireframe ou highlight na célula ativa (como o 2D fazia).</body>
+    </requirement>
+
+    <requirement id="R7" priority="high">
+      <title>Preview verde (válido) / vermelho (inválido)</title>
+      <body>Cubo de preview com cor condicional.</body>
+    </requirement>
+
+    <requirement id="R8" priority="high">
+      <title>Sombra dos cubos (shadowMap)</title>
+      <body>DirectionalLight castShadow + ground plane receiveShadow.</body>
+    </requirement>
+
+    <requirement id="R9" priority="medium">
+      <title>Indicador de direção + partículas + água/lava</title>
+      <body>Melhorias visuais secundárias.</body>
+    </requirement>
+
+    <requirement id="R10" priority="critical">
+      <title>Não quebrar nada existente</title>
+      <body>504 testes iso-core passam. 390+ testes character-builder passam.
+        Typecheck limpo. Gate.sh VERDE. O editor 2D já foi removido — não
+        recriá-lo. Trabalhar apenas no editor 3D.</body>
+    </requirement>
+
+  </requirements>
+
+  <constraints>
+    <constraint>NÃO usar motor de física externo (Rapier, Cannon, Ammo). Física
+      própria no iso-core, funções puras e determinísticas.</constraint>
+    <constraint>Z é DISCRETO (inteiro). XY é contínuo.</constraint>
+    <constraint>Câmera ortográfica, 4 vistas discretas (0°/90°/180°/270°).</constraint>
+    <constraint>Zero dinheiro gasto sem plan→estimate→confirm.</constraint>
+    <constraint>NUNCA mode='pro' em animação sem decisão registrada.</constraint>
+    <constraint>Editor local, single-user, sem servidor.</constraint>
+  </constraints>
+
+  <acceptance>
+    <criterion>Personagem NUNCA entra dentro de um cubo, mesmo em cantos,
+      diagonais, ou ao colocar bloco sobre ele. Sem vibração ao encostar.</criterion>
+    <criterion>Personagem anda nas 8 direções com sprite e animação corretos
+      no modo teste do editor 3D (WASD + rotação de câmera).</criterion>
+    <criterion>Todas as ações (parado, caminhando, correndo, pulando, agachado)
+      são exibidas com sprites corretos e fallback chain funcional.</criterion>
+    <criterion>Personagem projeta sombra no chão.</criterion>
+    <criterion>Célula sob o cursor tem highlight visual.</criterion>
+    <criterion>Preview de placement: verde quando válido, vermelho quando inválido.</criterion>
+    <criterion>Cubos projetam sombra (shadowMap).</criterion>
+    <criterion>504 testes iso-core passam. 390+ testes character-builder passam.
+      Typecheck limpo. Gate.sh VERDE.</criterion>
+  </acceptance>
+
+</task>
