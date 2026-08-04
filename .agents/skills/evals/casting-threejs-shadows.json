@@ -1,0 +1,44 @@
+{
+  "skill": "casting-threejs-shadows",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "a sombra do bloco sumiu no mapa", "should_trigger": true },
+    { "query": "sombra cortada na borda do mapa", "should_trigger": true },
+    { "query": "listras estranhas na sombra do cubo", "should_trigger": true },
+    { "query": "a sombra do bloco esta muito forte", "should_trigger": true },
+    { "query": "o editor trava quando eu movo a camera", "should_trigger": true },
+    { "query": "gerar oito direcoes de um personagem", "should_trigger": false },
+    { "query": "exportar o mapa em json", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "job is to **cast**, not to illuminate",
+      "why": "every material in the scene ignores lighting; treating the light as illumination leads to re-adding ambient and re-shading the baked art"
+    },
+    {
+      "must_contain": "**is** the darkening",
+      "why": "ShadowMaterial decouples shadow strength from photometry; a lit floor would retie them and make every light tweak a shadow tweak"
+    },
+    {
+      "must_contain": "mutually exclusive",
+      "why": "uniform face brightness forces a light behind the viewer, which hides every shadow behind its caster; this is arithmetic, not tuning"
+    },
+    {
+      "must_contain": "autoUpdate = false",
+      "why": "with autoUpdate on, every draw re-renders a 2048 depth pass, including every frame of a zoom or pan"
+    },
+    {
+      "must_contain": "consumed by the renderer after one frame",
+      "why": "needsUpdate is a one-shot request, not a mode; forgetting to set it again leaves the shadow map stale"
+    },
+    {
+      "must_contain": "updateMatrixWorld",
+      "why": "the light target is not refreshed by anything else; without it the shadow camera keeps aiming at the origin"
+    },
+    {
+      "must_contain": "1.4",
+      "why": "the shadow frustum must cover the map's diagonal in light space, not its axis-aligned footprint, or the shadow clips at the edge"
+    }
+  ],
+  "check_provenance": true
+}

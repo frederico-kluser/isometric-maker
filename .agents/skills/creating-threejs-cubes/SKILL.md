@@ -1,22 +1,33 @@
 ---
 name: creating-threejs-cubes
-description: Carries how block cubes are built in this editor - the six BoxGeometry material groups in cubemap order, the material-array contract for per-face texture or solid color, nearest-filtered textures with sRGB color space, the procedural canvas fallback from the cube rasterizer, the shared unit geometry, and why the cube meshes never rotate even when the camera does. Use whenever creating or texturing 3D blocks, mapping sprite art onto a cube face, or fixing a cube that looks wrong - including Portuguese phrasings like "criar cubo 3d", "textura em cada face do cubo", "o cubo fica preto", "textura esticada na face", "rotacionar a textura junto com a camera", "por que o topo do cubo esta escuro". Triggers on BoxGeometry, material array, MeshLambertMaterial, CanvasTexture, NearestFilter, cubo 3d, textura face.
+description: Carries how block meshes are built in this editor - the six BoxGeometry material groups in cubemap order and when that order stops mattering, the single unlit material every cube now uses, nearest-filtered sRGB textures without mipmaps, the shared geometry cached per sprite proportion, the cube yaw that follows the camera, and the preview and highlight helpers created once instead of per frame. Use whenever creating a block mesh, changing materials or geometry, adding a helper cube, or fixing a cube that renders black, blank or in the wrong place - including Portuguese phrasings like "criar cubo 3d", "o cubo fica preto", "material do cubo", "textura em cada face do cubo", "geometria compartilhada", "cubo de preview", "contorno de selecao". Triggers on BoxGeometry, material array, MeshBasicMaterial, CanvasTexture, NearestFilter, EdgesGeometry, cubo 3d, textura face, preview, highlight.
 metadata:
   type: knowledge
   verification_signal: cd tools/character-builder && npx tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck --target es2023 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --allowImportingTsExtensions --jsx react-jsx src/map/3d/scene3d.ts src/map/3d/controls3d.ts src/map/3d/cube3d.ts src/map/3d/pick3d-raycaster.ts src/map/3d/grid3d.ts
 ---
 
-# Creating Three.js cubes with per-face materials
+# Creating Three.js block meshes
 
 ## When to use
 
-Before creating a block mesh, before mapping art onto a cube, and before changing the material
-setup — face-order mistakes here put art on the wrong side of the block.
+Before creating a block mesh or changing its material or geometry. What the mesh *shows* — the sprite,
+its UVs, the canonical view — belongs to `mapping-sprites-onto-cubes`; this skill is the mesh itself.
 
-## The face order contract
+## One material, six faces
 
-`BoxGeometry` creates six material groups, one per face, in cubemap order — the array index IS the
-face:
+A cube mesh takes a **single** `MeshBasicMaterial`, not an array of six
+(`tools/character-builder/src/map/3d/cube3d.ts:290@51821ec4`). The faces differ by UV, not by
+material: one sprite is stretched across the three visible faces, so there is nothing left for a
+per-face material to carry.
+
+`MeshBasicMaterial` is deliberate — the art already has shading baked in, and lighting it again both
+darkens it twice and makes the same block change colour when the camera turns. The reasoning and its
+shadow consequence live in `mapping-sprites-onto-cubes` and `casting-threejs-shadows`.
+
+## The face order still exists, and still bites
+
+`BoxGeometry` creates six material groups in cubemap order. Nothing indexes them today, but the order
+is what the UV writer walks and what any future per-face material would use:
 
 | Index | Face | Axis |
 |---|---|---|
@@ -27,68 +38,66 @@ face:
 | 4 | front | +Z |
 | 5 | back | −Z |
 
-This order is fixed in the geometry and encoded once in `BOX_GROUP`
-(`tools/character-builder/src/map/3d/cube3d.ts:89-96@49482c8a`).
+The three faces that ever face the camera are **+X, +Y and +Z**, because the mesh yaw tracks the
+camera (`tools/character-builder/src/map/3d/scene3d.ts:339@7c752159`). The other three are never
+drawn.
 
-## Material array — the contract
+## The cube DOES rotate with the camera
 
-A mesh gets six `MeshLambertMaterial`s in that order; the index decides which face the material
-covers (`tools/character-builder/src/map/3d/cube3d.ts:444-458@49482c8a`). Lambert, not Standard:
-the microfacet BRDF of `MeshStandardMaterial` buys nothing on flat 1×1×1 blocks under one ambient
-and one directional light, and it costs more per fragment (`tools/character-builder/src/map/3d/cube3d.ts:341-368@49482c8a` uses Lambert
-throughout).
+This reverses the earlier rule. The mesh used to be static, with the sprite's faces pinned to +X/+Y/+Z
+— which meant three of the four views showed untextured faces. Now `applyCubeYaw` turns every block
+mesh with the camera; a cube is symmetric under 90° about Y, so the volume lands back in the same
+cell. `blockFaceToBoxGroup`, the dead helper that rotated the *mapping* instead, is gone.
 
-Every material is a draw call. Under ~100 cubes that is fine; beyond that, merge into
-`InstancedMesh` with an atlas — not done here, and not needed for the current maps.
+## Textures: nearest, sRGB, no mipmaps, clamped
 
-## Textures: nearest filter, sRGB, no mipmaps
+Every texture — loaded PNG or procedural canvas — goes through one configurator
+(`tools/character-builder/src/map/3d/cube3d.ts:123@51821ec4`): `NearestFilter` on min and mag,
+`generateMipmaps = false`, `colorSpace = SRGBColorSpace`, `ClampToEdgeWrapping`. Pixel art must not be
+smoothed, and 48×53 is not a power of two — under WebGL2 that is fine, but only with clamped wrapping
+and no mipmaps.
 
-Pixel art must not be smoothed. Every texture — loaded or procedural — is configured with
-`NearestFilter` for min and mag, `generateMipmaps = false`, and `colorSpace = SRGBColorSpace`
-(`tools/character-builder/src/map/3d/cube3d.ts:139-158@49482c8a` for loaded textures,
-`tools/character-builder/src/map/3d/cube3d.ts:54-61@49482c8a` for canvas textures).
+`alphaTest = 0.5` with `transparent: false` keeps the cube in the opaque pass. Generated art does not
+always fill the silhouette, and without the cutout those pixels render as a black fringe.
 
-## Procedural fallback: canvas → texture
+## Geometry is cached by sprite proportion, not per block
 
-Blocks without art get solid HSL colors, and their cube faces come from the cube rasterizer in
-`src/map/3d/cube-canvas.ts` — `makeCubeCanvasFromHue` and `makeCubeViewsFromHue`
-(`tools/character-builder/src/map/3d/cube-canvas.ts:67@171c2e2e`, `tools/character-builder/src/map/3d/cube-canvas.ts:83@171c2e2e`)
-— rasterized with the canonical 48px geometry from iso-core
-(`packages/iso-core/src/iso-cube.ts:222@2ad14e9b`). The rasterizer lives in the character-builder,
-not in iso-core; iso-core owns only the geometry math.
+One `BoxGeometry` per distinct sprite size, keyed `width×height`
+(`tools/character-builder/src/map/3d/cube3d.ts:97@51821ec4`). The UVs depend only on the proportion,
+so every block whose art is 48×53 shares one geometry object. A mesh owns neither its geometry nor its
+material; both come from module caches, and `disposeCubeCache` is what frees them.
 
-## Shared geometry
+The procedural cube (a block with no generated art) is cached by hue and shares one material across
+blocks and scenes (`tools/character-builder/src/map/3d/cube3d.ts:325@51821ec4`). That is why the
+scene disposes only the materials of blocks with `hasSprite`: disposing a shared procedural material
+would blank every other block using that hue.
 
-One `BoxGeometry(1, 1, 1)` is shared by every cube mesh — each mesh allocates only its six materials
-(`tools/character-builder/src/map/3d/cube3d.ts:44@49482c8a`,
-`tools/character-builder/src/map/3d/cube3d.ts:468-473@49482c8a`).
+## Preview and highlight: built once, moved after
 
-## The texture-rotation trap
+Both helpers are created a single time by the scene and then repositioned and toggled
+(`tools/character-builder/src/map/3d/scene3d.ts:591@7c752159`). Recreating them per frame allocated a
+material and recomputed an `EdgesGeometry` on every mouse move, on the main thread. The edges are now
+computed once and shared (`tools/character-builder/src/map/3d/cube3d.ts:402@51821ec4`).
 
-The cube mesh does NOT rotate when the camera rotates — only the camera orbits (`setCameraRotation`,
-see `controlling-threejs-camera`). The "north" sprite's three faces (top, left, right after dewarp)
-are pinned to +X, +Z and +Y, and the −X, −Z, −Y faces get solid color
-(`tools/character-builder/src/map/3d/cube3d.ts:341-368@49482c8a`). Rotating the textures to follow
-the camera was tried and removed: it swaps art as if the MESH turned, and because the mesh is static
-it ends up showing the wrong face. The `rotation` parameter remains on the signature but is ignored
-(`tools/character-builder/src/map/3d/cube3d.ts:346@49482c8a`). A leftover `blockFaceToBoxGroup` still rotates the mapping, but nothing
-calls it — it is dead code (`tools/character-builder/src/map/3d/cube3d.ts:112-122@49482c8a`).
+`depthWrite: false` on the preview is load-bearing: writing depth would make the preview occlude the
+next frame's raycast against the very cube it is previewing.
 
-## Preview and highlight
+## Draw calls
 
-The placement preview is a semi-transparent box with `depthTest: true` and `depthWrite: false` — it
-must not write depth, or it would shadow the raycast in the next frame
-(`tools/character-builder/src/map/3d/cube3d.ts:485-498@49482c8a`). The selection outline is
-`EdgesGeometry` plus `LineSegments` (`tools/character-builder/src/map/3d/cube3d.ts:507-519@49482c8a`).
+Every distinct material is a draw call. Under ~100 cubes that is fine; beyond that the answer is
+`InstancedMesh` with an atlas, which is not implemented and has not been needed. The threshold is a
+rule of thumb, never measured here.
 
 ## What is not verified
 
-The "under 100 cubes" draw-call threshold is a rule of thumb, not a measurement. Whether
-`InstancedMesh` is ever needed has not been decided.
+- No automated test renders a cube. The claims rest on typechecking and on reading the wiring.
+- The draw-call threshold and `alphaTest = 0.5` are judgment, not measurement.
 
 ## References
 
 - `tools/character-builder/src/map/3d/cube3d.ts` — the cube factory
 - `tools/character-builder/src/map/3d/cube-canvas.ts` — the isometric cube rasterizer
 - `packages/iso-core/src/iso-cube.ts` — the canonical cube geometry
+- `mapping-sprites-onto-cubes` — what the mesh shows, and why
+- `casting-threejs-shadows` — why the material is unlit
 - [Three.js BoxGeometry docs](https://threejs.org/docs/#api/en/geometries/BoxGeometry)

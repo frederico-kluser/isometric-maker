@@ -316,3 +316,81 @@ export function silhouetteArea(geom: IsoCubeGeometry): number {
   return total;
 }
 
+// ---------------------------------------------------------------- casamento de silhueta
+
+/** Quanto uma imagem se parece com a silhueta canônica do cubo. */
+export interface SilhouetteMatch {
+  /** Pixels opacos DENTRO da silhueta — o que deveria estar pintado, e está. */
+  readonly inside: number;
+  /** Pixels opacos FORA da silhueta — arte vazando da célula. */
+  readonly outside: number;
+  /** Pixels transparentes dentro da silhueta — buraco no cubo. */
+  readonly holes: number;
+  /**
+   * `(inside − outside − holes) / silhouetteArea`. `1` é a silhueta exata; `0`
+   * é indistinguível de ruído; negativo é arte que está mais fora que dentro.
+   */
+  readonly score: number;
+}
+
+/**
+ * Compara o canal alfa de uma imagem com a silhueta do cubo canônico.
+ *
+ * Existe por causa de uma incerteza que estava DECLARADA e não medida: os
+ * blocos gerados por `/rotate` gravam oito vistas com
+ * `frameKeying: "assumed-canonical-order"` no manifesto — ou seja, ninguém
+ * verificou qual das oito é a vista isométrica de três faces. Quatro delas são
+ * a vista de quina (o cubo de frente, duas faces), e usar uma delas como
+ * textura pinta o bloco com a arte errada.
+ *
+ * Como a forma do cubo já é uma primitiva única (`faceAtPixel`), a pergunta
+ * "esta imagem é um cubo isométrico?" é responder essa primitiva pixel a pixel.
+ * O mesmo código que PINTA o molde é o que ESCOLHE a vista — que é a regra da
+ * casa: duas implementações da mesma forma é como o validador passa a aprovar o
+ * que o pintor não desenha.
+ *
+ * `alpha` é indexado por `y * width + x`. `threshold` é o alfa mínimo para
+ * contar como opaco; 32 tolera as bordas suavizadas que a PixelLab às vezes
+ * devolve sem contar como pintura de verdade.
+ *
+ * Recusa dimensão diferente da geometria em vez de tentar acomodar: comparar
+ * silhueta com escala implícita responderia "parecido" para qualquer coisa.
+ */
+export function silhouetteMatch(
+  alpha: ArrayLike<number>,
+  width: number,
+  height: number,
+  geom: IsoCubeGeometry,
+  threshold = 32,
+): SilhouetteMatch {
+  if (width !== geom.spriteWidth || height !== geom.spriteHeight) {
+    throw new IsoCubeGeometryError(
+      `imagem ${width}×${height} não tem o tamanho da geometria ` +
+        `${geom.spriteWidth}×${geom.spriteHeight}: casamento de silhueta exige ` +
+        'a mesma escala, senão qualquer imagem "casa" com algum recorte.',
+    );
+  }
+  let inside = 0;
+  let outside = 0;
+  let holes = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const opaque = (alpha[y * width + x] ?? 0) >= threshold;
+      const covered = faceAtPixel(x, y, geom) !== null;
+      if (covered) {
+        if (opaque) inside += 1;
+        else holes += 1;
+      } else if (opaque) {
+        outside += 1;
+      }
+    }
+  }
+  const area = silhouetteArea(geom);
+  return {
+    inside,
+    outside,
+    holes,
+    score: area === 0 ? 0 : (inside - outside - holes) / area,
+  };
+}
+

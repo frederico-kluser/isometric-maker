@@ -32,10 +32,12 @@ interface WorldBlockSummary {
   readonly hash: string;
   readonly description: string;
   readonly shape: string;
-  /** 'chained' | 'rotated' | 'texture'. 'texture' = textura animada (ADR 0032). */
+  /** 'chained' | 'rotated' | 'texture' | 'views'. 'views' = vistas numeradas em disco. */
   readonly technique: string;
   /** v2: 4 faces. Ausente em v3 (texture). */
   readonly faceUrls?: Record<Facing, string>;
+  /** Vistas candidatas quando nenhuma é declarada canônica ('views'). */
+  readonly spriteUrls?: string[];
   /** v3 (texture): spritesheet da animação. */
   readonly spritesheetUrl?: string;
   /** v3 (texture): sidecar com fps e frameCount. */
@@ -139,6 +141,7 @@ export async function loadPalette(): Promise<PaletteLoad> {
       label: shortLabel(b.description),
       hash: b.hash,
       faceUrls: b.faceUrls as Record<Facing, string> | undefined,
+      spriteUrls: b.spriteUrls,
       spritesheetUrl: b.spritesheetUrl,
       animationUrl: b.animationUrl,
       frameCount: b.frameCount,

@@ -5,26 +5,47 @@
     { "query": "girar a camera em 90 graus", "should_trigger": true },
     { "query": "mover a camera com o mouse", "should_trigger": true },
     { "query": "dar zoom no editor 3d", "should_trigger": true },
-    { "query": "a camera nao acompanha o mouse", "should_trigger": true },
+    { "query": "o zoom da roda esta com lag", "should_trigger": true },
+    { "query": "a camera volta para o centro quando eu giro", "should_trigger": true },
     { "query": "colocar um bloco com textura na parede", "should_trigger": false },
     { "query": "quanto custa gerar um sprite na pixellab", "should_trigger": false }
   ],
   "invariants": [
     {
-      "must_contain": "camera moves in the view plane",
-      "why": "pan is defined by the camera matrix columns; moving in the ground plane instead is the classic OrbitControls mistake"
+      "must_contain": "orbits a TARGET",
+      "why": "a fixed lookAt(0,0,0) threw the view back to the origin on every turn after a pan; the target is what keeps the user's place"
     },
     {
-      "must_contain": "The caller keeps zoom integer",
-      "why": "fractional zoom misaligns the pixel-art grid; the integer contract is load-bearing"
+      "must_contain": "camera matrix columns",
+      "why": "pan is defined in the view plane by the matrix columns; moving in the ground plane instead is the classic OrbitControls mistake"
     },
     {
-      "must_contain": "meshes do NOT rotate with the camera",
-      "why": "only the camera orbits; rotating the meshes would put the pinned textures on the wrong faces"
+      "must_contain": "updateMatrixWorld(true)",
+      "why": "pan and anchored zoom read those columns; without forcing the update the first drag after a turn uses the previous view's axes"
+    },
+    {
+      "must_contain": "Geometric step",
+      "why": "additive zoom steps are huge near the minimum and imperceptible near the maximum, which is what made the wheel feel stuck at one end"
+    },
+    {
+      "must_contain": "1 − e^(−dt/τ)",
+      "why": "a fixed per-frame lerp makes the same gesture frame-rate dependent: slow at 60 Hz, frantic at 144 Hz"
+    },
+    {
+      "must_contain": "current** zoom, not the target zoom",
+      "why": "the anchor must hold the point that is on screen now, not the one the animation is heading toward"
+    },
+    {
+      "must_contain": "That stage no longer exists",
+      "why": "the integer-zoom rule came from the removed PixiJS 2D stage; restating it as live would forbid the fluid zoom for a reason that no longer applies"
     },
     {
       "must_contain": "35.264",
-      "why": "the true-isometric angle vs the 2:1 dimetric 30 degrees is the number that keeps the look consistent with the 2D editor"
+      "why": "the true-isometric angle vs the 2:1 dimetric 30 degrees is the number that keeps the look consistent with the sprite projection"
+    },
+    {
+      "must_contain": "tweens the **yaw angle**",
+      "why": "lerping positions cuts through the inside of the circle and swings the camera closer to the map mid-turn"
     }
   ],
   "check_provenance": true

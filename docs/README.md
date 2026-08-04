@@ -120,10 +120,12 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0036`](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md) | Física jogável: corrida é o default, Shift anda, agachar não pula, gravidade contra o mapa com passo fixo | vigente |
 | [`0037`](./adr/0037-editor-3d-apenas.md) | O editor de mapa é 3D (Three.js): o editor 2D do PixiJS sai — 24 arquivos e ~6,3 mil linhas — e `#/mundo` vira a rota única | vigente |
 | [`0038`](./adr/0038-colisao-solida-aabb.md) | Colisão sólida: caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV; a flag `solid` do catálogo é honrada (água/lava não bloqueiam) | vigente |
+| [`0039`](./adr/0039-sprite-unica-sobre-tres-faces.md) | Uma sprite só, esticada sobre as três faces do cubo por UV exato canto-a-canto; o mesh gira com a câmera; faces sem iluminação; a vista canônica é medida por silhueta, e os 6 blocos pagos escondidos voltam à paleta | vigente |
+| [`0040`](./adr/0040-zoom-continuo-e-desenho-sob-demanda.md) | Zoom contínuo, amortecido e ancorado no cursor; um laço de quadro só que coalesce e para sozinho; desenho separa mundo de câmera; `shadowMap.autoUpdate = false` | vigente |
 
 ## Skills
 
-**30 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
+**37 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
 
 Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, e o restante é tarefa e meta.
 
@@ -150,6 +152,7 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-02 | **O projeto inteiro num arquivo só** ([ADR 0033](./adr/0033-pacote-de-projeto-autocontido.md)): mapa + personagem + blocos num JSON autocontido, com PNGs em base64 — exporta (POST /api/project/export) e restaura (POST /api/project/import) personagem e blocos; bloco ausente degrada para o cubo procedural |
 | 2026-08-02 | **Um aplicativo só** ([ADR 0034](./adr/0034-aplicativo-unificado-com-tela-inicial.md)): o map-builder é fundido no character-builder — tela inicial (`#/`), estúdio (`#/personagem`) e editor de mapa (`#/mundo`) num processo só, `npm run dev` na raiz; molde de proporção adulto/criança como referência de geração ([ADR 0035](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md)); física jogável no iso-core — marchas, agachar, gravidade e degrau na travessia ([ADR 0036](./adr/0036-fisica-de-marchas-agachar-e-gravidade.md)) |
 | 2026-08-03 | **O editor vira 3D** ([ADR 0037](./adr/0037-editor-3d-apenas.md)): o editor 2D do PixiJS sai (24 arquivos, ~6,3 mil linhas), `#/mundo` é a rota única e `mundo3d` vira apelido; e a **colisão ganha corpo** ([ADR 0038](./adr/0038-colisao-solida-aabb.md)): caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV, com a flag `solid` do catálogo honrada; doc nova [`colisao-solida.md`](03-mapa/colisao-solida.md) |
+| 2026-08-04 | **A sprite do bloco passa a cobrir o cubo** ([ADR 0039](./adr/0039-sprite-unica-sobre-tres-faces.md)): uma sprite só, esticada sobre as três faces por UV exato canto-a-canto, com o mesh girando junto com a câmera e a vista canônica escolhida por casamento de silhueta — seis blocos pagos que o catálogo escondia voltam à paleta; e o **zoom deixa de travar** ([ADR 0040](./adr/0040-zoom-continuo-e-desenho-sob-demanda.md)): zoom contínuo ancorado no cursor, um laço de quadro só que coalesce e para sozinho, e `shadowMap.autoUpdate = false` |
 
 ## Referências
 

@@ -1377,6 +1377,71 @@ test('listWorldBlocks só publica bloco COMPLETO do formato v2, em ordem estáve
   }
 });
 
+test('listWorldBlocks publica bloco de VISTAS numeradas, em ordem numérica', async () => {
+  const dir = tmpDir();
+  try {
+    // Bloco gravado por um gerador anterior: v3, técnica rotate8, oito vistas.
+    // Seis blocos PAGOS existem assim em disco e ficavam invisíveis na paleta
+    // porque o catálogo só conhecia v2 e v3/texture.
+    const hash = 'bbbbbbbbbbbbbbbb';
+    const blockPath = join(dir, 'assets', 'world-blocks', hash);
+    mkdirSync(blockPath, { recursive: true });
+    writeFileSync(
+      join(blockPath, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash,
+        technique: 'rotate8-mould',
+        description: 'isometric pixel art cube block of grey stone',
+        geometry: {
+          tileWidth: 48, tileHeight: 24, cubeHeight: 29,
+          spriteWidth: 48, spriteHeight: 53,
+        },
+        views: 8,
+        rotate: { frameKeying: 'assumed-canonical-order' },
+      }),
+    );
+    // Fora de ordem lexicográfica de propósito: `view-10` vem depois de `view-9`.
+    for (const i of [0, 1, 9, 10]) {
+      writeFileSync(join(blockPath, `view-${i}.png`), 'png');
+    }
+
+    const list = await listWorldBlocks(join(dir, 'assets'));
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.technique, 'views');
+    assert.equal(list[0]?.shape, 'block');
+    assert.deepEqual(list[0]?.spriteUrls, [
+      `/world-blocks/${hash}/view-0.png`,
+      `/world-blocks/${hash}/view-1.png`,
+      `/world-blocks/${hash}/view-9.png`,
+      `/world-blocks/${hash}/view-10.png`,
+    ]);
+    assert.equal(list[0]?.faceUrls, undefined, 'vistas não são faces por direção');
+    assert.equal(list[0]?.geometry.spriteHeight, 53);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('bloco v3 sem vista nenhuma em disco não entra na paleta', async () => {
+  const dir = tmpDir();
+  try {
+    const hash = 'cccccccccccccccc';
+    const blockPath = join(dir, 'assets', 'world-blocks', hash);
+    mkdirSync(blockPath, { recursive: true });
+    writeFileSync(
+      join(blockPath, 'block.json'),
+      JSON.stringify({
+        version: 3, hash, technique: 'rotate8-prompt', description: 'nada em disco',
+      }),
+    );
+    const list = await listWorldBlocks(join(dir, 'assets'));
+    assert.deepEqual(list, [], 'manifesto sem arte é bloco pela metade');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('listWorldBlocks publica textura animada (v3) com spritesheet e sidecar', async () => {
   const dir = tmpDir();
   try {

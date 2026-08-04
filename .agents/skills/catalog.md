@@ -95,16 +95,24 @@ shims and v7 code therefore typechecks clean.
 
 ## Knowledge — Three.js, the map editor's renderer
 
-The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Four skills
-carry how this editor renders — scene boot, cubes, camera, picking. They share one verification
-signal: `cd tools/character-builder && npx tsc --noEmit`.
+The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Seven skills
+carry how this editor renders and behaves — scene boot, mesh, art, camera, picking, shadow, live
+physics. They share one verification signal: `cd tools/character-builder && npx tsc --noEmit`.
 
 | Skill | Owns |
 |---|---|
-| [`bootstrapping-threejs-scene`](bootstrapping-threejs-scene/SKILL.md) | async init do WebGLRenderer, lights, render-on-demand, ResizeObserver, teardown |
-| [`creating-threejs-cubes`](creating-threejs-cubes/SKILL.md) | BoxGeometry face order, material array, NearestFilter, procedural fallback, shared geometry |
-| [`controlling-threejs-camera`](controlling-threejs-camera/SKILL.md) | pan via view-plane, integer zoom, discrete 90° rotation, no OrbitControls |
-| [`raycasting-threejs-blocks`](raycasting-threejs-blocks/SKILL.md) | Raycaster, face normal → adjacent cell, ground plane, 4 traps |
+| [`bootstrapping-threejs-scene`](bootstrapping-threejs-scene/SKILL.md) | WebGLRenderer boot, the single coalescing frame loop, the sync-world/draw-camera split, ResizeObserver, teardown |
+| [`creating-threejs-cubes`](creating-threejs-cubes/SKILL.md) | the block **mesh**: one unlit material, BoxGeometry group order, NearestFilter, geometry cached per sprite proportion, preview/highlight helpers |
+| [`mapping-sprites-onto-cubes`](mapping-sprites-onto-cubes/SKILL.md) | what the mesh **shows**: one sprite stretched over three faces, the exact corner-to-corner UV, the cube yaw that follows the camera, the canonical view chosen by silhouette |
+| [`controlling-threejs-camera`](controlling-threejs-camera/SKILL.md) | the orbit target that pan moves, continuous damped zoom anchored on the cursor, discrete 90° turns, no OrbitControls |
+| [`raycasting-threejs-blocks`](raycasting-threejs-blocks/SKILL.md) | Raycaster, face normal → adjacent cell, ground plane, 6 traps |
+| [`casting-threejs-shadows`](casting-threejs-shadows/SKILL.md) | the light that only casts, the `ShadowMaterial` catcher, why cubes do not receive, `autoUpdate = false` |
+| [`simulating-editor-physics`](simulating-editor-physics/SKILL.md) | test mode: the rAF loop, refs over React state, the collision index, the two direction conversions, push-out |
+
+The split between the last four and the first three is deliberate. `creating-threejs-cubes` owns the
+**object**; `mapping-sprites-onto-cubes` owns the **image on it**. A task about art that looks sheared
+needs the second; a task about a cube that renders black needs the first. Loading only one of the
+pair is how a UV bug gets fixed by changing a material.
 
 ## Task — procedures with a pass/fail signal
 

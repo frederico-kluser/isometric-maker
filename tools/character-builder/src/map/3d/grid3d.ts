@@ -1,190 +1,216 @@
 /**
- * Grid do chão, plano de raycasting e piso visível para o editor 3D.
+ * O chão do editor 3D: quatro planos com quatro funções distintas.
  *
- * Três elementos:
- * 1. GridHelper — malha visual no plano Y=0 para orientação
- * 2. Plano invisível para raycasting — captura cliques no espaço vazio
- * 3. Piso visível (shadow plane) — recebe as sombras projetadas pelos cubos
+ * | Plano | Y | Material | Para quê |
+ * |---|---|---|---|
+ * | `floor` | −0,02 | `MeshBasicMaterial` escuro | dar fundo às sombras |
+ * | `catcher` | −0,005 | `ShadowMaterial` | **desenhar a sombra** |
+ * | `pick` | −0,01 | invisível | capturar clique no vazio |
+ * | `grid` | +0,001 | linhas | orientação por célula |
  *
- * O grid e os dois planos são redimensionados conforme o mapa cresce, para
- * que sempre haja superfície de clique ao redor do conteúdo e as sombras
- * nunca cortem na borda.
+ * ## Por que a sombra tem plano próprio
+ *
+ * `ShadowMaterial` desenha SÓ a sombra: onde a luz chega ele é totalmente
+ * transparente, onde não chega ele é preto com a opacidade escolhida. Isso
+ * separa a sombra da iluminação — e essa separação é o que permite os cubos
+ * serem `MeshBasicMaterial` (arte exata, sem sombreamento por cima, ver
+ * `cube3d.ts`) e ainda assim projetarem sombra visível no chão.
+ *
+ * A alternativa — piso `MeshStandardMaterial` com `receiveShadow` — amarra a
+ * intensidade da sombra à fotometria das luzes: mudar a luz muda o quanto a
+ * sombra escurece, e o resultado depende de constantes que só se acertam por
+ * tentativa na tela. Com `ShadowMaterial`, a opacidade É o escurecimento.
+ *
+ * ## Os Y minúsculos não são superstição
+ *
+ * Os quatro planos são paralelos e quase coincidentes; sem separação eles
+ * brigam por profundidade e o resultado cintila conforme a câmera se move. A
+ * ordem de empilhamento resolve isso e mais uma coisa: o `catcher` fica ABAIXO
+ * da base dos cubos (que é `y = 0`), então a sombra nunca aparece atravessando
+ * a base de um bloco.
  */
 import * as THREE from 'three';
 
+// ------------------------------------------------------------------ constantes
+
+const FLOOR_Y = -0.02;
+const CATCHER_Y = -0.005;
+const PICK_Y = -0.01;
+const GRID_Y = 0.001;
+
+/** Lado do plano na criação. O redimensionamento é por `scale`, não por geometria. */
+const BASE_SIZE = 10;
+
+/** Margem em células ao redor do conteúdo. */
+export const GRID_MARGIN = 4;
+
+/** Lado mínimo do chão, em células. Um mapa vazio ainda precisa de onde clicar. */
+const MIN_SIZE = 20;
+
+const FLOOR_COLOR = 0x141a2e;
+const GRID_COLOR = 0x94a3b8;
+const GRID_SUBCOLOR = 0x334155;
+
+/** Opacidade da sombra projetada. É literalmente o quanto o chão escurece. */
+const SHADOW_OPACITY = 0.42;
+
+// ------------------------------------------------------------------ tipos
+
+/** Retângulo ocupado pelo mapa, em células. */
+export interface MapBounds {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+/** Os quatro planos do chão, criados juntos porque mudam juntos. */
+export interface GroundRig {
+  grid: THREE.GridHelper;
+  readonly pick: THREE.Mesh;
+  readonly floor: THREE.Mesh;
+  readonly catcher: THREE.Mesh;
+  /** Extensão atual, para o frustum da sombra acompanhar. */
+  size: number;
+  centerX: number;
+  centerZ: number;
+}
+
 // ------------------------------------------------------------------ grid visual
 
-/**
- * Cria um grid no plano XZ (chão).
- *
- * O GridHelper padrão do Three.js desenha no plano XZ (normal Y).
- * Centralizado na origem, com `size` células de lado.
- */
-export function createGrid(size: number, divisions: number): THREE.GridHelper {
-  const grid = new THREE.GridHelper(size, divisions, 0x94a3b8, 0x334155);
-  grid.position.set(0.5, 0.001, 0.5); // meio-cubo: linhas nas arestas, não nos centros
+function makeGrid(size: number, divisions: number): THREE.GridHelper {
+  const grid = new THREE.GridHelper(size, divisions, GRID_COLOR, GRID_SUBCOLOR);
   grid.material.transparent = true;
-  grid.material.opacity = 0.35;
+  grid.material.opacity = 0.3;
   grid.material.depthTest = true;
   grid.material.depthWrite = false;
-  grid.renderOrder = 0;
+  grid.renderOrder = 2;
   return grid;
 }
 
-/**
- * Atualiza o grid para cobrir pelo menos a área ocupada + margem.
- *
- * Recria o GridHelper — o Three.js não expõe redimensionamento.
- */
-export function resizeGrid(
-  grid: THREE.GridHelper,
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-  margin: number,
-  scene: THREE.Scene,
-): THREE.GridHelper {
-  const size = Math.max(
-    maxX - minX + margin * 2,
-    maxZ - minZ + margin * 2,
-    10, // mínimo
+// ------------------------------------------------------------------ fábrica
+
+/** Cria os quatro planos e adiciona todos à cena. */
+export function createGroundRig(scene: THREE.Scene): GroundRig {
+  const grid = makeGrid(BASE_SIZE, BASE_SIZE);
+  grid.position.set(0.5, GRID_Y, 0.5); // meio-cubo: linhas nas arestas, não nos centros
+  scene.add(grid);
+
+  const planeGeom = new THREE.PlaneGeometry(BASE_SIZE, BASE_SIZE);
+
+  const pick = new THREE.Mesh(
+    planeGeom,
+    new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
   );
-  const centerX = (minX + maxX) / 2;
-  const centerZ = (minZ + maxZ) / 2;
+  pick.rotation.x = -Math.PI / 2;
+  pick.position.y = PICK_Y;
+  pick.name = 'ground-plane';
+  pick.renderOrder = -1;
+  scene.add(pick);
 
-  if (
-    Math.abs(grid.position.x - (centerX + 0.5)) < 0.1 &&
-    Math.abs(grid.position.z - (centerZ + 0.5)) < 0.1 &&
-    Math.abs(grid.scale.x - size / 10) < 0.1
-  ) {
-    return grid; // não mudou
-  }
-
-  scene.remove(grid);
-  grid.dispose();
-
-  const divisions = Math.max(Math.round(size), 10);
-  const newGrid = new THREE.GridHelper(size, divisions, 0x94a3b8, 0x334155);
-  newGrid.material.transparent = true;
-  newGrid.material.opacity = 0.35;
-  newGrid.material.depthTest = true;
-  newGrid.material.depthWrite = false;
-  newGrid.renderOrder = 0;
-  newGrid.position.set(centerX + 0.5, 0.001, centerZ + 0.5); // leve offset para evitar z-fight; +0.5 põe linhas nas arestas
-  scene.add(newGrid);
-  return newGrid;
-}
-
-// ------------------------------------------------------------------ plano de raycasting
-
-/**
- * Plano invisível no chão (Y=0) para capturar cliques no vazio.
- *
- * Sem este plano, clicar onde não há cubo não produz hit nenhum,
- * e o editor não sabe onde colocar o primeiro bloco.
- */
-export function createGroundPlane(size: number): THREE.Mesh {
-  const geom = new THREE.PlaneGeometry(size, size);
-  const mat = new THREE.MeshBasicMaterial({
-    visible: false, // invisível mas raycastable
-    side: THREE.DoubleSide,
-  });
-  const plane = new THREE.Mesh(geom, mat);
-  plane.rotation.x = -Math.PI / 2; // plano XZ
-  plane.position.y = -0.01; // levemente abaixo do chão
-  plane.name = 'ground-plane';
-  plane.renderOrder = -1;
-  return plane;
-}
-
-/**
- * Calcula tamanho e centro do piso a partir dos bounds ocupados do mapa.
- *
- * Compartilhado entre o ground plane (raycasting) e o shadow plane
- * (sombra): os dois cobrem exatamente a mesma área, para a sombra nunca
- * cortar onde o clique ainda funciona.
- */
-function computePlaneExtent(
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-  margin: number,
-): { size: number; centerX: number; centerZ: number } {
-  const size = Math.max(
-    maxX - minX + margin * 2,
-    maxZ - minZ + margin * 2,
-    20,
+  const floor = new THREE.Mesh(
+    planeGeom,
+    new THREE.MeshBasicMaterial({ color: FLOOR_COLOR }),
   );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = FLOOR_Y;
+  floor.name = 'ground-floor';
+  floor.renderOrder = 0;
+  scene.add(floor);
+
+  const catcher = new THREE.Mesh(
+    planeGeom,
+    new THREE.ShadowMaterial({
+      color: 0x000000,
+      opacity: SHADOW_OPACITY,
+      // Não escreve profundidade: o grid é desenhado depois e não pode ser
+      // ocultado por um plano que, onde não há sombra, é invisível.
+      depthWrite: false,
+    }),
+  );
+  catcher.rotation.x = -Math.PI / 2;
+  catcher.position.y = CATCHER_Y;
+  catcher.receiveShadow = true;
+  catcher.name = 'shadow-catcher';
+  catcher.renderOrder = 1;
+  scene.add(catcher);
+
   return {
-    size,
+    grid, pick, floor, catcher,
+    size: BASE_SIZE, centerX: 0, centerZ: 0,
+  };
+}
+
+// ------------------------------------------------------------------ redimensionamento
+
+/** Extensão e centro do chão para os bounds dados. */
+function extentOf(bounds: MapBounds): {
+  size: number;
+  centerX: number;
+  centerZ: number;
+} {
+  const { minX, maxX, minZ, maxZ } = bounds;
+  return {
+    size: Math.max(
+      maxX - minX + GRID_MARGIN * 2,
+      maxZ - minZ + GRID_MARGIN * 2,
+      MIN_SIZE,
+    ),
     centerX: (minX + maxX) / 2,
     centerZ: (minZ + maxZ) / 2,
   };
 }
 
 /**
- * Expande o plano de chão para cobrir a área do mapa.
+ * Ajusta os quatro planos para cobrir o mapa mais a margem.
+ *
+ * Devolve `true` quando algo mudou — o chamador usa isso para saber se o shadow
+ * map precisa ser refeito. Os três planos crescem por `scale`; só o
+ * `GridHelper` é recriado, porque o three.js não expõe redimensionamento dele e
+ * o número de divisões tem de acompanhar o lado para as linhas continuarem de
+ * uma célula.
  */
-export function resizeGroundPlane(
-  plane: THREE.Mesh,
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-  margin: number,
-): void {
-  const { size, centerX, centerZ } = computePlaneExtent(
-    minX, maxX, minZ, maxZ, margin,
-  );
-  plane.position.x = centerX;
-  plane.position.z = centerZ;
-  plane.scale.set(size / 10, size / 10, 1);
+export function resizeGroundRig(
+  rig: GroundRig,
+  bounds: MapBounds,
+  scene: THREE.Scene,
+): boolean {
+  const { size, centerX, centerZ } = extentOf(bounds);
+  if (
+    size === rig.size &&
+    Math.abs(centerX - rig.centerX) < 1e-6 &&
+    Math.abs(centerZ - rig.centerZ) < 1e-6
+  ) {
+    return false;
+  }
+
+  rig.size = size;
+  rig.centerX = centerX;
+  rig.centerZ = centerZ;
+
+  const scale = size / BASE_SIZE;
+  for (const plane of [rig.pick, rig.floor, rig.catcher]) {
+    plane.position.x = centerX;
+    plane.position.z = centerZ;
+    plane.scale.set(scale, scale, 1);
+  }
+
+  scene.remove(rig.grid);
+  rig.grid.dispose();
+  const grid = makeGrid(size, Math.max(Math.round(size), 2));
+  grid.position.set(centerX + 0.5, GRID_Y, centerZ + 0.5);
+  scene.add(grid);
+  rig.grid = grid;
+  return true;
 }
 
-// ------------------------------------------------------------------ piso visível (sombra)
-
-/**
- * Cria o piso VISÍVEL do editor (Y=0) que recebe as sombras dos cubos.
- *
- * O ground plane de raycasting é invisível por design; sem um piso visível
- * as sombras não teriam onde pousar. Material standard (e não basic) porque
- * o MeshBasicMaterial ignora o shadow map — ele é a única superfície que
- * precisa de `receiveShadow` além dos próprios cubos.
- */
-export function createShadowPlane(size: number): THREE.Mesh {
-  const geom = new THREE.PlaneGeometry(size, size);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x1a1a2e, // escuro — as sombras precisam de contraste para aparecer
-  });
-  const plane = new THREE.Mesh(geom, mat);
-  plane.rotation.x = -Math.PI / 2; // plano XZ
-  plane.position.y = 0; // nível do chão
-  plane.receiveShadow = true;
-  plane.renderOrder = -1; // desenha antes dos cubos
-  plane.name = 'shadow-plane';
-  return plane;
-}
-
-/**
- * Expande o piso de sombra para cobrir a área do mapa.
- *
- * Mesmos bounds do ground plane de raycasting — se o piso visível fosse
- * menor que a área clicável, a sombra cortaria em cima de terreno jogável.
- */
-export function updateGroundShadowPlane(
-  plane: THREE.Mesh,
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-  margin: number,
-): void {
-  const { size, centerX, centerZ } = computePlaneExtent(
-    minX, maxX, minZ, maxZ, margin,
-  );
-  plane.position.x = centerX;
-  plane.position.z = centerZ;
-  plane.scale.set(size / 10, size / 10, 1);
+/** Remove e libera tudo. A geometria dos planos é compartilhada pelos três. */
+export function disposeGroundRig(rig: GroundRig, scene: THREE.Scene): void {
+  scene.remove(rig.grid);
+  rig.grid.dispose();
+  for (const plane of [rig.pick, rig.floor, rig.catcher]) {
+    scene.remove(plane);
+    (plane.material as THREE.Material).dispose();
+  }
+  rig.pick.geometry.dispose();
 }

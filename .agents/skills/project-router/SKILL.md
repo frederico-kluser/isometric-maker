@@ -74,15 +74,18 @@ The usual mappings:
 | collision, walkability, steps, jumping, falling, deterministic replay | `simulating-isometric-physics` |
 | placing a piece, picking a cell, painting terrain, autotiling, exporting the map | `editing-isometric-maps` |
 | rotating the camera, more than one view of the map, "efeito 3D" | `rotating-isometric-camera` — and it is an **ADR**, not a ticket |
-| booting the 3D viewport, the light rig, resize, teardown | `bootstrapping-threejs-scene` |
-| block cubes, their faces, textures, materials | `creating-threejs-cubes` |
+| booting the 3D viewport, the frame loop, resize, teardown | `bootstrapping-threejs-scene` |
+| the block mesh — its material, its geometry, the preview and highlight | `creating-threejs-cubes` |
+| the art ON the block — the sprite, its UVs, "esticar a sprite nas três faces" | `mapping-sprites-onto-cubes` |
 | camera controls — pan, zoom, the 90° rotations | `controlling-threejs-camera` |
 | clicking a block, placing or removing with the mouse, picking a cell | `raycasting-threejs-blocks` |
+| shadows, the light rig, `shadowMap`, "a sombra sumiu" | `casting-threejs-shadows` |
+| test mode, the character loop, collision wiring in the editor | `simulating-editor-physics` |
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
 | **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate — for the map editor 3D, delegate to the Three.js skills instead |
-| **map editor 3D** — renderer, scene, camera, picking, the viewport | the Three.js family: `bootstrapping-threejs-scene`, `creating-threejs-cubes`, `controlling-threejs-camera`, `raycasting-threejs-blocks`; hand off, do not enumerate |
+| **map editor 3D** — renderer, scene, camera, picking, art, shadow, test mode | the Three.js family: `bootstrapping-threejs-scene`, `creating-threejs-cubes`, `mapping-sprites-onto-cubes`, `controlling-threejs-camera`, `raycasting-threejs-blocks`, `casting-threejs-shadows`, `simulating-editor-physics`; hand off, do not enumerate |
 | no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
 
 `routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in

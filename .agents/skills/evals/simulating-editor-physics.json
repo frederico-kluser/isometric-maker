@@ -1,0 +1,48 @@
+{
+  "skill": "simulating-editor-physics",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o personagem anda de lado depois de girar a camera", "should_trigger": true },
+    { "query": "modo teste do editor de mapa", "should_trigger": true },
+    { "query": "colocar bloco em cima do personagem", "should_trigger": true },
+    { "query": "o personagem atravessa a parede", "should_trigger": true },
+    { "query": "o pulo ficou errado na tela", "should_trigger": true },
+    { "query": "aplicar textura na face do cubo", "should_trigger": false },
+    { "query": "quanto custa animar um objeto", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "stepWithMap",
+      "why": "it is the only door with both collision and carried state; a second implementation is how the live path and the replay diverge"
+    },
+    {
+      "must_contain": "clamped delta",
+      "why": "an unclamped delta after a backgrounded tab processes hundreds of steps at once and the character crosses or falls through the map"
+    },
+    {
+      "must_contain": "refs, not in React state",
+      "why": "reconciling the tree 60 times a second for a value only the renderer consumes costs a whole frame for nothing"
+    },
+    {
+      "must_contain": "air inside a column is explicit",
+      "why": "an empty run means empty, not solid; treating '' as a block makes the character walk on air"
+    },
+    {
+      "must_contain": "opposite directions",
+      "why": "key-to-world and world-to-screen are two different conversions, and confusing them is the classic defect here"
+    },
+    {
+      "must_contain": "never a level",
+      "why": "the jump parabola is decoration; if it reached the model's z it would decide what the character can stand on"
+    },
+    {
+      "must_contain": "without** the jump offset",
+      "why": "reusing the sprite's Y lifts the shadow with the character, which is the one thing a ground shadow may not do"
+    },
+    {
+      "must_contain": "push",
+      "why": "placing a block on the character must never leave them inside stone"
+    }
+  ],
+  "check_provenance": true
+}

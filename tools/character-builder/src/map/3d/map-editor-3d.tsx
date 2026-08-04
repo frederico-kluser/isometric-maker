@@ -79,10 +79,10 @@ import {
 } from './pick3d-raycaster.ts';
 import {
   createIsoScene3D,
-  collectBlockMeshes,
   spawnParticles,
   type IsoScene3D,
 } from './scene3d.ts';
+import { canonicalSpriteUrl } from './cube3d.ts';
 import type { BlockDef } from './block-def.ts';
 import {
   canRedo,
@@ -115,8 +115,44 @@ import { ToastStack, Toast } from '@/components/motion-ui/toast-stack';
 import { useMessages } from '../editor/toast-messages.ts';
 import { editor as T } from '../strings.ts';
 
-const ZOOM_STEPS = [1, 2, 3, 4] as const;
 const ROTATIONS = [0, 1, 2, 3] as const;
+
+/**
+ * Quanto um clique no botão de zoom multiplica o zoom.
+ *
+ * Multiplicativo, e não aditivo, pelo mesmo motivo da roda: passo fixo é enorme
+ * perto do mínimo e imperceptível perto do máximo.
+ */
+const ZOOM_BUTTON_FACTOR = 1.35;
+
+/**
+ * Duas leituras de picking são iguais?
+ *
+ * Existe para NÃO chamar `setPickState` a cada `pointermove`. O ponteiro
+ * dispara dezenas de eventos por segundo, e quase todos caem na mesma célula;
+ * sem esta comparação cada um deles reconciliava a árvore React inteira e
+ * disparava um desenho. Comparar três inteiros é o que separa "o editor
+ * engasga ao mover o mouse" de "o editor não faz nada quando nada mudou".
+ */
+function samePick(a: Pick3DResult | null, b: Pick3DResult | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.hitFace !== b.hitFace) return false;
+  if (
+    a.placement.x !== b.placement.x ||
+    a.placement.y !== b.placement.y ||
+    a.placement.z !== b.placement.z
+  ) {
+    return false;
+  }
+  if (a.hit === null || b.hit === null) return a.hit === b.hit;
+  return (
+    a.hit.x === b.hit.x &&
+    a.hit.y === b.hit.y &&
+    a.hit.z === b.hit.z &&
+    a.hit.block === b.hit.block
+  );
+}
 
 const TOOLS = ['empilhar', 'colocar', 'pintar', 'remover'] as const;
 type Tool = (typeof TOOLS)[number];
@@ -226,7 +262,12 @@ export function MapEditor3D() {
       }
       scene3d = created;
       scene3dRef.current = created;
+      // A HUD do zoom acompanha a cena, não o contrário: a roda escreve no
+      // alvo de zoom da câmera imediatamente e só depois avisa o React. Assim
+      // um giro de roda nunca espera por uma reconciliação para aparecer.
+      created.onZoomChange(setZoom);
       created.resize(host.clientWidth, host.clientHeight);
+      setZoom(created.zoomTarget());
       setReady(true);
     });
 
@@ -307,7 +348,9 @@ export function MapEditor3D() {
       const canvas = canvasRef.current;
       const s3d = scene3dRef.current;
       if (!canvas || !s3d) return null;
-      const meshes = collectBlockMeshes(s3d.scene);
+      // A lista vem mantida pela cena; varrer o grafo por movimento de
+      // ponteiro era custo puro.
+      const meshes = s3d.blockMeshes();
       const s = stateRef.current;
 
       if (s.tool === 'empilhar') {
@@ -414,7 +457,7 @@ export function MapEditor3D() {
       // No modo teste o ponteiro não edita — só o pan (já tratado acima).
       if (stateRef.current.mode === 'testar') return;
       const result = pickAt(e.clientX, e.clientY);
-      setPickState(result);
+      setPickState((prev) => (samePick(prev, result) ? prev : result));
       if (dragging.current && result) applyTool(result);
     },
     [applyTool, pickAt],
@@ -454,30 +497,27 @@ export function MapEditor3D() {
     [],
   );
 
-  // Throttle do wheel: no máximo um passo a cada 80 ms (~12.5 passos/s).
-  // O evento de scroll dispara dezenas de vezes por segundo; sem throttle
-  // cada disparo causa re-render do React, saturando o ciclo.
-  const lastWheelTime = useRef(0);
-
+  /**
+   * Roda do mouse → zoom.
+   *
+   * Sem throttle e sem degraus. O que havia antes era um throttle de 80 ms
+   * sobre quatro passos inteiros, e o passo só aparecia na tela no
+   * `pointermove` seguinte, porque `zoom()` mudava a matriz e não desenhava.
+   * Agora cada evento empurra o ALVO de zoom; a cena persegue esse alvo com
+   * amortecimento no seu próprio quadro. Eventos demais num quadro só deixam o
+   * alvo mais longe — nunca enfileiram desenhos.
+   *
+   * `deltaMode` importa: Firefox manda `deltaY` em LINHAS (modo 1) e não em
+   * pixels, e sem a conversão a roda ficaria ~16× mais lenta lá.
+   */
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    const now = performance.now();
-    if (now - lastWheelTime.current < 80) return;
-    lastWheelTime.current = now;
-
     const s3d = scene3dRef.current;
-    const currentZoom = stateRef.current.zoom;
-    const i = ZOOM_STEPS.indexOf(currentZoom as (typeof ZOOM_STEPS)[number]);
-    const delta = e.deltaY < 0 ? 1 : -1;
-    const next =
-      ZOOM_STEPS[
-        Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + delta))
-      ];
-    if (next === undefined || next === currentZoom) return;
-
-    // Aplica na câmera imediatamente (responsivo)
-    s3d?.zoom(next);
-    // Atualiza React para o badge
-    setZoom(next);
+    if (!s3d) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
+    s3d.wheelZoom(e.deltaY * scale, ndcX, ndcY);
   }, []);
 
   // ---------------------------------------------------------------- rotação
@@ -488,18 +528,10 @@ export function MapEditor3D() {
     scene3dRef.current?.animateRotation(rot);
   }, []);
 
-  const zoomBy = useCallback((delta: number) => {
-    setZoom((z) => {
-      const i = ZOOM_STEPS.indexOf(z as (typeof ZOOM_STEPS)[number]);
-      const next =
-        ZOOM_STEPS[
-          Math.min(ZOOM_STEPS.length - 1, Math.max(0, i + delta))
-        ];
-      if (next === undefined) return z;
-      const s3d = scene3dRef.current;
-      if (s3d) s3d.zoom(next);
-      return next;
-    });
+  const zoomBy = useCallback((direction: 1 | -1) => {
+    scene3dRef.current?.zoomByFactor(
+      direction > 0 ? ZOOM_BUTTON_FACTOR : 1 / ZOOM_BUTTON_FACTOR,
+    );
   }, []);
 
   // ---------------------------------------------------------------- modo teste
@@ -878,7 +910,7 @@ export function MapEditor3D() {
           <Button variant="ghost" size="sm" onClick={() => zoomBy(-1)} aria-label={T.camera.diminuir}>
             <ZoomOutIcon className="size-4" />
           </Button>
-          <Badge variant="outline">{zoom}×</Badge>
+          <Badge variant="outline">{zoom.toFixed(1)}×</Badge>
           <Button variant="ghost" size="sm" onClick={() => zoomBy(1)} aria-label={T.camera.aumentar}>
             <ZoomInIcon className="size-4" />
           </Button>
@@ -1009,11 +1041,19 @@ export function MapEditor3D() {
 
 function BlockThumb({ b }: { b: BlockDef }) {
   const [failed, setFailed] = useState(false);
-  const src =
-    b.faceUrls?.north ??
-    (b.animated === false || b.frameCount === 0
-      ? (b.baseUrl ?? (b.hash ? `/world-blocks/${b.hash}/base.png` : ''))
-      : (b.hash ? `/world-blocks/${b.hash}/frames/frame_000.png` : ''));
+  // A miniatura mostra a MESMA sprite que o cubo vai mostrar. Adivinhar a URL
+  // aqui foi o que fazia bloco de várias vistas aparecer como quadrado colorido
+  // na paleta e como arte no mapa.
+  const [src, setSrc] = useState<string>('');
+  useEffect(() => {
+    let alive = true;
+    void canonicalSpriteUrl(b).then((url) => {
+      if (alive && url) setSrc(url);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [b]);
   if (failed || !src) {
     return (
       <span

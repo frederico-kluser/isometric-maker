@@ -738,7 +738,41 @@ interface WorldBlockManifestV3 {
   };
 }
 
-type WorldBlockManifest = WorldBlockManifestV2 | WorldBlockManifestV3;
+/**
+ * Técnicas v3 que gravaram VISTAS numeradas em disco.
+ *
+ * Nenhum código atual as produz — o gerador que as escreveu não existe mais no
+ * repositório. Elas estão declaradas porque seis blocos PAGOS existem assim em
+ * `assets/world-blocks/`, e um catálogo que não os reconhece transforma arte
+ * comprada em arquivo morto. Ler o disco é sempre mais barato que regerar.
+ */
+const VIEW_TECHNIQUES = ['rotate8-mould', 'rotate8-prompt'] as const;
+type ViewTechnique = (typeof VIEW_TECHNIQUES)[number];
+
+/**
+ * Manifesto v3 com vistas numeradas (`view-0.png` … `view-7.png`).
+ *
+ * O campo que importa é o que ele NÃO garante: `frameKeying` vale
+ * `"assumed-canonical-order"`, ou seja, ninguém verificou qual índice é a
+ * vista isométrica de três faces. Por isso o catálogo entrega a lista inteira e
+ * a escolha é medida no editor, não assumida aqui.
+ */
+interface WorldBlockManifestV3Views {
+  readonly version: 3;
+  readonly hash: string;
+  readonly technique: ViewTechnique;
+  readonly description: string;
+  readonly geometry?: ManifestGeometry;
+  /** Quantas vistas foram gravadas. */
+  readonly views?: number;
+  /** Rótulos das vistas, na ordem ASSUMIDA. Informativo, não confiável. */
+  readonly view8Mapping?: string;
+}
+
+type WorldBlockManifest =
+  | WorldBlockManifestV2
+  | WorldBlockManifestV3
+  | WorldBlockManifestV3Views;
 
 async function readManifestFile(
   assetsDir: string,
@@ -809,12 +843,23 @@ export async function readWorldBlockResult(
   return null;
 }
 
+/**
+ * Como o catálogo classifica o que achou em disco.
+ *
+ * Não é o enum de GERAÇÃO (`BLOCK_TECHNIQUES`): aquele valida o que o POST
+ * aceita produzir, e nada mais pode ser adicionado a ele sem uma ADR. `'views'`
+ * descreve arte que EXISTE em disco, gravada por um gerador anterior, com
+ * várias vistas numeradas e nenhuma delas declarada canônica. Misturar os dois
+ * enums criaria uma técnica que o servidor lista mas não sabe gerar.
+ */
+export type CatalogTechnique = BlockTechnique | 'views';
+
 /** Uma entrada do catálogo lido por GET /api/world-blocks. */
 export interface WorldBlockSummary {
   readonly hash: string;
   readonly description: string;
   readonly shape: TileShape;
-  readonly technique: BlockTechnique;
+  readonly technique: CatalogTechnique;
   /** Projeção em que o bloco está desenhado. */
   readonly geometry: ManifestGeometry;
   /** Face → caminho público (v2: 4 faces). Ausente em v3 (texture). */
@@ -833,6 +878,46 @@ export interface WorldBlockSummary {
   readonly frameCount?: number;
   /** FPS da animação (v3: texture animada). */
   readonly fps?: number;
+  /**
+   * Vistas gravadas em disco, quando há mais de uma e nenhuma é declarada
+   * canônica (`technique: 'views'`).
+   *
+   * É uma LISTA, e não uma URL, de propósito: o manifesto desses blocos grava
+   * `frameKeying: "assumed-canonical-order"` — a ordem das vistas é assumida e
+   * nunca foi verificada. Quem escolhe é o editor, medindo a silhueta de cada
+   * candidata contra a forma canônica do cubo. Entregar aqui um índice
+   * adivinhado seria transformar uma incerteza declarada num número que parece
+   * certeza.
+   */
+  readonly spriteUrls?: readonly string[];
+}
+
+/**
+ * Vistas numeradas de um bloco em disco (`view-0.png`, `view-1.png`, …).
+ *
+ * Blocos gravados por gerações anteriores usam esse formato. Nenhum código
+ * atual o PRODUZ — mas seis blocos pagos existem assim em disco, e enquanto o
+ * catálogo não os reconhecia eles simplesmente não apareciam na paleta. Ler o
+ * que já foi pago é sempre mais barato que regerar.
+ *
+ * Ordena por número, não por nome: `view-10` vem depois de `view-9`.
+ */
+async function readViewUrls(
+  assetsDir: string,
+  hash: string,
+): Promise<readonly string[]> {
+  const dir = blockDir(assetsDir, hash);
+  if (!existsSync(dir)) return [];
+  try {
+    const files = await readdir(dir);
+    return files
+      .map((name) => /^view-(\d+)\.png$/.exec(name))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .sort((a, b) => Number(a[1]) - Number(b[1]))
+      .map((m) => `/world-blocks/${hash}/${m[0]}`);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -870,6 +955,13 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
           animated: true,
           spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
           animationUrl: `/world-blocks/${hash}/animation.json`,
+          // O cubo base existe mesmo quando há animação, e é ELE que o editor
+          // 3D usa como sprite do bloco — a spritesheet é uma textura plana de
+          // 48×48 por quadro, que não descreve o volume. Declarar a URL aqui
+          // evita que o cliente a adivinhe a partir do hash.
+          ...(existsSync(baseImagePath(assetsDir, hash))
+            ? { baseUrl: `/world-blocks/${hash}/base.png` }
+            : {}),
           frameCount: manifest.frameCount,
           fps: manifest.fps,
           pingPong: manifest.pingPong ?? true,
@@ -888,6 +980,23 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
           frameCount: 0,
         });
       }
+      continue;
+    }
+
+    if (manifest.version === 3) {
+      // v3 que NÃO é 'texture': arte de um gerador anterior, gravada como
+      // vistas numeradas. Entra no catálogo como 'views' — a paleta mostra, o
+      // editor escolhe a vista canônica medindo a silhueta.
+      const spriteUrls = await readViewUrls(assetsDir, hash);
+      if (spriteUrls.length === 0) continue;
+      out.push({
+        hash,
+        description: manifest.description,
+        shape: 'block',
+        technique: 'views',
+        geometry: manifest.geometry ?? MANIFEST_GEOMETRY,
+        spriteUrls,
+      });
       continue;
     }
 

@@ -1,419 +1,360 @@
 /**
  * Fábrica de cubos 3D para o editor Three.js.
  *
- * Cria meshes de BoxGeometry com texturas por face a partir dos BlockDefs da
- * paleta. Blocos sem arte gerada caem no cubo procedural — mesma rasterização
- * do iso-core, via canvas 2D →纹理 Three.js.
+ * **Uma sprite por bloco. A mesma, esticada sobre as três faces visíveis.**
  *
- * ## Mapeamento de faces
+ * Não há textura por face, não há quatro vistas, não há recorte da arte em três
+ * imagens. O bloco tem UMA sprite isométrica — a mesma que o editor 2D
+ * desenharia inteira na célula — e o `BoxGeometry` recebe UVs que fazem cada
+ * face samplear a região da sprite que lhe corresponde: o losango do topo na
+ * face +Y, o paralelogramo esquerdo em +Z, o direito em +X.
  *
- * O BlockDef tem `faceUrls` com as 4 direções cardinais (north/east/south/west).
- * No Three.js com Y-up e câmera isométrica (45° yaw), as faces visíveis são:
- *   - top (Y+) — topo do cubo
- *   - front (Z+) — visível quando a câmera está ao sul
- *   - right (X+) — visível quando a câmera está a leste
+ * ## Por que isso reproduz a arte, e não uma versão dela
  *
- * A textura "north" do BlockDef (vista norte da câmera antiga) corresponde à
- * face frontal (Z+) no Three.js na rotação 0. Conforme a câmera gira, as
- * texturas são remapeadas.
+ * A câmera é ortográfica com yaw 45° e elevação 30°, que é exatamente a
+ * projeção 2:1 em que a sprite foi desenhada (a derivação está em
+ * `packages/iso-core/src/iso-cube-uv.ts`). Cada face do cubo projeta num
+ * paralelogramo, e paralelogramo é imagem afim de quadrado — o mapeamento
+ * canto-a-canto é exato nos dois triângulos do quad, sem cisalhamento e sem
+ * costura na diagonal.
  *
- * ## Material por face
+ * ## As faces escondidas não existem para o olho
  *
- * BoxGeometry tem 6 grupos (um por face: +X, -X, +Y, -Y, +Z, -Z). Passamos um
- * array de 6 materiais para Mesh. Cada material pode ter `map` (textura) ou
- * `color` (cor sólida procedural).
+ * O mesh gira junto com a câmera (`scene3d.ts`, `applyCubeYaw`): o cubo é
+ * simétrico sob 90° em Y, então girá-lo com a câmera devolve o cubo ao mesmo
+ * lugar no mundo e mantém +X, +Y e +Z sempre de frente. −X, −Y e −Z nunca
+ * aparecem, em nenhuma das quatro vistas nem durante o giro animado. Elas
+ * recebem UV pela mesma fórmula (espelhado), o que é irrelevante e mais barato
+ * que ramificar.
  *
- * Blocos com `faceUrls` usam a sprite "north" inteira como textura nas três
- * faces visíveis, com a geometria clonada e UVs remapeados por face
- * (`createSpriteGeometry`) — cada face mostra a região da sprite que lhe
- * corresponde, em vez de repetir a sprite inteira.
+ * ## Sem iluminação nas faces, por decisão
+ *
+ * `MeshBasicMaterial`, não `MeshLambertMaterial`. A pixel art já tem o
+ * sombreamento assado — topo claro, direita média, esquerda escura, a convenção
+ * que `packages/iso-core/src/cube-raster.ts` declara como "a luz é presa à
+ * CÂMERA". Iluminar por cima disso escurece a arte duas vezes e, pior, faz a
+ * mesma peça mudar de cor ao girar a câmera, que se lê como bug. A sombra
+ * projetada continua existindo — ela cai no CHÃO, ver `grid3d.ts`.
  */
 import * as THREE from 'three';
 import {
   CANONICAL_CUBE,
+  silhouetteMatch,
   type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
-import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from './cube-canvas.ts';
+import {
+  cornerOfLocalPosition,
+  cornerSpriteUv,
+  spriteGeometryFromImage,
+  spriteStretchError,
+} from '../../../../../packages/iso-core/src/iso-cube-uv.ts';
+import { makeCubeViewsFromHue } from './cube-canvas.ts';
 import type { BlockDef } from './block-def.ts';
-import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts';
 
 // ------------------------------------------------------------------ constantes
 
 /** Tamanho do cubo em world units. 1 = 1 tile de lado. */
 const CUBE_SIZE = 1;
 
-/** BoxGeometry compartilhada — mesma forma para todos os cubos. */
-const sharedBox = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+/**
+ * Alfa mínimo para o pixel ser desenhado.
+ *
+ * `alphaTest` em vez de `transparent`: a arte gerada nem sempre preenche a
+ * silhueta inteira, e sem recorte o pixel vazio apareceria como borda preta.
+ * Com `transparent: false` o cubo continua no passe opaco — sem ordenação por
+ * profundidade e sem o custo de blend.
+ */
+const ALPHA_TEST = 0.5;
 
-// ------------------------------------------------------------------ textura procedural
+/** Matiz do bloco sem arte nem matiz declarado. Cinza-azulado neutro. */
+const DEFAULT_HUE = 210;
+
+// ------------------------------------------------------------------ geometria com UV de sprite
 
 /**
- * Converte um HTMLCanvasElement em textura Three.js.
+ * Cache das geometrias por proporção de sprite.
  *
- * pixel art → nearest filtering, sem mipmaps. O canvas vem do rasterizador
- * do iso-core (`makeCubeCanvasFromHue`), que desenha em pixel art.
+ * A chave é `largura×altura` da imagem: dois blocos com sprites do mesmo
+ * tamanho compartilham a geometria inteira, porque o UV depende só da
+ * proporção — não da arte.
  */
-function canvasTexture(canvas: HTMLCanvasElement): THREE.Texture {
-  const tex = new THREE.CanvasTexture(canvas);
+const geometryCache = new Map<string, THREE.BoxGeometry>();
+
+/**
+ * `BoxGeometry(1,1,1)` com o UV reescrito para a sprite isométrica.
+ *
+ * O UV de cada vértice sai da POSIÇÃO dele, não do UV default do `BoxGeometry`.
+ * Isso importa: o UV default depende da ordem em que o three.js emite os
+ * vértices de cada face, que é detalhe interno da biblioteca; a posição é a
+ * geometria. Um vértice em (+0.5, +0.5, +0.5) é o canto da frente do topo em
+ * qualquer versão, e é lá que fica o vinco entre as duas laterais da sprite.
+ *
+ * Os 24 vértices (4 por face, não compartilhados) são percorridos uma vez. Os
+ * três vértices que ocupam o mesmo canto — um por face vizinha — recebem o
+ * MESMO UV, porque as três faces se encontram num único pixel da sprite. É essa
+ * coincidência que faz as arestas do cubo casarem com as arestas desenhadas.
+ */
+function spriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
+  const key = `${geom.spriteWidth}x${geom.spriteHeight}`;
+  const cached = geometryCache.get(key);
+  if (cached) return cached;
+
+  const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+  const position = geo.getAttribute('position');
+  const uv = geo.getAttribute('uv');
+  for (let i = 0; i < position.count; i += 1) {
+    const corner = cornerOfLocalPosition(
+      position.getX(i),
+      position.getY(i),
+      position.getZ(i),
+    );
+    const { u, v } = cornerSpriteUv(corner, geom);
+    uv.setXY(i, u, v);
+  }
+  uv.needsUpdate = true;
+
+  geometryCache.set(key, geo);
+  return geo;
+}
+
+// ------------------------------------------------------------------ texturas
+
+/** Configuração de textura para pixel art: nada de suavização, nada de mipmap. */
+function asPixelArt(tex: THREE.Texture): THREE.Texture {
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.generateMipmaps = false;
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
   return tex;
 }
 
-/** Cache de texturas procedurais por matiz. */
-const proceduralCache = new Map<string, THREE.Texture[]>();
+/** Cache de imagens por URL — a mesma sprite serve vários blocos. */
+const imageLoads = new Map<string, Promise<HTMLImageElement | null>>();
 
 /**
- * Texturas procedurais para um bloco (4 vistas).
- *
- * Cada vista é um canvas diferente — mesmo tom, grão diferente por direção.
+ * Carrega uma imagem. Devolve `null` em vez de rejeitar: uma sprite que não
+ * carrega é um bloco procedural, não um editor quebrado.
  */
-function proceduralTextures(hue: number): THREE.Texture[] {
-  const key = `hue:${hue}`;
-  const cached = proceduralCache.get(key);
+function loadImage(url: string): Promise<HTMLImageElement | null> {
+  const cached = imageLoads.get(url);
   if (cached) return cached;
-  const views = makeCubeViewsFromHue(hue, CANONICAL_CUBE);
-  const textures = views.map((c) => canvasTexture(c));
-  proceduralCache.set(key, textures);
-  return textures;
-}
-
-// ------------------------------------------------------------------ mapeamento de faces
-
-/**
- * Índices dos grupos de material no BoxGeometry do Three.js.
- *
- * Ordem do BoxGeometry: +X (right), -X (left), +Y (top), -Y (bottom),
- * +Z (front), -Z (back).
- */
-const BOX_GROUP = {
-  right: 0,  // +X
-  left: 1,   // -X
-  top: 2,    // +Y
-  bottom: 3, // -Y
-  front: 4,  // +Z
-  back: 5,   // -Z
-} as const;
-
-/**
- * Mapeia as 4 direções cardinais do BlockDef para faces do cubo 3D,
- * dado o rotation da câmera.
- *
- * Na rotação 0 (câmera ao sul):
- *   - "north" (face norte do sprite isométrico) → front (+Z)
- *   - "east" → right (+X)
- *   - "south" → back (-Z)
- *   - "west" → left (-X)
- *
- * Conforme a câmera gira, as faces rodam junto.
- */
-const FACE_ORDER: readonly string[] = ['north', 'east', 'south', 'west'];
-
-export function blockFaceToBoxGroup(
-  facing: string,
-  rotation: Rotation,
-): number {
-  const baseIdx = FACE_ORDER.indexOf(facing);
-  if (baseIdx === -1) return BOX_GROUP.top; // fallback: topo
-  // Girar a face: (baseIdx - rotation) mod 4
-  const rotated = ((baseIdx - rotation) % 4 + 4) % 4;
-  const groupOrder = [BOX_GROUP.front, BOX_GROUP.right, BOX_GROUP.back, BOX_GROUP.left];
-  return groupOrder[rotated]!;
-}
-
-// ------------------------------------------------------------------ UVs do sprite
-
-/**
- * Limites do retângulo de textura do sprite isométrico no UV do BoxGeometry.
- *
- * O sprite (canônico 48×53) empilha as três faces do cubo: o losango do topo
- * ocupa as primeiras `tileHeight` linhas, e as laterais ficam abaixo — a
- * metade esquerda é a face SW (→ +Z) e a metade direita a face SE (→ +X),
- * com o vinco entre elas na coluna `tileWidth / 2`.
- *
- * Orientação do UV do BoxGeometry no three 0.185 (confirmada no source):
- * `v = 1 − iy/gridY`, ou seja, v=1 no topo de cada face e v=0 embaixo; u não
- * inverte. Com flipY=true (default do TextureLoader), v=1 é a linha 0 da
- * imagem e v=0 a última linha. Daí os limites:
- *   - `uFold` — coluna do vinco em u: meia largura sobre a largura do sprite
- *     ((48/2)/48 = 0.5);
- *   - `vRoofBottom` — v da base do losango do topo, a linha `tileHeight` da
- *     imagem (1 − 24/53 = 29/53 ≈ 0.5472).
- *
- * O vinco fica na aresta onde +X encontra +Z (a aresta frontal do cubo), e a
- * base do losango na aresta frontal do topo — por isso as laterais sobem de
- * v=0 (embaixo do cubo) até `vRoofBottom`, e o topo desce de v=1 (atrás)
- * até `vRoofBottom` (frente).
- */
-const SPRITE_UV = {
-  uFold: (CANONICAL_CUBE.tileWidth / 2) / CANONICAL_CUBE.spriteWidth,
-  vRoofBottom: 1 - CANONICAL_CUBE.tileHeight / CANONICAL_CUBE.spriteHeight,
-} as const;
-
-/** Cache da geometria com UV de sprite, por geometria canônica. */
-const spriteGeometryCache = new Map<IsoCubeGeometry, THREE.BoxGeometry>();
-
-/**
- * Reescreve o UV dos vértices de um grupo de material (uma face).
- *
- * O BoxGeometry é indexado: cada grupo aponta 6 índices (2 triângulos) que
- * referenciam 4 vértices do buffer de position/uv. O UV default de cada face
- * é o quadrado [0,1]² — remapear os cantos basta.
- */
-function remapFaceUv(
-  geo: THREE.BoxGeometry,
-  materialIndex: number,
-  remap: (u: number, v: number) => readonly [number, number],
-): void {
-  const index = geo.index;
-  const uv = geo.getAttribute('uv');
-  if (index === null || uv === undefined) return;
-  const group = geo.groups.find((g) => g.materialIndex === materialIndex);
-  if (!group) return;
-  // Cada face tem 4 vértices únicos — os 2 triângulos compartilham a
-  // diagonal. Remapear um canto duas vezes dobraria a transformação.
-  const remapped = new Set<number>();
-  for (let i = group.start; i < group.start + group.count; i++) {
-    const vi = index.getX(i);
-    if (remapped.has(vi)) continue;
-    remapped.add(vi);
-    const [nu, nv] = remap(uv.getX(vi), uv.getY(vi));
-    uv.setXY(vi, nu, nv);
-  }
-}
-
-/**
- * BoxGeometry clonada com os UVs remapeados para as 3 faces do sprite.
- *
- * Clona a `sharedBox` (nunca muta a geometria compartilhada) e reescreve o UV
- * de +X, +Y e +Z para cada face samplear a região certa da sprite inteira:
- *   - +X (direita): metade direita (colunas uFold..1), na faixa das laterais;
- *   - +Z (frente): metade esquerda (colunas 0..uFold), na faixa das laterais;
- *   - +Y (topo): as primeiras `tileHeight` linhas (v vRoofBottom..1).
- * As faces ocultas (−X, −Y, −Z) ficam com o UV default — recebem cor sólida.
- */
-function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
-  const cached = spriteGeometryCache.get(geom);
-  if (cached) return cached;
-  const { uFold, vRoofBottom } = SPRITE_UV;
-  const geo = sharedBox.clone();
-  // +X: u vai do vinco (0.5) à borda direita; v sobe das laterais ao topo.
-  remapFaceUv(geo, BOX_GROUP.right, (u, v) => [
-    uFold + u * (1 - uFold),
-    v * vRoofBottom,
-  ]);
-  // +Y: u inteiro; v vai do vinco do losango (vRoofBottom) ao topo da imagem.
-  remapFaceUv(geo, BOX_GROUP.top, (u, v) => [
-    u,
-    vRoofBottom + v * (1 - vRoofBottom),
-  ]);
-  // +Z: u vai da borda esquerda ao vinco; v igual ao +X.
-  remapFaceUv(geo, BOX_GROUP.front, (u, v) => [
-    u * uFold,
-    v * vRoofBottom,
-  ]);
-  spriteGeometryCache.set(geom, geo);
-  return geo;
-}
-
-// ------------------------------------------------------------------ criação de materiais
-
-export interface CubeMaterials {
-  readonly materials: readonly THREE.Material[];
-  /** true se alguma face tem textura (não é só cor procedural). */
-  readonly hasTexture: boolean;
-  /**
-   * Geometria com UVs remapeados para a sprite (faceUrls). Ausente →
-   * `createCubeMesh` usa a BoxGeometry compartilhada.
-   */
-  readonly geometry?: THREE.BoxGeometry | undefined;
-}
-
-const loader = new THREE.TextureLoader();
-// pixel art — config antes de carregar
-loader.crossOrigin = 'anonymous';
-
-/** Textura em carregamento: URL → promise de THREE.Texture. */
-const textureLoads = new Map<string, Promise<THREE.Texture>>();
-
-function loadTexture(url: string): Promise<THREE.Texture> {
-  const cached = textureLoads.get(url);
-  if (cached) return cached;
-  const promise = new Promise<THREE.Texture>((resolve) => {
-    loader.load(
-      url,
-      (tex: THREE.Texture) => {
-        tex.magFilter = THREE.NearestFilter;
-        tex.minFilter = THREE.NearestFilter;
-        tex.generateMipmaps = false;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        resolve(tex);
-      },
-      undefined,
-      () => resolve(fallbackColorTexture(210)), // falha → cinza
-    );
+  const promise = new Promise<HTMLImageElement | null>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
   });
-  textureLoads.set(url, promise);
+  imageLoads.set(url, promise);
   return promise;
 }
 
-/** Cor de fallback procedural quando a textura falha. */
-function fallbackColorTexture(hue: number): THREE.Texture {
-  const views = proceduralTextures(hue);
-  return views[0]!; // usa a vista 0 como fallback
+// ------------------------------------------------------------------ escolha da vista canônica
+
+/** Canal alfa de uma imagem, linha a linha. `null` se o canvas não abrir. */
+function alphaOf(img: HTMLImageElement): Uint8Array | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (ctx === null) return null;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const alpha = new Uint8Array(canvas.width * canvas.height);
+  for (let i = 0; i < alpha.length; i += 1) alpha[i] = data[i * 4 + 3] ?? 0;
+  return alpha;
 }
 
-// ------------------------------------------------------------------ materiais com sprite único
+/**
+ * Escolhe, entre várias candidatas, a que É um cubo isométrico de três faces.
+ *
+ * Os blocos gerados por `/rotate` gravam oito vistas e declaram no manifesto
+ * `frameKeying: "assumed-canonical-order"` — ninguém verificou qual índice é a
+ * vista de três faces. Quatro delas são a vista de quina (o cubo de frente,
+ * duas faces), e usar uma dessas como sprite pinta o bloco com a arte errada,
+ * esticada sobre uma geometria que ela não descreve.
+ *
+ * A escolha é MEDIDA, não assumida: `silhouetteMatch` compara o alfa de cada
+ * candidata com a silhueta que `faceAtPixel` define, e a de maior score vence.
+ * Na arte deste repositório a vencedora é a `view-7` em 5 dos 6 blocos — o que
+ * confirma que a ordem assumida (`view-0` primeiro) estava errada.
+ *
+ * Com uma candidata só, nem abre canvas: não há o que comparar.
+ */
+async function pickCanonicalSprite(
+  urls: readonly string[],
+): Promise<{ url: string; image: HTMLImageElement } | null> {
+  const loaded = (
+    await Promise.all(
+      urls.map(async (url) => {
+        const image = await loadImage(url);
+        return image ? { url, image } : null;
+      }),
+    )
+  ).filter((c): c is { url: string; image: HTMLImageElement } => c !== null);
+  if (loaded.length === 0) return null;
+  if (loaded.length === 1) return loaded[0]!;
+
+  let best: { url: string; image: HTMLImageElement } | null = null;
+  let bestScore = -Infinity;
+  for (const candidate of loaded) {
+    const { image } = candidate;
+    const geom = spriteGeometryFromImage(image.naturalWidth, image.naturalHeight);
+    if (!geom) continue;
+    const alpha = alphaOf(image);
+    if (!alpha) continue;
+    const { score } = silhouetteMatch(
+      alpha,
+      image.naturalWidth,
+      image.naturalHeight,
+      geom,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best ?? loaded[0]!;
+}
+
+/** Memoriza a escolha por bloco — a miniatura e o cubo têm de concordar. */
+const chosenSprite = new Map<string, Promise<string | null>>();
 
 /**
- * Materiais com UMA textura (a sprite inteira) nas 3 faces visíveis.
+ * A URL da sprite que o cubo deste bloco vai mostrar.
  *
- * A mesma sprite isométrica cobre as faces +X (direita), +Z (frente) e +Y
- * (topo). As faces ocultas (−X, −Z, −Y) recebem cor sólida. O cubo não gira
- * — só a câmera orbita.
- *
- * A geometria vem com UVs remapeados (`createSpriteGeometry`): cada face
- * sampleia a região da sprite que lhe corresponde — topo nas primeiras
- * `tileHeight` linhas, metade direita em +X, metade esquerda em +Z.
+ * A paleta usa isto na miniatura. Antes ela adivinhava a URL por conta própria
+ * e errava justamente nos blocos de várias vistas — a miniatura mostrava um
+ * quadrado colorido enquanto o cubo mostrava a arte. Uma pergunta, uma
+ * resposta, os dois lugares.
  */
-function materialsWithSingleSprite(
-  tex: THREE.Texture,
-  hue: number,
-): CubeMaterials {
-  const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
-  const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
+export function canonicalSpriteUrl(block: BlockDef): Promise<string | null> {
+  const cached = chosenSprite.get(block.id);
+  if (cached) return cached;
+  const urls = spriteCandidates(block);
+  const promise =
+    urls.length === 0
+      ? Promise.resolve(null)
+      : pickCanonicalSprite(urls).then((c) => c?.url ?? null);
+  chosenSprite.set(block.id, promise);
+  return promise;
+}
 
-  const spriteMat = new THREE.MeshLambertMaterial({ map: tex });
-  const hidden = new THREE.MeshLambertMaterial({ color: hiddenColor });
-  const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
+// ------------------------------------------------------------------ arte do cubo
 
-  // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
-  const mats: THREE.Material[] = [
-    spriteMat, // +X  (right) — sprite inteira
-    hidden,    // −X  (left)  — oculta
-    spriteMat, // +Y  (top)   — sprite inteira
-    bottomMat, // −Y  (bottom)
-    spriteMat, // +Z  (front) — sprite inteira
-    hidden,    // −Z  (back)  — oculta
-  ];
+/** Tudo que um cubo precisa para existir: uma geometria e um material. */
+export interface CubeArt {
+  /** Material único — as seis faces usam o mesmo; o UV é que difere. */
+  readonly material: THREE.Material;
+  /** Geometria compartilhada com UV de sprite. Não dar dispose por mesh. */
+  readonly geometry: THREE.BufferGeometry;
+  /** false = arte procedural (o bloco não tem sprite gerada). */
+  readonly hasSprite: boolean;
+  /**
+   * Quanto a sprite se afasta da proporção de um cubo perfeito (0 = exata).
+   * Fica registrado para diagnóstico: arte muito fora aparece esticada, e saber
+   * disso evita atribuir à geração o que é proporção.
+   */
+  readonly stretch: number;
+}
 
-  return {
-    materials: mats,
-    hasTexture: true,
-    geometry: createSpriteGeometry(CANONICAL_CUBE),
+/**
+ * As URLs candidatas a sprite de um bloco, em ordem de preferência.
+ *
+ * `spriteUrls` (as oito vistas do `/rotate`) vem primeiro porque é a única
+ * fonte com mais de uma candidata — e portanto a única que precisa da escolha
+ * por silhueta. Os demais caminhos têm uma imagem só.
+ */
+function spriteCandidates(block: BlockDef): readonly string[] {
+  if (block.spriteUrls && block.spriteUrls.length > 0) return block.spriteUrls;
+  if (block.faceUrls) return [block.faceUrls.north];
+  if (block.baseUrl) return [block.baseUrl];
+  if (block.hash) return [`/world-blocks/${block.hash}/base.png`];
+  return [];
+}
+
+/**
+ * Monta a arte de um bloco: sprite gerada quando existe, cubo procedural quando
+ * não.
+ *
+ * O caminho é UM só. Antes havia três (quatro faces, textura única, procedural)
+ * e eles discordavam sobre o que é a arte de um bloco — o de textura única
+ * colava a sprite isométrica inteira em cada face lateral, que é o defeito que
+ * esta reescrita corrige. Agora todo bloco é uma sprite isométrica sobre a
+ * mesma geometria; o procedural só troca a origem da imagem, do PNG para o
+ * rasterizador do iso-core.
+ */
+export async function createCubeArt(block: BlockDef): Promise<CubeArt> {
+  const chosen = await pickCanonicalSprite(spriteCandidates(block));
+  if (chosen) {
+    const img = chosen.image;
+    chosenSprite.set(block.id, Promise.resolve(chosen.url));
+    const geom = spriteGeometryFromImage(img.naturalWidth, img.naturalHeight);
+    if (geom) {
+      const texture = asPixelArt(new THREE.Texture(img));
+      texture.needsUpdate = true;
+      return {
+        material: new THREE.MeshBasicMaterial({
+          map: texture,
+          alphaTest: ALPHA_TEST,
+        }),
+        geometry: spriteGeometry(geom),
+        hasSprite: true,
+        stretch: spriteStretchError(geom),
+      };
+    }
+    // Imagem que não é um cubo isométrico (textura plana, losango solto):
+    // cai no procedural em vez de esticar arte que não descreve um volume.
+  }
+  return proceduralArt(block.hue ?? DEFAULT_HUE);
+}
+
+/** Cache do cubo procedural por matiz — o rasterizador é caro para repetir. */
+const proceduralCache = new Map<number, CubeArt>();
+
+/**
+ * Cubo desenhado por código, na MESMA forma e no mesmo caminho da arte gerada.
+ *
+ * O rasterizador do iso-core devolve a sprite isométrica canônica (48×53) com o
+ * sombreamento das três faces já assado. Ou seja: o bloco procedural não é um
+ * caso especial do renderizador — é a mesma sprite única, com outra origem.
+ */
+function proceduralArt(hue: number): CubeArt {
+  const cached = proceduralCache.get(hue);
+  if (cached) return cached;
+  // Vista 0 das quatro: o desenho do material muda entre elas, o tom das faces
+  // não. Como a sprite é uma só, qualquer uma serve — a 0 é a canônica.
+  const canvas = makeCubeViewsFromHue(hue, CANONICAL_CUBE)[0]!;
+  const texture = asPixelArt(new THREE.CanvasTexture(canvas));
+  const art: CubeArt = {
+    material: new THREE.MeshBasicMaterial({
+      map: texture,
+      alphaTest: ALPHA_TEST,
+    }),
+    geometry: spriteGeometry(CANONICAL_CUBE),
+    hasSprite: false,
+    stretch: 0,
   };
-}
-
-/**
- * Cria os 6 materiais para um cubo a partir de um BlockDef.
- *
- * Estratégia:
- * 1. Se tem `faceUrls` (v2: 4 faces), carrega o sprite "north" como UMA
- *    textura única e aplica a mesma sprite nas 3 faces visíveis (+X, +Z, +Y)
- * 2. Se tem `spritesheetUrl` (v3: textura animada), usa o primeiro frame em
- *    todas as faces laterais
- * 3. Se não tem arte, usa cor procedural com matiz
- */
-export async function createCubeMaterials(
-  block: BlockDef,
-): Promise<CubeMaterials> {
-  // Face URLs (v2: 4 faces por direção) — sprite único nas 3 faces visíveis
-  if (block.faceUrls) {
-    try {
-      const tex = await loadTexture(block.faceUrls.north);
-      return materialsWithSingleSprite(tex, block.hue ?? 210);
-    } catch {
-      // fallthrough → procedural se o carregamento falhar
-    }
-  }
-
-  // v3: textura (animada ou estática)
-  const staticUrl =
-    block.baseUrl ??
-    (block.hash ? `/world-blocks/${block.hash}/base.png` : undefined);
-  if (staticUrl) {
-    try {
-      const tex = await loadTexture(staticUrl);
-      return materialsWithSingleTexture(tex, block.hue ?? 210);
-    } catch {
-      // fallthrough → procedural
-    }
-  } else if (block.spritesheetUrl) {
-    try {
-      const tex = await loadTexture(block.spritesheetUrl);
-      return materialsWithSingleTexture(tex, block.hue ?? 210);
-    } catch {
-      // fallthrough → procedural
-    }
-  }
-
-  // Fallback procedural
-  return materialsProcedural(block.hue ?? 210);
-}
-
-/**
- * Materiais com uma única textura nas faces laterais.
- */
-function materialsWithSingleTexture(
-  tex: THREE.Texture,
-  hue: number,
-): CubeMaterials {
-  const topColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.62);
-  const sideMat = new THREE.MeshLambertMaterial({ map: tex });
-  const mats: THREE.Material[] = [
-    sideMat,  // right (+X)
-    sideMat,  // left (-X)
-    new THREE.MeshLambertMaterial({ color: topColor }),  // top (+Y)
-    new THREE.MeshLambertMaterial({ color: topColor }),  // bottom (-Y)
-    sideMat,  // front (+Z)
-    sideMat,  // back (-Z)
-  ];
-  return { materials: mats, hasTexture: true };
-}
-
-/**
- * Materiais puramente procedurais (cor sólida, sem textura).
- *
- * Topo mais claro, laterais mais escuras — mesma hierarquia de luminosidade
- * da pixel art isométrica.
- */
-function materialsProcedural(hue: number): CubeMaterials {
-  const topColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.62);
-  const sideColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.47);
-  const darkColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
-
-  const mats: THREE.Material[] = [
-    new THREE.MeshLambertMaterial({ color: sideColor }),  // right (+X)
-    new THREE.MeshLambertMaterial({ color: darkColor }),   // left (-X)
-    new THREE.MeshLambertMaterial({ color: topColor }),     // top (+Y)
-    new THREE.MeshLambertMaterial({ color: topColor }),     // bottom (-Y)
-    new THREE.MeshLambertMaterial({ color: sideColor }),    // front (+Z)
-    new THREE.MeshLambertMaterial({ color: darkColor }),    // back (-Z)
-  ];
-  return { materials: mats, hasTexture: false };
+  proceduralCache.set(hue, art);
+  return art;
 }
 
 // ------------------------------------------------------------------ criação de mesh
 
 /**
- * Cria um mesh de cubo com os materiais dados.
+ * Cria o mesh de um cubo.
  *
- * A geometria é compartilhada (BoxGeometry(1,1,1)) — cada mesh tem seus
- * próprios materiais.
+ * `castShadow` sim, `receiveShadow` não: material sem iluminação ignora shadow
+ * map, então marcar `receiveShadow` só custaria a checagem por fragmento sem
+ * escurecer nada. Quem recebe sombra é o chão (`grid3d.ts`).
  */
-export function createCubeMesh(mats: CubeMaterials): THREE.Mesh {
-  // Blocos com faceUrls usam geometria própria (UV do sprite); os demais
-  // compartilham a BoxGeometry padrão.
-  const mesh = new THREE.Mesh(
-    mats.geometry ?? sharedBox,
-    mats.materials as THREE.Material[],
-  );
-  // Projeta sombra nos blocos abaixo/ao lado e recebe a sombra dos blocos
-  // acima — sem receiveShadow um cubo sob outro não escurece (R8).
+export function createCubeMesh(art: CubeArt): THREE.Mesh {
+  const mesh = new THREE.Mesh(art.geometry, art.material);
   mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = false;
   return mesh;
 }
 
@@ -426,6 +367,9 @@ let previewBox: THREE.BoxGeometry | null = null;
  *
  * Azul para colocação, vermelho para remoção. Geometria levemente maior
  * para evitar z-fighting com o cubo existente.
+ *
+ * `depthWrite: false` é obrigatório: escrevendo profundidade, o preview
+ * apareceria como oclusor do raycast do quadro seguinte.
  */
 export function createPreviewMesh(invalid: boolean): THREE.Mesh {
   if (!previewBox) {
@@ -439,50 +383,65 @@ export function createPreviewMesh(invalid: boolean): THREE.Mesh {
     depthTest: true,
     depthWrite: false,
   });
-  return new THREE.Mesh(previewBox, mat);
+  const mesh = new THREE.Mesh(previewBox, mat);
+  mesh.renderOrder = 5;
+  return mesh;
 }
 
 // ------------------------------------------------------------------ highlight
 
-let highlightBox: THREE.BoxGeometry | null = null;
+let highlightEdges: THREE.EdgesGeometry | null = null;
 
 /**
  * Contorno de seleção (edge highlight).
+ *
+ * A `EdgesGeometry` é calculada UMA vez e compartilhada. Recriá-la por quadro —
+ * como era feito antes — recalculava as arestas do cubo a cada movimento do
+ * mouse, no thread principal.
  */
 export function createHighlightMesh(): THREE.LineSegments {
-  if (!highlightBox) {
-    highlightBox = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+  if (!highlightEdges) {
+    const box = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+    highlightEdges = new THREE.EdgesGeometry(box);
+    box.dispose();
   }
-  const edges = new THREE.EdgesGeometry(highlightBox);
   const mat = new THREE.LineBasicMaterial({
     color: 0x38bdf8,
     transparent: true,
     opacity: 0.9,
     depthTest: true,
   });
-  return new THREE.LineSegments(edges, mat);
+  const lines = new THREE.LineSegments(highlightEdges, mat);
+  lines.renderOrder = 6;
+  return lines;
 }
 
 // ------------------------------------------------------------------ limpeza
 
 /**
- * Descarta todos os caches de textura. Chamar ao destruir a cena.
+ * Descarta os caches do módulo. Chamar ao destruir a cena.
+ *
+ * As geometrias e os materiais procedurais são compartilhados entre cenas e
+ * entre blocos; quem cria não é quem remove, então a liberação é aqui e não no
+ * mesh.
  */
 export function disposeCubeCache(): void {
-  for (const tex of proceduralCache.values()) {
-    for (const t of tex) t.dispose();
+  for (const geo of geometryCache.values()) geo.dispose();
+  geometryCache.clear();
+  for (const art of proceduralCache.values()) {
+    const mat = art.material as THREE.MeshBasicMaterial;
+    mat.map?.dispose();
+    mat.dispose();
   }
   proceduralCache.clear();
-  for (const geo of spriteGeometryCache.values()) geo.dispose();
-  spriteGeometryCache.clear();
-  textureLoads.clear();
-  sharedBox.dispose();
+  imageLoads.clear();
+  chosenSprite.clear();
   if (previewBox) {
     previewBox.dispose();
     previewBox = null;
   }
-  if (highlightBox) {
-    highlightBox.dispose();
-    highlightBox = null;
+  if (highlightEdges) {
+    highlightEdges.dispose();
+    highlightEdges = null;
   }
 }

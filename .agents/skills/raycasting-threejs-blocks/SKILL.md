@@ -76,9 +76,14 @@ three → map:  x = round(pos.x),  y = round(pos.z),  z = round(pos.y)
 
 When the ray misses every block, it is tested against an invisible plane on the floor — `visible:
 false` but still raycastable, `DoubleSide`, rotated flat at y − 0.01, named `ground-plane`
-(`tools/character-builder/src/map/3d/grid3d.ts:85-97@df615bbb`). The hit point rounds to a cell with
+(`tools/character-builder/src/map/3d/grid3d.ts:100@477d8c0f`). The hit point rounds to a cell with
 z = 0 (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:160-173@7382effa`). The plane is found
-by name via `findGroundPlane` (`tools/character-builder/src/map/3d/scene3d.ts:473-481@dddf5555`).
+by name via `findGroundPlane` (`tools/character-builder/src/map/3d/scene3d.ts:817@7c752159`).
+
+It is one of four coplanar ground planes now — the others are the dark floor, the `ShadowMaterial`
+catcher and the grid. Only this one carries the `ground-plane` name, and only it is picked; the
+others are deliberately unnamed so a rename never turns the shadow catcher into a click target
+(`casting-threejs-shadows`).
 
 ## hitFace: the stacking contract
 
@@ -98,14 +103,22 @@ adjacent cell at the same level — the Minecraft behavior.
    codebase.
 3. **DoubleSide flips normals.** A `DoubleSide` block material can report an inward normal. Blocks
    keep the `FrontSide` default; only the invisible ground plane is `DoubleSide`, deliberately, so
-   it stays raycastable from both sides (`tools/character-builder/src/map/3d/grid3d.ts:87-89@df615bbb`).
+   it stays raycastable from both sides (`tools/character-builder/src/map/3d/grid3d.ts:103@477d8c0f`).
 4. **Preview must not write depth.** The placement preview uses `depthWrite: false` so it cannot
-   block the next frame's raycast (`tools/character-builder/src/map/3d/cube3d.ts:485-498@49482c8a`).
+   block the next frame's raycast (`tools/character-builder/src/map/3d/cube3d.ts:384@51821ec4`).
+5. **The mesh list is maintained, not discovered.** Ask the scene for `blockMeshes()`
+   (`tools/character-builder/src/map/3d/scene3d.ts:675@7c752159`) instead of traversing the graph on
+   every pointer move. `collectBlockMeshes` still exists for callers that only hold a scene.
+6. **The block meshes now rotate with the camera.** `first.face.normal` is in LOCAL space and must be
+   transformed by `matrixWorld` — which the picker already does. What is new is that the transform is
+   no longer a no-op, so skipping it silently places blocks on the wrong side in three of the four
+   views. `applyCubeYaw` refreshes `matrixWorld` itself, because the raycaster never does
+   (`tools/character-builder/src/map/3d/scene3d.ts:339@7c752159`).
 
 ## What is not verified
 
 The ground plane resizes to follow the map bounds
-(`tools/character-builder/src/map/3d/grid3d.ts:102-121@df615bbb`); whether it ever fails to cover
+(`tools/character-builder/src/map/3d/grid3d.ts:173@477d8c0f`); whether it ever fails to cover
 clicks at extreme zoom was not measured.
 
 ## References

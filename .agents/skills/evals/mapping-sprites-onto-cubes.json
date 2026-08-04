@@ -1,0 +1,52 @@
+{
+  "skill": "mapping-sprites-onto-cubes",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "esticar a sprite nas tres faces do bloco", "should_trigger": true },
+    { "query": "a textura do cubo ficou torta", "should_trigger": true },
+    { "query": "uma sprite so cobrindo o bloco inteiro", "should_trigger": true },
+    { "query": "o bloco nao muda quando eu giro a camera", "should_trigger": true },
+    { "query": "escolher a view canonica entre as oito", "should_trigger": true },
+    { "query": "quanto custa gerar um personagem novo", "should_trigger": false },
+    { "query": "o teste de colisao falhou no degrau", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "ratio of exactly **2:1**",
+      "why": "the mapping is exact only because the 3D camera reproduces the sprite's own projection; lose that and corner-to-corner UV becomes an approximation"
+    },
+    {
+      "must_contain": "derives each UV from the vertex's local position",
+      "why": "transforming the default BoxGeometry UVs depends on three.js vertex emission order, which is library-internal and version-dependent"
+    },
+    {
+      "must_contain": "parallelogram is the affine image of a square",
+      "why": "this is why there is no shear and no seam on the quad diagonal; the old axis-aligned rectangle mapping was wrong for exactly this reason"
+    },
+    {
+      "must_contain": "symmetric under 90° about\nY",
+      "why": "rotating the cube with the camera is only lossless because the cube maps onto itself; the same trick on a non-cube shape moves the volume"
+    },
+    {
+      "must_contain": "continuous",
+      "why": "snapping the cube yaw in 90° steps exposes the untextured back face during the 280 ms animated turn"
+    },
+    {
+      "must_contain": "updateMatrixWorld",
+      "why": "the raycaster reads matrixWorld and never updates it; without the call a click right after a turn places the block in the wrong cell"
+    },
+    {
+      "must_contain": "alphaTest",
+      "why": "generated art does not fill the silhouette; without the cutout the empty pixels render as a black fringe"
+    },
+    {
+      "must_contain": "assumed-canonical-order",
+      "why": "the manifest itself declares the view order is unverified; picking by index instead of by silhouette paints the block with corner-on art"
+    },
+    {
+      "must_contain": "view-7",
+      "why": "the measured result contradicts the assumed order, and that measurement is the reason the chooser exists"
+    }
+  ],
+  "check_provenance": true
+}

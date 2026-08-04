@@ -5,22 +5,34 @@
     { "query": "aplicar textura na face do cubo", "should_trigger": true },
     { "query": "criar cubo 3d", "should_trigger": true },
     { "query": "o cubo fica preto", "should_trigger": true },
-    { "query": "rotacionar a textura junto com a camera", "should_trigger": true },
+    { "query": "cubo de preview do cursor", "should_trigger": true },
     { "query": "mover a camera com o mouse", "should_trigger": false },
     { "query": "quanto custa a geracao de um sprite", "should_trigger": false }
   ],
   "invariants": [
     {
-      "must_contain": "the array index IS the",
-      "why": "the BoxGeometry group order is the whole contract; a material put at the wrong index shows art on the wrong side"
+      "must_contain": "**single** `MeshBasicMaterial`",
+      "why": "the faces differ by UV, not by material; reintroducing a six-material array re-invites per-face art and the double shading that comes with it"
     },
     {
-      "must_contain": "pinned to +X, +Z and +Y",
-      "why": "the cube mesh is static; the pinned faces are why rotating textures with the camera was removed"
+      "must_contain": "cubemap order",
+      "why": "the group order is still what the UV writer walks; getting it wrong puts art on the wrong side the moment anyone indexes it again"
     },
     {
-      "must_contain": "dead code",
-      "why": "blockFaceToBoxGroup still rotates the mapping but nothing calls it; reintroducing it re-breaks the pinned faces"
+      "must_contain": "symmetric under 90° about Y",
+      "why": "rotating the mesh with the camera is only lossless because the cube maps onto itself"
+    },
+    {
+      "must_contain": "not a power of two",
+      "why": "48x53 textures are only safe under WebGL2 with clamped wrapping and no mipmaps"
+    },
+    {
+      "must_contain": "keyed `width×height`",
+      "why": "geometry is shared by sprite proportion; allocating one per block would multiply GPU buffers for identical data"
+    },
+    {
+      "must_contain": "hasSprite",
+      "why": "the procedural material is shared across blocks and scenes; disposing it blanks every other block with that hue"
     },
     {
       "must_contain": "depthWrite: false",

@@ -20,6 +20,15 @@ export interface BlockDef {
   /** URLs das quatro faces (v2: chained/rotated). Ausente = cubo procedural ou textura. */
   readonly faceUrls?: Readonly<Record<Facing, string>> | undefined;
   /**
+   * Candidatas a sprite do bloco, quando há mais de uma vista gravada (v3
+   * `rotate8`: oito vistas, e o manifesto declara que a ordem é ASSUMIDA).
+   *
+   * Quem escolhe é `cube3d.ts`, por casamento de silhueta contra a forma
+   * canônica — não por índice. Uma lista, e não uma URL, existe justamente
+   * porque o índice certo não é conhecido de antemão.
+   */
+  readonly spriteUrls?: readonly string[] | undefined;
+  /**
    * Matiz HSL do cubo procedural. Ausente, um cinza neutro — derivar do id dá
    * cor estável, mas sem relação com o material (foi como "Grama" saiu
    * vermelha).

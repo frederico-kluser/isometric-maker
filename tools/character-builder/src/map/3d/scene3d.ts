@@ -1,62 +1,73 @@
 /**
  * Cena 3D do editor — Three.js.
  *
- * Substitui `scene.ts` (PixiJS) para a versão 3D do map builder.
- * A cena vive fora do React, criada uma vez num useEffect e atualizada
- * por chamadas imperativas de `render(state)`.
+ * A cena vive FORA do React: criada uma vez num `useEffect`, atualizada por
+ * chamadas imperativas. Nenhum nó do three.js passa por reconciliação.
  *
- * ## Diferenças fundamentais em relação ao editor 2D
+ * ## As duas coisas que mudam, e por que são separadas
  *
- * 1. **Projeção**: Three.js usa câmera ortográfica real, não fórmula 2:1.
- *    A posição da câmera (yaw 45°, elevação 30°) produz visual similar
- *    ao isométrico 2D, mas em 3D verdadeiro.
+ * | O que mudou | Custo | Como se atualiza |
+ * |---|---|---|
+ * | o MUNDO (blocos, preview, realce) | varre o mapa, cria/remove meshes, refaz o shadow map | `render(state)` |
+ * | a CÂMERA (pan, zoom, giro) | uma matriz | `requestDraw()` |
  *
- * 2. **Cubos**: BoxGeometry com materiais por face, não sprites 2D.
- *    Cada face recebe textura ou cor sólida.
+ * Antes havia só o primeiro caminho, e mover o mouse refazia o mundo inteiro —
+ * incluindo um shadow map de 2048² — a cada evento de ponteiro. O zoom, por
+ * sua vez, não tinha caminho nenhum: `zoom()` atualizava a matriz e não
+ * desenhava, então a tela só mudava no `pointermove` seguinte. Era isso o
+ * "lag": não era lentidão, era desenho que não acontecia.
  *
- * 3. **Picking**: Raycaster com interseção de mesh, não aritmética diagonal.
+ * ## Um laço só, que para sozinho
  *
- * 4. **Iluminação**: DirectionalLight + AmbientLight para shading; a
- *    DirectionalLight projeta sombras (shadowMap 2048², PCF suave) sobre o
- *    piso visível e sobre os outros cubos.
+ * Tudo que anima — o amortecimento do zoom, o giro de 280 ms, as partículas —
+ * passa pelo mesmo `requestAnimationFrame`. Pedidos de desenho no mesmo quadro
+ * viram UM desenho. Quando nada está animando e nada foi pedido, não há laço:
+ * o editor é render-on-demand de verdade, não um jogo que desenha 60 vezes por
+ * segundo um mapa parado.
  *
- * ## O que NÃO muda
+ * ## Sombra
  *
- * - O formato MapData (RLE) continua igual
- * - O estado (map-state.ts) continua igual
- * - A paleta (blocks-api.ts) continua igual
- * - A rotação (iso-core/rotation.ts) continua igual
+ * Uma luz direcional projeta; o `ShadowMaterial` do chão desenha
+ * (`grid3d.ts`). Os cubos não recebem sombra por decisão — material iluminado
+ * mudaria a arte (`cube3d.ts`). Como nada na cena é iluminado, girar ou dar
+ * zoom **não** invalida o shadow map: ele é refeito só quando o mapa muda.
+ * `shadowMap.autoUpdate = false` é o que transforma isso em economia real.
  */
 import * as THREE from 'three';
 import type { MapData } from '../../../../../packages/iso-core/src/map.ts';
 import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts';
 import type { BlockDef, Cell3D } from './block-def.ts';
 import {
-  createCubeMaterials,
+  createCubeArt,
   createCubeMesh,
   createPreviewMesh,
   createHighlightMesh,
   disposeCubeCache,
-  type CubeMaterials,
+  type CubeArt,
 } from './cube3d.ts';
 import {
-  createGrid,
-  createGroundPlane,
-  createShadowPlane,
-  resizeGrid,
-  resizeGroundPlane,
-  updateGroundShadowPlane,
+  createGroundRig,
+  disposeGroundRig,
+  resizeGroundRig,
+  type GroundRig,
+  type MapBounds,
 } from './grid3d.ts';
 import {
+  anchorZoom,
+  approach,
   BASE_YAW,
+  clampZoom,
   createEditorCamera,
-  DEFAULT_DISTANCE,
-  ELEVATION,
-  panCamera,
-  pixelDeltaToWorld,
+  easeInOutCubic,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  panTarget,
+  placeCamera,
+  resizeCamera,
   ROTATION_DURATION_MS,
-  setCameraRotation,
-  zoomCamera,
+  yawOf,
+  ZOOM_EPSILON,
+  zoomStep,
 } from './controls3d.ts';
 import { buildActorVisual, SHADOW_RADIUS } from '../actor.ts';
 
@@ -109,18 +120,31 @@ export interface IsoScene3D {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
-  /** Registra as peças da paleta e pré-carrega texturas. */
+  /** Registra as peças da paleta e pré-carrega as sprites. */
   setPalette(blocks: readonly BlockDef[]): Promise<void>;
-  /** Desenha o estado atual. */
+  /** Sincroniza a cena com o estado e agenda um desenho. */
   render(state: Scene3DState): void;
+  /** Agenda um desenho sem tocar no mundo. Coalescido em um quadro. */
+  requestDraw(): void;
   /** Pan da câmera em pixels de tela. */
   pan(dx: number, dy: number, viewportW: number, viewportH: number): void;
-  /** Zoom inteiro. */
-  zoom(factor: number): void;
+  /**
+   * Um passo de roda. `ndcX`/`ndcY` são o cursor em coordenadas normalizadas
+   * (−1..1); o ponto sob o cursor fica parado enquanto o zoom muda.
+   */
+  wheelZoom(deltaY: number, ndcX: number, ndcY: number): void;
+  /** Multiplica o zoom alvo (botões +/−). Ancorado no centro da tela. */
+  zoomByFactor(factor: number): void;
+  /** O zoom alvo atual — o valor que a HUD mostra. */
+  zoomTarget(): number;
+  /** Chamado quando o zoom alvo muda, para a HUD acompanhar. */
+  onZoomChange(listener: (zoom: number) => void): void;
   /** Gira a câmera para a vista discreta (instantâneo). */
   setRotation(rotation: Rotation): void;
   /** Gira a câmera com animação suave (280 ms, ease-in-out cúbico). */
   animateRotation(targetRotation: Rotation): void;
+  /** Os meshes de bloco, para o raycaster. Sem varrer a cena. */
+  blockMeshes(): readonly THREE.Mesh[];
   /** Redimensiona o renderer. */
   resize(width: number, height: number): void;
   /** Destrói a cena e libera recursos. */
@@ -130,7 +154,6 @@ export interface IsoScene3D {
 // ------------------------------------------------------------------ constantes
 
 const BG_COLOR = 0x0b1020;
-const GRID_MARGIN = 4;
 /** BoxGeometry(1,1,1) tem centro na origem — base fica em -0.5. */
 const HALF_CUBE = 0.5;
 /** Altura do personagem em unidades de mundo (~1.5 blocos). */
@@ -145,33 +168,8 @@ const ARROW_EPS = 0.02;
 /** Cor e opacidade da seta de direção — sutil, não poluir a cena. */
 const DIRECTION_ARROW_COLOR = 0xffd04d;
 const DIRECTION_ARROW_OPACITY = 0.6;
-
-// ------------------------------------------------------------------ animação
-
-/** Easing cúbico simétrico — acelera no início, desacelera no fim. */
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-}
-
-/** Estado da animação de rotação em curso. null = parado. */
-let animState: {
-  frameId: number;
-  startPos: THREE.Vector3;
-  targetPos: THREE.Vector3;
-  startTime: number;
-  /** Renderer e câmera referenciados durante a animação. */
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.OrthographicCamera;
-} | null = null;
-
-/** Cancela a animação de rotação em curso, se houver. */
-function cancelRotationAnim(): void {
-  if (animState) {
-    cancelAnimationFrame(animState.frameId);
-    animState = null;
-  }
-}
+/** Direção da luz que projeta sombra. Fixa no MUNDO — ver o cabeçalho. */
+const SUN_OFFSET = new THREE.Vector3(14, 26, 8);
 
 // ------------------------------------------------------------------ fábrica
 
@@ -183,60 +181,174 @@ export async function createIsoScene3D(
     canvas,
     antialias: false,
     alpha: false,
+    powerPreference: 'high-performance',
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(BG_COLOR);
-  // Sombras ativadas em configureShadowSystem, abaixo — o shadowMap precisa
-  // do `sun` e do piso visível prontos antes de ser configurado.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // A chave do zoom fluido: o shadow map NÃO é refeito a cada desenho. Nada na
+  // cena é iluminado, então mover a câmera não muda sombra nenhuma — só mudar
+  // o mapa muda. `needsUpdate` é ligado em `syncBlocks` quando algo mudou.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
 
   // --- cena ---
   const scene = new THREE.Scene();
 
   // --- luz ---
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambient);
-
-  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-  sun.position.set(10, 20, 5);
+  // Uma luz só, e ela existe para PROJETAR sombra, não para iluminar: todos os
+  // materiais da cena são `Basic`/`Sprite`/`Shadow`, que ignoram iluminação.
+  // Sem luz ambiente porque não há nada para ela acender.
+  const sun = new THREE.DirectionalLight(0xffffff, 1);
+  sun.position.copy(SUN_OFFSET);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  // Bias negativo: afasta o depth da superfície que recebe a sombra, para a
+  // própria luz não marcar acne no cubo que a projeta.
+  sun.shadow.bias = -0.0006;
+  sun.shadow.normalBias = 0.02;
   scene.add(sun);
+  scene.add(sun.target);
 
   // --- câmera ---
   const camera = createEditorCamera(
     canvas.clientWidth || 800,
     canvas.clientHeight || 600,
   );
+  /** O ponto que a câmera olha. Pan e zoom com âncora movem ISTO. */
+  const target = new THREE.Vector3(0, 0, 0);
+  /** Yaw corrente da câmera. Os cubos giram junto com ele. */
+  let yaw = yawOf(0);
+  placeCamera(camera, target, yaw);
 
-  // Registra o contexto de render para o laço de partículas (spawnParticles
-  // só recebe a scene, mas precisa de renderer+câmera para animar on-demand).
-  renderContexts.set(scene, { renderer, camera });
+  // --- chão ---
+  const ground: GroundRig = createGroundRig(scene);
+  sizeShadowFrustum(sun, ground);
 
-  // --- grid e chão ---
-  let grid = createGrid(10, 10);
-  scene.add(grid);
-  const groundPlane = createGroundPlane(20); // invisível: só raycasting
-  scene.add(groundPlane);
-  // Piso visível que recebe as sombras (R8). Complementa o ground plane —
-  // o de raycasting continua invisível e intocado.
-  const shadowPlane = createShadowPlane(20);
-  scene.add(shadowPlane);
+  // --- caches ---
+  const artByBlock = new Map<string, CubeArt>();
+  /** Meshes dos blocos no mapa. Key = "x:z:y". */
+  const meshes = new Map<string, THREE.Mesh>();
+  /** A mesma coleção em array, para o raycaster não varrer a cena. */
+  let meshList: THREE.Mesh[] = [];
+  let meshListStale = true;
 
-  // --- sombras (R8) ---
-  configureShadowSystem(renderer, sun, shadowPlane);
+  // Preview e realce são criados UMA vez e reposicionados. Recriar por quadro
+  // significava alocar geometria e material a cada movimento do mouse.
+  const previewValid = createPreviewMesh(false);
+  const previewInvalid = createPreviewMesh(true);
+  const highlight = createHighlightMesh();
+  for (const helper of [previewValid, previewInvalid, highlight]) {
+    helper.visible = false;
+    helper.castShadow = false;
+    helper.receiveShadow = false;
+    scene.add(helper);
+  }
 
-  // --- cache de materiais ---
-  const materialsByBlock = new Map<string, CubeMaterials>();
-  /** Meshes dos blocos no mapa. Key = "x:y:z". */
-  const blockMeshes = new Map<string, THREE.Mesh>();
+  // ---------------------------------------------------------------- laço único
 
-  // Preview e highlight — recriados a cada frame
-  let previewMesh: THREE.Mesh | null = null;
-  let highlightMesh: THREE.LineSegments | null = null;
+  let frameId: number | null = null;
+  let lastFrameTime = 0;
+  let drawPending = false;
 
-  // --- ator do modo teste ---
-  // Sprite billboard: sempre de frente para a câmera, com depth test contra os
-  // cubos (um prédio na frente oculta o personagem). Texturas cacheadas por
-  // URL — o ticker troca de quadro a 60 fps e recarregar a mesma imagem a cada
-  // frame travaria a rede e o disco.
+  /** Zoom perseguido pelo amortecimento. Igual a `camera.zoom` quando assenta. */
+  let zoomGoal = camera.zoom;
+  let zoomListener: ((zoom: number) => void) | null = null;
+
+  /** Giro em curso. null = parado. */
+  let turning: { from: number; to: number; start: number } | null = null;
+
+  const drawNow = (): void => {
+    renderer.render(scene, camera);
+  };
+
+  const schedule = (): void => {
+    if (frameId !== null) return;
+    lastFrameTime = performance.now();
+    frameId = requestAnimationFrame(tick);
+  };
+
+  const requestDraw = (): void => {
+    drawPending = true;
+    schedule();
+  };
+
+  function tick(now: number): void {
+    frameId = null;
+    // dt clampado: voltar de uma aba inativa daria um salto e o amortecimento
+    // pularia direto para o alvo, perdendo o movimento.
+    const dt = Math.min(0.05, Math.max(0, (now - lastFrameTime) / 1000));
+    lastFrameTime = now;
+
+    let animating = false;
+
+    // Zoom: persegue o alvo com constante de tempo, não com fator por quadro.
+    if (Math.abs(camera.zoom - zoomGoal) > ZOOM_EPSILON) {
+      camera.zoom = approach(camera.zoom, zoomGoal, dt);
+      camera.updateProjectionMatrix();
+      animating = true;
+      drawPending = true;
+    } else if (camera.zoom !== zoomGoal) {
+      camera.zoom = zoomGoal;
+      camera.updateProjectionMatrix();
+      drawPending = true;
+    }
+
+    // Giro: interpola o YAW, não a posição. Interpolar posição atravessaria o
+    // interior do círculo e a câmera passaria mais perto do mapa no meio.
+    if (turning) {
+      const t = Math.min(1, (now - turning.start) / ROTATION_DURATION_MS);
+      const eased = easeInOutCubic(t);
+      yaw = turning.from + (turning.to - turning.from) * eased;
+      placeCamera(camera, target, yaw);
+      applyCubeYaw();
+      drawPending = true;
+      if (t >= 1) {
+        yaw = turning.to;
+        placeCamera(camera, target, yaw);
+        applyCubeYaw();
+        turning = null;
+      } else {
+        animating = true;
+      }
+    }
+
+    if (drawPending) {
+      drawPending = false;
+      drawNow();
+    }
+    if (animating) schedule();
+  }
+
+  // ---------------------------------------------------------------- giro do cubo
+
+  /**
+   * Gira TODO cubo junto com a câmera.
+   *
+   * O cubo é simétrico sob 90° em Y: girá-lo com a câmera devolve o volume ao
+   * mesmo lugar no mundo e mantém as três faces texturizadas (+X, +Y, +Z)
+   * sempre de frente. É isto que faz "a sprite mudar de lugar para a nova
+   * perspectiva" sem trocar textura, sem recortar arte e sem uma segunda
+   * imagem: a arte não muda, o volume é que acompanha o olhar.
+   *
+   * Contínuo, e não em degraus de 90°: durante os 280 ms do giro animado, um
+   * cubo parado em 0° enquanto a câmera passa por 45° mostraria a face crua de
+   * trás.
+   */
+  const applyCubeYaw = (): void => {
+    const angle = yaw - BASE_YAW;
+    for (const mesh of meshes.values()) {
+      mesh.rotation.y = angle;
+      // O raycaster lê `matrixWorld` e NÃO a atualiza. Sem isto, um clique
+      // entre o giro e o quadro seguinte usaria a orientação anterior e a
+      // normal da face apontaria para a célula errada.
+      mesh.updateMatrixWorld();
+    }
+  };
+
+  // ---------------------------------------------------------------- ator
+
   let actorSprite: THREE.Sprite | null = null;
   let actorUrl: string | null = null;
   const actorTextures = new Map<string, THREE.Texture>();
@@ -267,8 +379,7 @@ export async function createIsoScene3D(
     });
     const shadow = new THREE.Mesh(sharedShadowGeometry(), shadowMat);
     // CircleGeometry nasce no plano XY (normal +Z) — sem a rotação o disco
-    // ficaria em pé como uma moeda. O mesmo giro que grid3d.ts aplica nos
-    // planos do chão (rotation.x = -π/2) deita a sombra no plano XZ.
+    // ficaria em pé como uma moeda.
     shadow.rotation.x = -Math.PI / 2;
     shadow.renderOrder = 9; // abaixo do sprite
     scene.add(shadow);
@@ -343,219 +454,253 @@ export async function createIsoScene3D(
         // O ticker pode ter avançado para outro quadro enquanto a imagem
         // carregava — aplicar uma textura velha depois de trocar a URL erra
         // a animação.
-        if (actorUrl === url) applyActorTexture(sprite, tex);
+        if (actorUrl === url) {
+          applyActorTexture(sprite, tex);
+          requestDraw();
+        }
       });
     }
   };
 
-  // --- carregamento de paleta ---
+  // ---------------------------------------------------------------- paleta
+
   const setPalette = async (blocks: readonly BlockDef[]): Promise<void> => {
-    // Carrega materiais em paralelo
     const entries = await Promise.all(
-      blocks.map(async (b): Promise<[string, CubeMaterials]> => [
+      blocks.map(async (b): Promise<[string, CubeArt]> => [
         b.id,
-        await createCubeMaterials(b),
+        await createCubeArt(b),
       ]),
     );
-    // Descarta cache antigo
-    for (const [, mats] of materialsByBlock) {
-      for (const m of mats.materials) m.dispose();
+    // Só a arte com sprite própria é descartável aqui: o cubo procedural é
+    // compartilhado entre blocos e entre cenas, e quem o libera é
+    // `disposeCubeCache`.
+    for (const [, art] of artByBlock) {
+      if (art.hasSprite) art.material.dispose();
     }
-    materialsByBlock.clear();
-    for (const [id, mats] of entries) {
-      materialsByBlock.set(id, mats);
+    artByBlock.clear();
+    for (const [id, art] of entries) artByBlock.set(id, art);
+    // Blocos já na cena podem ter ficado com material velho.
+    for (const mesh of meshes.values()) {
+      const id = (mesh.userData as { blockId?: string }).blockId;
+      const art = id === undefined ? undefined : artByBlock.get(id);
+      if (art) {
+        mesh.material = art.material;
+        mesh.geometry = art.geometry;
+      }
     }
+    // Invalida o atalho de `syncBlocks`. A paleta chega DEPOIS do primeiro
+    // desenho: aquele desenho não criou mesh nenhum (não havia arte) e já
+    // gravou o mapa como sincronizado. Sem esta linha, o `render` seguinte
+    // veria o mesmo objeto de mapa, sairia cedo, e o editor abriria vazio.
+    lastMap = null;
+    renderer.shadowMap.needsUpdate = true;
+    requestDraw();
   };
 
-  // --- render ---
-  const render = (state: Scene3DState): void => {
-    const { map } = state;
+  // ---------------------------------------------------------------- sincronização
 
-    // Remove preview e highlight antigos
-    if (previewMesh) {
-      scene.remove(previewMesh);
-      previewMesh.geometry !== previewMesh.geometry && previewMesh.geometry.dispose();
-      (previewMesh.material as THREE.Material).dispose();
-      previewMesh = null;
-    }
-    if (highlightMesh) {
-      scene.remove(highlightMesh);
-      highlightMesh.geometry.dispose();
-      (highlightMesh.material as THREE.Material).dispose();
-      highlightMesh = null;
-    }
+  /** Última referência de mapa desenhada — a igualdade evita varrer à toa. */
+  let lastMap: MapData | null = null;
 
-    // Sincroniza meshes com o mapa
-    const currentKeys = new Set<string>();
+  /**
+   * Põe a cena de acordo com o mapa.
+   *
+   * Devolve `true` se algo mudou de fato. O `map === lastMap` no início não é
+   * micro-otimização: no modo teste esta função é chamada 60 vezes por segundo
+   * com o MESMO mapa, e sem o atalho cada quadro varreria todas as colunas RLE
+   * e refaria o shadow map.
+   */
+  const syncBlocks = (map: MapData): boolean => {
+    if (map === lastMap) return false;
+    lastMap = map;
+
+    const seen = new Set<string>();
+    const cubeAngle = yaw - BASE_YAW;
+    let changed = false;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
 
     for (const [key, runs] of Object.entries(map.blocks)) {
       const [xs, zs] = key.split(':');
       const x = Number(xs);
-      const z = Number(zs); // Em Three.js, o "y" do mapa 2D vira Z
+      const z = Number(zs); // o "y" do mapa 2D é o Z do three.js
       if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
 
-      let y = 0; // altura em Three.js (equivale ao z do mapa)
+      let y = 0;
       for (const run of runs) {
         if (run.block !== '') {
-          for (let i = 0; i < run.count; i++) {
+          for (let i = 0; i < run.count; i += 1) {
             const blockY = y + i;
             const meshKey = `${x}:${z}:${blockY}`;
-            currentKeys.add(meshKey);
-
-            let mesh = blockMeshes.get(meshKey);
-            if (!mesh) {
-              const mats = materialsByBlock.get(run.block);
-              if (mats) {
-                mesh = createCubeMesh(mats);
-                mesh.position.set(x, blockY + HALF_CUBE, z);
-                mesh.userData = { blockId: run.block, cellX: x, cellY: z, cellZ: blockY };
-                scene.add(mesh);
-                blockMeshes.set(meshKey, mesh);
+            seen.add(meshKey);
+            const existing = meshes.get(meshKey);
+            if (existing) {
+              // Pintar troca o bloco da célula sem mexer na posição. Sem esta
+              // comparação o mesh antigo ficava e a pintura não aparecia.
+              const data = existing.userData as { blockId?: string };
+              if (data.blockId !== run.block) {
+                const art = artByBlock.get(run.block);
+                if (art) {
+                  existing.material = art.material;
+                  existing.geometry = art.geometry;
+                  data.blockId = run.block;
+                  changed = true;
+                }
               }
+              continue;
             }
-            // Se já existe, mantém (posição não muda para o mesmo bloco)
+            const art = artByBlock.get(run.block);
+            if (!art) continue;
+            const mesh = createCubeMesh(art);
+            mesh.position.set(x, blockY + HALF_CUBE, z);
+            mesh.rotation.y = cubeAngle;
+            mesh.userData = { blockId: run.block, cellX: x, cellY: z, cellZ: blockY };
+            scene.add(mesh);
+            meshes.set(meshKey, mesh);
+            changed = true;
           }
         }
         y += run.count;
       }
     }
 
-    // Remove meshes que não estão mais no mapa
-    for (const [key, mesh] of blockMeshes) {
-      if (!currentKeys.has(key)) {
-        scene.remove(mesh);
-        // Não damos dispose nos materiais — são compartilhados do cache
-        mesh.geometry !== sharedBoxGeometry() && mesh.geometry.dispose();
-        blockMeshes.delete(key);
-      }
+    for (const [key, mesh] of meshes) {
+      if (seen.has(key)) continue;
+      scene.remove(mesh);
+      // Geometria e material vêm do cache por bloco — nunca são do mesh.
+      meshes.delete(key);
+      changed = true;
     }
 
-    // Atualiza grid, ground planes e a luz de sombra conforme o mapa cresce
-    updateGridAndPlane(
-      map, grid, groundPlane, shadowPlane, sun, scene,
-      () => {
-        const g = createGrid(10, 10);
-        scene.add(g);
-        return g;
-      },
-    );
+    if (changed) meshListStale = true;
 
-    // Preview
-    if (state.preview) {
-      previewMesh = createPreviewMesh(state.previewInvalid === true);
-      previewMesh.position.set(
-        state.preview.x,
-        state.preview.z + HALF_CUBE, // z do mapa → Y do Three.js
-        state.preview.y, // y do mapa → Z do Three.js
-      );
-      scene.add(previewMesh);
+    const bounds: MapBounds = Number.isFinite(minX)
+      ? { minX, maxX, minZ, maxZ }
+      : { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+    if (resizeGroundRig(ground, bounds, scene)) {
+      sizeShadowFrustum(sun, ground);
+      changed = true;
     }
 
-    // Highlight
-    if (state.highlight) {
-      highlightMesh = createHighlightMesh();
-      highlightMesh.position.set(
-        state.highlight.x,
-        state.highlight.z + HALF_CUBE, // z do mapa → Y do Three.js
-        state.highlight.y, // y do mapa → Z do Three.js
-      );
-      scene.add(highlightMesh);
-    }
-
-    // Ator do modo teste — o turn da câmera entra aqui porque a seta é um
-    // mesh no MUNDO: o ângulo dela precisa compensar o giro para continuar
-    // apontando para onde o sprite parece olhar na vista atual.
-    updateActor(state.actor ?? null, state.rotation);
-
-    // Desenha
-    renderer.render(scene, camera);
+    if (changed) renderer.shadowMap.needsUpdate = true;
+    return changed;
   };
 
-  // --- controles ---
+  /** Reposiciona preview e realce sem alocar nada. */
+  const syncHelpers = (state: Scene3DState): void => {
+    previewValid.visible = false;
+    previewInvalid.visible = false;
+    if (state.preview) {
+      const mesh = state.previewInvalid === true ? previewInvalid : previewValid;
+      mesh.position.set(
+        state.preview.x,
+        state.preview.z + HALF_CUBE, // z do mapa → Y do three.js
+        state.preview.y, // y do mapa → Z do three.js
+      );
+      mesh.visible = true;
+    }
+    highlight.visible = false;
+    if (state.highlight) {
+      highlight.position.set(
+        state.highlight.x,
+        state.highlight.z + HALF_CUBE,
+        state.highlight.y,
+      );
+      highlight.visible = true;
+    }
+  };
+
+  const render = (state: Scene3DState): void => {
+    syncBlocks(state.map);
+    syncHelpers(state);
+    updateActor(state.actor ?? null, state.rotation);
+    requestDraw();
+  };
+
+  // ---------------------------------------------------------------- controles
+
   const pan = (
     dx: number,
     dy: number,
     viewportW: number,
     viewportH: number,
   ): void => {
-    const delta = pixelDeltaToWorld(camera, dx, dy, viewportW, viewportH);
-    panCamera(camera, delta.dx, delta.dy);
+    panTarget(camera, target, dx, dy, viewportW, viewportH);
+    placeCamera(camera, target, yaw);
+    requestDraw();
   };
 
-  const zoom = (factor: number): void => {
-    zoomCamera(camera, factor);
+  const setZoomGoal = (next: number): void => {
+    const clamped = clampZoom(next);
+    if (clamped === zoomGoal) return;
+    zoomGoal = clamped;
+    zoomListener?.(clamped);
+    schedule();
+  };
+
+  const wheelZoom = (deltaY: number, ndcX: number, ndcY: number): void => {
+    const next = zoomStep(zoomGoal, deltaY);
+    if (next === zoomGoal) return;
+    // A âncora usa o zoom CORRENTE, não o alvo: é o que está na tela agora que
+    // precisa ficar parado sob o cursor.
+    anchorZoom(camera, target, camera.zoom, next, ndcX, ndcY);
+    placeCamera(camera, target, yaw);
+    setZoomGoal(next);
+  };
+
+  const zoomByFactor = (factor: number): void => {
+    setZoomGoal(zoomGoal * factor);
   };
 
   const setRotation = (rotation: Rotation): void => {
-    setCameraRotation(camera, rotation);
+    turning = null;
+    yaw = yawOf(rotation);
+    placeCamera(camera, target, yaw);
+    applyCubeYaw();
+    requestDraw();
   };
 
-  const animateRotation = (targetRotation: Rotation): void => {
-    cancelRotationAnim();
-
-    const startPos = camera.position.clone();
-    const targetYaw = BASE_YAW + targetRotation * (Math.PI / 2);
-    const targetPos = new THREE.Vector3(
-      DEFAULT_DISTANCE * Math.cos(ELEVATION) * Math.sin(targetYaw),
-      DEFAULT_DISTANCE * Math.sin(ELEVATION),
-      DEFAULT_DISTANCE * Math.cos(ELEVATION) * Math.cos(targetYaw),
-    );
-
-    const startTime = performance.now();
-
-    const tick = (now: number): void => {
-      const elapsed = now - startTime;
-      const t = Math.min(1, elapsed / ROTATION_DURATION_MS);
-      const eased = easeInOutCubic(t);
-
-      camera.position.lerpVectors(startPos, targetPos, eased);
-      camera.lookAt(0, 0, 0);
-      camera.updateProjectionMatrix();
-
-      renderer.render(scene, camera);
-
-      if (t < 1) {
-        animState!.frameId = requestAnimationFrame(tick);
-      } else {
-        // Snap ao destino exato
-        camera.position.copy(targetPos);
-        camera.lookAt(0, 0, 0);
-        camera.updateProjectionMatrix();
-        renderer.render(scene, camera);
-        animState = null;
-      }
-    };
-
-    animState = {
-      frameId: requestAnimationFrame(tick),
-      startPos,
-      targetPos,
-      startTime,
-      renderer,
-      scene,
-      camera,
-    };
+  const animateRotation = (rotation: Rotation): void => {
+    const to = yawOf(rotation);
+    // O caminho mais curto: sem isto, ir da vista 3 para a 0 desenrolaria 270°
+    // no sentido contrário.
+    let from = yaw;
+    while (to - from > Math.PI) from += Math.PI * 2;
+    while (to - from < -Math.PI) from -= Math.PI * 2;
+    turning = { from, to, start: performance.now() };
+    schedule();
   };
 
-  // --- resize ---
+  const blockMeshes = (): readonly THREE.Mesh[] => {
+    if (meshListStale) {
+      meshList = [...meshes.values()];
+      meshListStale = false;
+    }
+    return meshList;
+  };
+
+  // ---------------------------------------------------------------- resize
+
   const resize = (width: number, height: number): void => {
     if (width === 0 || height === 0) return;
     renderer.setSize(width, height, false);
-    const aspect = width / height;
-    const frustumSize = 15;
-    camera.left = -frustumSize * aspect;
-    camera.right = frustumSize * aspect;
-    camera.top = frustumSize;
-    camera.bottom = -frustumSize;
-    camera.updateProjectionMatrix();
+    resizeCamera(camera, width, height);
+    requestDraw();
   };
 
-  // --- destroy ---
+  // ---------------------------------------------------------------- destroy
+
   const destroy = (): void => {
-    cancelRotationAnim();
-    // Desregistra o contexto ANTES de renderer.dispose(): o laço de
-    // partículas em voo checa o WeakMap a cada frame e aborta ao ver o
-    // contexto sumir — nunca renderiza num renderer já disposto.
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    frameId = null;
+    // Desregistra o contexto ANTES de renderer.dispose(): o laço de partículas
+    // em voo checa o WeakMap a cada quadro e aborta ao ver o contexto sumir.
     renderContexts.delete(scene);
     if (actorSprite) {
       detachActorVisualMeshes(actorSprite);
@@ -564,20 +709,27 @@ export async function createIsoScene3D(
     }
     for (const tex of actorTextures.values()) tex.dispose();
     actorTextures.clear();
-    renderer.dispose();
-    for (const [, mesh] of blockMeshes) {
-      scene.remove(mesh);
+    for (const mesh of meshes.values()) scene.remove(mesh);
+    meshes.clear();
+    meshList = [];
+    for (const [, art] of artByBlock) {
+      if (art.hasSprite) art.material.dispose();
     }
-    blockMeshes.clear();
-    for (const [, mats] of materialsByBlock) {
-      for (const m of mats.materials) m.dispose();
+    artByBlock.clear();
+    for (const helper of [previewValid, previewInvalid, highlight]) {
+      scene.remove(helper);
+      (helper.material as THREE.Material).dispose();
     }
-    materialsByBlock.clear();
+    disposeGroundRig(ground, scene);
     disposeCubeCache();
     disposeParticles();
     scene.clear();
+    renderer.dispose();
     renderer.domElement?.remove();
   };
+
+  // Registra o contexto para o laço de partículas — ele precisa desenhar.
+  renderContexts.set(scene, { renderNow: drawNow });
 
   return {
     renderer,
@@ -585,27 +737,23 @@ export async function createIsoScene3D(
     camera,
     setPalette,
     render,
+    requestDraw,
     pan,
-    zoom,
+    wheelZoom,
+    zoomByFactor,
+    zoomTarget: () => zoomGoal,
+    onZoomChange: (listener) => {
+      zoomListener = listener;
+    },
     setRotation,
     animateRotation,
+    blockMeshes,
     resize,
     destroy,
   };
 }
 
 // ------------------------------------------------------------------ helpers
-
-/**
- * Geometria compartilhada — evita alocar uma BoxGeometry por cubo.
- */
-let _sharedBox: THREE.BoxGeometry | null = null;
-function sharedBoxGeometry(): THREE.BoxGeometry {
-  if (!_sharedBox) {
-    _sharedBox = new THREE.BoxGeometry(1, 1, 1);
-  }
-  return _sharedBox;
-}
 
 /**
  * Geometria compartilhada da sombra do ator — um disco no plano XZ.
@@ -643,77 +791,30 @@ function sharedArrowGeometry(): THREE.BufferGeometry {
   return _sharedArrowGeo;
 }
 
-/**
- * Atualiza grid, piso de raycasting, piso de sombra e luz para cobrir a
- * área ocupada do mapa.
- *
- * O frustum da sombra acompanha o piso: sem isso, um mapa que cresce para
- * fora do frustum inicial teria a sombra cortada na borda (e a luz
- * continuaria mirando a origem em mapas deslocados).
- */
-function updateGridAndPlane(
-  map: MapData,
-  grid: THREE.GridHelper,
-  plane: THREE.Mesh,
-  shadowPlane: THREE.Mesh,
-  sun: THREE.DirectionalLight,
-  scene: THREE.Scene,
-  createNewGrid: () => THREE.GridHelper,
-): void {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-
-  for (const key of Object.keys(map.blocks)) {
-    const [xs, zs] = key.split(':');
-    const x = Number(xs);
-    const z = Number(zs);
-    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minZ = Math.min(minZ, z);
-    maxZ = Math.max(maxZ, z);
-  }
-
-  if (!Number.isFinite(minX)) {
-    minX = 0; maxX = 0;
-    minZ = 0; maxZ = 0;
-  }
-
-  resizeGrid(
-    grid, minX, maxX, minZ, maxZ, GRID_MARGIN, scene,
-  );
-  resizeGroundPlane(plane, minX, maxX, minZ, maxZ, GRID_MARGIN);
-  updateGroundShadowPlane(shadowPlane, minX, maxX, minZ, maxZ, GRID_MARGIN);
-  sizeShadowFrustum(sun, shadowPlane);
-}
-
 // ------------------------------------------------------------------ raycaster helpers
 
 /**
- * Obtém todos os meshes de bloco da cena (para raycasting).
+ * Obtém todos os meshes de bloco da cena varrendo o grafo.
  *
- * Filtra por nome/tipo: os meshes de bloco são instâncias de Mesh
- * com `userData.blockId` definido.
+ * Preferir `scene3d.blockMeshes()`, que devolve a lista já mantida. Esta versão
+ * existe para quem só tem a cena — varrer a cena por movimento de ponteiro é
+ * exatamente o custo que o cache evita.
  */
 export function collectBlockMeshes(scene: THREE.Scene): THREE.Mesh[] {
-  const meshes: THREE.Mesh[] = [];
+  const found: THREE.Mesh[] = [];
   scene.traverse((obj: THREE.Object3D) => {
     if (
       obj instanceof THREE.Mesh &&
       obj.userData &&
       typeof (obj.userData as Record<string, unknown>).blockId === 'string'
     ) {
-      meshes.push(obj);
+      found.push(obj);
     }
   });
-  return meshes;
+  return found;
 }
 
-/**
- * Encontra o mesh do ground plane para raycasting de espaço vazio.
- */
+/** Encontra o mesh do ground plane para raycasting de espaço vazio. */
 export function findGroundPlane(scene: THREE.Scene): THREE.Mesh | null {
   let found: THREE.Mesh | null = null;
   scene.traverse((obj: THREE.Object3D) => {
@@ -724,86 +825,57 @@ export function findGroundPlane(scene: THREE.Scene): THREE.Mesh | null {
   return found;
 }
 
-// ------------------------------------------------------------------ sombras (R8)
+// ------------------------------------------------------------------ sombra
 
 /**
- * Ajusta a luz e o frustum da câmera de sombra ao tamanho e posição do piso.
+ * Ajusta a luz e o frustum da câmera de sombra ao tamanho e à posição do chão.
  *
  * A câmera da sombra é ortográfica e fica na posição da luz olhando para o
- * alvo (ver `DirectionalLightShadow.updateMatrices`). O frustum precisa
- * cobrir o mapa inteiro na projeção da luz — que é maior que a projeção
- * axis-aligned do piso (o mapa visto em 45° tem a diagonal ~1.4× maior),
- * por isso o padding de 60% + 2 unidades.
+ * alvo. O frustum precisa cobrir o mapa inteiro NA PROJEÇÃO DA LUZ, que é maior
+ * que a projeção alinhada aos eixos do piso — o mapa visto em diagonal tem a
+ * diagonal ~1,4× maior. Daí o padding de 60% mais 2 unidades.
+ *
+ * A luz e o alvo acompanham o centro do mapa: a DIREÇÃO da luz não muda (o
+ * offset é fixo), mas um mapa que cresce para longe da origem sairia do
+ * frustum se a luz continuasse mirando o (0,0,0).
  */
-function sizeShadowFrustum(
-  sun: THREE.DirectionalLight,
-  plane: THREE.Mesh,
-): void {
-  const geometry = plane.geometry as THREE.PlaneGeometry;
-  const half = (geometry.parameters.width / 2) * plane.scale.x;
-  const centerX = plane.position.x;
-  const centerZ = plane.position.z;
+function sizeShadowFrustum(sun: THREE.DirectionalLight, ground: GroundRig): void {
+  const half = ground.size / 2;
   const pad = half * 0.6 + 2;
-
   const cam = sun.shadow.camera;
   cam.left = -(half + pad);
   cam.right = half + pad;
   cam.top = half + pad;
   cam.bottom = -(half + pad);
   cam.near = 0.5;
-  cam.far = Math.max(100, half * 4);
+  cam.far = Math.max(160, half * 6);
   cam.updateProjectionMatrix();
 
-  // Luz e alvo acompanham o centro do mapa: a direção da luz (offset fixo
-  // de 10,20,5) não muda, mas a sombra deixa de apontar para a origem quando
-  // o mapa cresce fora dela.
-  sun.position.set(centerX + 10, 20, centerZ + 5);
-  sun.target.position.set(centerX, 0, centerZ);
-  // O alvo não está na cena — sem o update manual o matrixWorld fica parado
-  // na identidade e o shadow camera continuaria mirando a origem.
+  sun.position.set(
+    ground.centerX + SUN_OFFSET.x,
+    SUN_OFFSET.y,
+    ground.centerZ + SUN_OFFSET.z,
+  );
+  sun.target.position.set(ground.centerX, 0, ground.centerZ);
   sun.target.updateMatrixWorld();
 }
 
-// ------------------------------------------------------------------ partículas (R9)
-
-/**
- * Renderer e câmera por cena, para o laço de animação de partículas.
- *
- * `spawnParticles` recebe só a scene (contrato do stub), mas o editor é
- * render-on-demand — sem estas referências a animação não teria como
- * desenhar. WeakMap: a entrada some sozinha quando a cena é coletada.
- */
-const renderContexts = new WeakMap<
-  THREE.Scene,
-  { readonly renderer: THREE.WebGLRenderer; readonly camera: THREE.OrthographicCamera }
->();
-
-// ------------------------------------------------------------------ stubs Onda 2
-// Estes stubs existem como contrato entre os agentes 2.1 e 2.2.
-// Cada agente preenche o seu sem tocar no stub do outro.
+// ------------------------------------------------------------------ ator: sombra e seta
 
 /**
  * Atualiza a sombra e o indicador de direção do ator.
  *
- * Consome os dados puros de `buildActorVisual` (actor.ts) e aplica nos
- * meshes pendurados no `userData` do sprite por `attachActorVisualMeshes`
- * (dentro de createIsoScene3D — a função de módulo não tem a cena, o sprite
- * carrega as referências):
+ * Consome os dados puros de `buildActorVisual` (actor.ts) e aplica nos meshes
+ * pendurados no `userData` do sprite:
  *
- * - **Sombra**: disco escuro assentado no piso REAL (`floorY`, o z do
- *   iso-core sem o offset visual do pulo) + `SHADOW_EPS` — o deslocamento
- *   mínimo que evita z-fight com o chão onde o ator pisa. Opacidade
- *   proporcional à altura da parábola do pulo.
+ * - **Sombra**: disco escuro assentado no piso REAL (`floorY`, o z do iso-core
+ *   sem o offset visual do pulo) + `SHADOW_EPS`. Opacidade proporcional à
+ *   altura da parábola do pulo.
  * - **Seta**: triângulo no chão, um pouco acima da sombra, com a ponta no
- *   ângulo da direção de tela (`directionIndex`, 0=sul) projetado no plano
- *   XZ do mundo.
+ *   ângulo da direção de tela (`directionIndex`, 0=sul) projetado no plano XZ.
  *
- * Campos ausentes de `ActorSprite` caem para defaults seguros: direção sul,
- * piso na altura dos pés e pulo completo (sombra plena).
- *
- * `cameraTurn` é o turn atual da câmera (0-3): sem ele a seta apontaria para
- * o sul de TELA como se o mundo nunca girasse — certa só na vista 0. O turn
- * corrige o ângulo da seta, que vive no plano XZ do mundo.
+ * `cameraTurn` é o turn atual da câmera (0-3): sem ele a seta apontaria para o
+ * sul de TELA como se o mundo nunca girasse — certo só na vista 0.
  */
 export function updateActorVisual(
   sprite: THREE.Sprite,
@@ -827,61 +899,38 @@ export function updateActorVisual(
   if (arrow) {
     arrow.position.set(actor.x, visual.floorY + SHADOW_EPS + ARROW_EPS, actor.z);
     // A ponta do triângulo local +X precisa apontar para (cos α, 0, sin α);
-    // a rotação em Y de −α faz exatamente isso (R_y(θ)·(1,0,0) = (cos θ, 0, −sin θ)).
+    // a rotação em Y de −α faz exatamente isso.
     arrow.rotation.y = -visual.directionAngle;
   }
 }
 
+// ------------------------------------------------------------------ partículas
+
 /**
- * Configura shadowMap, luz e piso visível (R8).
+ * Como cada cena desenha, para o laço de partículas.
  *
- * - shadowMap ativado com PCF suave (bordas de sombra difusas).
- * - `sun` projeta sombra em 2048×2048 — caro, mas só custa nas renders
- *   on-demand do editor; não há loop contínuo. O `autoUpdate` da sombra
- *   fica no default (true) de propósito: com false, um cubo colocado depois
- *   da primeira render nunca projetaria sombra (mapa estático e velho).
- * - Frustum, posição da luz e alvo acompanham o piso (bounds do mapa).
- *
- * `groundPlane` deve ser o piso VISÍVEL (createShadowPlane), já adicionado à
- * cena — a função lê posição e escala dele para dimensionar a sombra.
+ * `spawnParticles` recebe só a scene (contrato do stub), mas o editor é
+ * render-on-demand — sem esta referência a animação não teria como desenhar.
+ * WeakMap: a entrada some sozinha quando a cena é coletada.
  */
-export function configureShadowSystem(
-  renderer: THREE.WebGLRenderer,
-  sun: THREE.DirectionalLight,
-  groundPlane: THREE.Mesh,
-): void {
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.near = 0.5;
-  sun.shadow.camera.far = 100;
-  // Bias negativo: afasta o depth da superfície que recebe a sombra, para
-  // a própria luz não marcar acne no cubo que a projeta.
-  sun.shadow.bias = -0.0005;
-
-  sizeShadowFrustum(sun, groundPlane);
-}
+const renderContexts = new WeakMap<
+  THREE.Scene,
+  { readonly renderNow: () => void }
+>();
 
 /**
- * Dispara partículas na posição de um bloco colocado/removido (R9).
+ * Dispara partículas na posição de um bloco colocado/removido.
  *
- * Cubinhos 0.1³ (geometria compartilhada) com material básico colorido —
- * sem luz, para o efeito não depender do rig de iluminação. Sobem com
- * velocidade inicial, caem com gravidade (−9.8 units/s²) e somem por fade
- * out em ~0.5 s.
+ * Cubinhos 0,1³ (geometria compartilhada) com material básico colorido — sem
+ * luz, para o efeito não depender do rig de iluminação. Sobem com velocidade
+ * inicial, caem com gravidade (−9,8 units/s²) e somem por fade out em ~0,5 s.
  *
- * O editor é render-on-demand: o laço de animação é um rAF próprio que
- * renderiza a cena a cada frame e se limpa sozinho no fim (remove os
- * meshes, descarta os materiais, renderiza um frame final limpo e para).
- * Se a cena for destruída no meio, o laço detecta e aborta sem renderizar.
+ * O laço é um rAF próprio que se limpa sozinho no fim. Se a cena for destruída
+ * no meio, o laço detecta pelo WeakMap e aborta sem desenhar num renderer já
+ * descartado.
  *
- * `position` é o centro do bloco em world units (y com o offset de meio
- * cubo, como em `render()`). A integração com o editor (chamar ao
- * colocar/remover) fica para depois — esta função é o contrato.
- *
- * @param count Número de partículas (default 8).
+ * `position` é o centro do bloco em world units (y com o offset de meio cubo,
+ * como em `syncBlocks`).
  */
 export function spawnParticles(
   scene: THREE.Scene,
@@ -889,7 +938,7 @@ export function spawnParticles(
   count = 8,
 ): void {
   const ctx = renderContexts.get(scene);
-  if (!ctx || count <= 0) return; // cena sem renderer registrado → não anima
+  if (!ctx || count <= 0) return;
 
   if (!particleBox) {
     particleBox = new THREE.BoxGeometry(0.1, 0.1, 0.1);
@@ -899,23 +948,22 @@ export function spawnParticles(
   // materiais compartilhados sumiriam todos juntos.
   const particles: Particle[] = [];
   const materials: THREE.MeshBasicMaterial[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < count; i += 1) {
     const color = PARTICLE_COLORS[i % PARTICLE_COLORS.length]!;
     const material = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      depthWrite: false, // transparência não deve ocultar o que está atrás
+      depthWrite: false,
     });
     materials.push(material);
     const mesh = new THREE.Mesh(particleBox, material);
-    // Espalha num cubo de 0.3 ao redor do centro do bloco.
     mesh.position.set(
       position.x + (Math.random() - 0.5) * 0.3,
       position.y + (Math.random() - 0.5) * 0.3,
       position.z + (Math.random() - 0.5) * 0.3,
     );
     mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-    mesh.renderOrder = 10; // desenha por cima dos cubos
+    mesh.renderOrder = 10;
     scene.add(mesh);
     particles.push({
       mesh,
@@ -933,15 +981,10 @@ export function spawnParticles(
   let last = performance.now();
 
   const tick = (now: number): void => {
-    // Cena destruída durante a animação (destroy chamou renderContexts.delete)
-    // → aborta sem renderizar num renderer já disposto.
     if (renderContexts.get(scene) !== ctx) {
       cleanup();
       return;
     }
-
-    // Clamp do dt: após uma aba inativa o primeiro frame saltaria e as
-    // partículas atravessariam o chão.
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
@@ -953,20 +996,19 @@ export function spawnParticles(
         continue;
       }
       alive = true;
-      p.velY -= 9.8 * dt; // gravidade
-      p.mesh.position.y += p.velY * dt; // sobem e depois caem
-      (p.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - p.age / p.lifetime; // fade out
+      p.velY -= 9.8 * dt;
+      p.mesh.position.y += p.velY * dt;
+      (p.mesh.material as THREE.MeshBasicMaterial).opacity =
+        1 - p.age / p.lifetime;
     }
 
-    ctx.renderer.render(scene, ctx.camera);
+    ctx.renderNow();
 
     if (alive) {
       requestAnimationFrame(tick);
     } else {
-      // Fim: remove tudo e renderiza uma última vez para o frame final
-      // (sem partículas) aparecer.
       cleanup();
-      ctx.renderer.render(scene, ctx.camera);
+      ctx.renderNow();
     }
   };
 
@@ -984,7 +1026,7 @@ interface Particle {
   age: number;
 }
 
-/** Geometria compartilhada dos cubinhos de partícula (0.1³). */
+/** Geometria compartilhada dos cubinhos de partícula (0,1³). */
 let particleBox: THREE.BoxGeometry | null = null;
 
 /** Cores vivas das partículas — visíveis porque o material ignora luz. */
@@ -992,13 +1034,21 @@ const PARTICLE_COLORS: readonly number[] = [
   0xffd166, 0xff6b6b, 0x4ecdc4, 0xffa94d, 0x74c0fc,
 ];
 
-/**
- * Descarta a geometria compartilhada das partículas. Chamar no destroy da
- * cena — como `disposeCubeCache` do cube3d.
- */
+/** Descarta a geometria compartilhada das partículas. Chamar no destroy. */
 export function disposeParticles(): void {
   if (particleBox) {
     particleBox.dispose();
     particleBox = null;
   }
+  if (_sharedShadowGeo) {
+    _sharedShadowGeo.dispose();
+    _sharedShadowGeo = null;
+  }
+  if (_sharedArrowGeo) {
+    _sharedArrowGeo.dispose();
+    _sharedArrowGeo = null;
+  }
 }
+
+/** Faixa de zoom aceita pelos controles — reexportada para a UI. */
+export { MIN_ZOOM, MAX_ZOOM };
