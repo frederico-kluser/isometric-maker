@@ -26,8 +26,6 @@
 import * as THREE from 'three';
 import {
   CANONICAL_CUBE,
-  columnBounds,
-  diamondRow,
   type IsoCubeGeometry,
 } from '../../../../../packages/iso-core/src/iso-cube.ts';
 import { makeCubeCanvasFromHue, makeCubeViewsFromHue } from './cube-canvas.ts';
@@ -179,117 +177,74 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
 }
 
 /**
- * DEWARPA as 3 faces visíveis de um sprite isométrico para texturas quadradas
- * (W×W), próprias para as faces de um BoxGeometry.
+ * RECORTA as 3 faces visíveis de um sprite isométrico em texturas retangulares,
+ * SEM de-warp — cada face é um retângulo do sprite copiado 1:1, na posição e
+ * orientação originais, sem reamostragem.
  *
  * O sprite (ex.: `faceUrls.north`, 48×53 para o CANONICAL_CUBE) já mostra o
- * cubo em perspectiva: o topo é um losango W×H e as laterais são
- * paralelogramos de `cubeHeight` linhas. Usar o sprite inteiro como textura de
- * uma face do cubo 3D distorce a arte — a UV cobre o quadrado da face, não o
- * losango. O de-warp inverte a projeção de cada face para um quadrado W×W:
+ * cubo inteiro em projeção 2:1: o topo é um losango W×H no alto e as laterais
+ * são paralelogramos de `cubeHeight` linhas. As três regiões são recortadas
+ * direto do sprite:
  *
- *   - **Topo**: a inversa exata da projeção 2:1 restrita ao topo é
- *     `sx = (c − r + W) / 2`, `sy = (c + r) · H / (2W)`. A linha `r` da
- *     textura é a reta do mundo `z = cte`; esticar cada linha do losango
- *     isoladamente ("row stretch") cisalha a arte, porque a linha do losango
- *     `y` é a reta `x + z = cte` — as duas só coincidem na diagonal. Com a
- *     inversa exata, o render do cubo na vista 0 reproduz o sprite pixel a
- *     pixel.
- *   - **Laterais**: cada coluna de origem (0..W/2−1 para a esquerda,
- *     W/2..W−1 para a direita) tem exatamente `cubeHeight` linhas de face,
- *     de `sideStart(x)` a `sideEnd(x)` (`columnBounds`). As `d` linhas são
- *     esticadas para encher as `W` linhas do quadrado, e as `W/2` colunas
- *     preenchem as `W` colunas do destino na mesma ordem — sem espelhamento.
+ *   - **Topo**: o bounding box do losango — W colunas × H linhas (as primeiras
+ *     `tileHeight` linhas do sprite, largura cheia).
+ *   - **Direita**: a metade direita do sprite abaixo do topo — colunas
+ *     W/2..W−1, linhas `tileHeight`..fim (a face SE do cubo).
+ *   - **Esquerda**: a metade esquerda abaixo do topo — colunas 0..W/2−1,
+ *     linhas `tileHeight`..fim (a face SW do cubo).
  *
- * A amostragem é nearest-neighbor (pixel art, `imageSmoothingEnabled = false`
- * em tudo) e pixels fora da silhueta saem transparentes, como no sprite.
+ * As texturas ficam retangulares; o mapeamento UV do BoxGeometry estica cada
+ * uma para a face quadrada correspondente, sem transformação de pixels na
+ * origem. A amostragem é nearest-neighbor (pixel art, `imageSmoothingEnabled =
+ * false`). Os pixels transparentes (margens do losango, cantos, áreas fora da
+ * silhueta) são preenchidos com a cor da face — a mesma do cubo procedural —
+ * porque o MeshLambertMaterial com `transparent: false` (default) renderizaria
+ * transparência como preto opaco.
  */
-function dewarpFaces(
+function cropFaces(
   sourceImage: HTMLImageElement,
   geom: IsoCubeGeometry,
-): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } | null {
-  const { spriteWidth: w, spriteHeight: h, tileWidth, tileHeight, cubeHeight: d } = geom;
+  hue: number,
+): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } {
+  const { spriteHeight: h, tileWidth, tileHeight } = geom;
   const half = tileWidth / 2;
-  const out = tileWidth; // saída quadrada: W×W
 
-  // Fonte: desenha o sprite num canvas para ler os pixels sem reamostragem.
-  const srcCanvas = document.createElement('canvas');
-  srcCanvas.width = w;
-  srcCanvas.height = h;
-  const srcCtx = srcCanvas.getContext('2d');
-  if (!srcCtx) return null;
-  srcCtx.imageSmoothingEnabled = false;
-  srcCtx.drawImage(sourceImage, 0, 0);
-  const srcData = srcCtx.getImageData(0, 0, w, h);
+  // Cores de preenchimento — as mesmas das faces procedurais (cube-raster.ts):
+  // topo mais claro (0.62), laterais mais escuras (0.47), saturação 0.45.
+  const topFill = `hsl(${hue} 45% 62%)`;
+  const sideFill = `hsl(${hue} 45% 47%)`;
 
-  /** Canvas de saída quadrado, via createImageData + putImageData. */
-  function makeFaceCanvas(): {
-    canvas: HTMLCanvasElement;
-    ctx: CanvasRenderingContext2D;
-    data: ImageData;
-  } {
+  /**
+   * Copia o retângulo (x, y, cw×ch) do sprite para um canvas novo, 1:1,
+   * preenchendo antes o fundo com a cor da face.
+   */
+  function cropRect(
+    x: number,
+    y: number,
+    cw: number,
+    ch: number,
+    fill: string,
+  ): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
-    canvas.width = out;
-    canvas.height = out;
+    canvas.width = cw;
+    canvas.height = ch;
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas 2d indisponível para de-warp de face');
+    if (!ctx) throw new Error('canvas 2d indisponível para recorte de face');
     ctx.imageSmoothingEnabled = false;
-    return { canvas, ctx, data: ctx.createImageData(out, out) };
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(sourceImage, x, y, cw, ch, 0, 0, cw, ch);
+    return canvas;
   }
 
-  /** Copia o pixel (sx, sy) da fonte para o destino; fora do sprite → transparente. */
-  function copyPixel(sx: number, sy: number, dst: ImageData, di: number): void {
-    const xi = Math.floor(sx);
-    const yi = Math.floor(sy);
-    if (xi < 0 || xi >= w || yi < 0 || yi >= h) return;
-    const si = (yi * w + xi) * 4;
-    dst.data[di] = srcData.data[si]!;
-    dst.data[di + 1] = srcData.data[si + 1]!;
-    dst.data[di + 2] = srcData.data[si + 2]!;
-    dst.data[di + 3] = srcData.data[si + 3]!;
-  }
+  // O topo ocupa as primeiras `tileHeight` linhas do sprite; as laterais ficam
+  // ABAIXO dele. Recortar das linhas iniciais incluiria a metade do losango do
+  // topo na parede.
+  const top = cropRect(0, 0, tileWidth, tileHeight, topFill);
+  const right = cropRect(half, tileHeight, half, h - tileHeight, sideFill);
+  const left = cropRect(0, tileHeight, half, h - tileHeight, sideFill);
 
-  // --- topo: losango (W×H) → quadrado W×W ---
-  const top = makeFaceCanvas();
-  for (let r = 0; r < out; r++) {
-    for (let c = 0; c < out; c++) {
-      const sx = (c - r + tileWidth) / 2;
-      const sy = ((c + r) * tileHeight) / (2 * tileWidth); // = (c+r)/4 com 2:1
-      // A inversa exata cai sempre dentro do losango; o clamp defende a arte
-      // gerada que fugir um pouco do contrato de pixel (diamondRow).
-      const span = diamondRow(Math.floor(sy), geom);
-      const spanMin = span.start;
-      const spanMax = span.start + span.width - 1;
-      copyPixel(Math.min(Math.max(sx, spanMin), spanMax), sy, top.data, (r * out + c) * 4);
-    }
-  }
-  top.ctx.putImageData(top.data, 0, 0);
-
-  // --- laterais: paralelogramo (W/2 × d) → quadrado W×W ---
-  // Esquerda usa as colunas 0..W/2−1; a direita é o espelho (W/2..W−1).
-  function dewarpSide(
-    side: 'left' | 'right',
-  ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; data: ImageData } {
-    const face = makeFaceCanvas();
-    const columnOf = (c: number): number => (side === 'left' ? c / 2 : half + c / 2);
-    for (let c = 0; c < out; c++) {
-      const sx = columnOf(c);
-      const b = columnBounds(Math.floor(sx), geom);
-      if (b === null) continue;
-      for (let r = 0; r < out; r++) {
-        // As `d` linhas da face na coluna viram as `W` linhas do quadrado.
-        const sy = b.sideStart + (r * d) / out;
-        copyPixel(sx, sy, face.data, (r * out + c) * 4);
-      }
-    }
-    face.ctx.putImageData(face.data, 0, 0);
-    return face;
-  }
-
-  const left = dewarpSide('left');
-  const right = dewarpSide('right');
-
-  return { top: top.canvas, left: left.canvas, right: right.canvas };
+  return { top, left, right };
 }
 
 /**
@@ -299,23 +254,27 @@ function dewarpFaces(
 async function extractFacesFromUrl(
   url: string,
   geom: IsoCubeGeometry,
+  hue: number,
 ): Promise<{ top: THREE.Texture; left: THREE.Texture; right: THREE.Texture } | null> {
   const img = await loadImage(url);
   if (!img) return null;
-  const faces = dewarpFaces(img, geom);
-  if (!faces) return null;
-  // canvasTexture para todas as texturas extraídas: nearest, sem mipmaps, sRGB.
-  return {
-    top: canvasTexture(faces.top),
-    left: canvasTexture(faces.left),
-    right: canvasTexture(faces.right),
-  };
+  try {
+    const faces = cropFaces(img, geom, hue);
+    // canvasTexture para todas as texturas recortadas: nearest, sem mipmaps, sRGB.
+    return {
+      top: canvasTexture(faces.top),
+      left: canvasTexture(faces.left),
+      right: canvasTexture(faces.right),
+    };
+  } catch {
+    return null; // fallthrough → procedural se o crop falhar
+  }
 }
 
 // ------------------------------------------------------------------ mapeamento de faces extraídas para BoxGeometry
 
 /**
- * Cria os 6 materiais a partir das 3 faces extraídas de UM sprite.
+ * Cria os 6 materiais a partir das 3 faces recortadas de UM sprite.
  *
  * O sprite "north" é a vista sul do cubo (ADR 0029: "north → south é fixo"),
  * desenhada na projeção 2:1: a metade direita do sprite é a face SE do cubo
@@ -371,7 +330,7 @@ function materialsFromExtractedFaces(
  * Cria os 6 materiais para um cubo a partir de um BlockDef.
  *
  * Estratégia:
- * 1. Se tem `faceUrls` (v2: 4 faces), extrai as 3 faces do sprite e mapeia
+ * 1. Se tem `faceUrls` (v2: 4 faces), recorta as 3 faces do sprite e mapeia
  * 2. Se tem `spritesheetUrl` (v3: textura animada), usa o primeiro frame em
  *    todas as faces laterais
  * 3. Se não tem arte, usa cor procedural com matiz
@@ -379,12 +338,12 @@ function materialsFromExtractedFaces(
 export async function createCubeMaterials(
   block: BlockDef,
 ): Promise<CubeMaterials> {
-  // Face URLs (v2: 4 faces por direção) — extrai topo/esquerda/direita do sprite
+  // Face URLs (v2: 4 faces por direção) — recorta topo/esquerda/direita do sprite
   if (block.faceUrls) {
     // Usa o sprite "north" (vista sul, ADR 0029). As 3 faces dele ficam
     // presas às faces +X/+Z/+Y do cubo; girar a câmera mostra outras faces
     // do mesmo cubo, sem trocar os materiais (ver materialsFromExtractedFaces).
-    const faces = await extractFacesFromUrl(block.faceUrls.north, CANONICAL_CUBE);
+    const faces = await extractFacesFromUrl(block.faceUrls.north, CANONICAL_CUBE, block.hue ?? 210);
     if (faces) {
       return materialsFromExtractedFaces(faces, 0, block.hue ?? 210);
     }
