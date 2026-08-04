@@ -603,9 +603,6 @@ test('south com reference.png envia init_image + strength 500; sem, omite', asyn
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
-    // Sem molde: o seed nasce com o adulto (ADR 0035) e, com molde, o
-    // init_image é SEMPRE o molde — este teste exercita o caminho histórico.
-    delete store.studio.characters[0]!.mold;
 
     // Sem o arquivo: a sul vai em modo texto puro, sem init_image.
     await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
@@ -647,9 +644,6 @@ test('modo manequim: o texto vira estilo, e negative_description + coverage_perc
     const client = new FakeClient();
     const ch = store.studio.characters[0]!;
     ch.mannequin = true;
-    // Sem molde: o seed nasce com o adulto (ADR 0035) e o negativo do molde
-    // se somaria ao do andaime — este teste isola o negativo do modo manequim.
-    delete ch.mold;
 
     await generateSouthFromText(client, store, CHAR_ID, 'ragnarok online 2002 style', opts);
 
@@ -683,10 +677,6 @@ test('fora do modo manequim, negative_description e coverage_percentage são omi
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
-    // Sem molde: o seed nasce com o adulto (ADR 0035) e, com molde, o
-    // negative_description é obrigatório (MOLD_NEGATIVE) — este teste isola
-    // a omissão F0-09 do caminho sem molde e sem modo manequim.
-    delete store.studio.characters[0]!.mold;
     await generateSouthFromText(client, store, CHAR_ID, 'um mago de robe azul', opts);
 
     const body = client.calls.find((c) => c.path === '/create-image-bitforge')?.body ?? {};
@@ -703,9 +693,6 @@ test('negativo extra do personagem entra sem o modo manequim ligado', async () =
   const { dir, store, opts } = makeHarness();
   try {
     const client = new FakeClient();
-    // Sem molde: o seed nasce com o adulto (ADR 0035) e o MOLD_NEGATIVE se
-    // somaria ao texto — este teste isola o negativo extra do personagem.
-    delete store.studio.characters[0]!.mold;
     store.studio.characters[0]!.negativePrompt = 'tattoo, scars';
 
     await generateSouthFromText(client, store, CHAR_ID, 'um guerreiro', opts);

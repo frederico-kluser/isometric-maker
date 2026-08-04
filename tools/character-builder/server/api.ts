@@ -1638,10 +1638,6 @@ export async function handle(
 				// Sem silhueta informada, o derivado herda a do manequim: é o corpo
 				// de referência, e peça só vale dentro da mesma silhueta.
 				silhouette: b.silhouette ?? base.silhouette,
-				// O molde de proporção também é herdado do corpo-base: derivado
-				// é o mesmo corpo, então a mesma referência geométrica (adulto
-				// por padrão no manequim). O usuário pode trocar no passo da sul.
-				...(base.mold !== undefined ? { mold: base.mold } : {}),
 				size: lock.size,
 				seed: b.seed ?? Math.floor(Math.random() * 100000),
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },

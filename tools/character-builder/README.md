@@ -69,9 +69,9 @@ Um import de bundle interage com a trava: studio **sem** lock trava na hora com 
 
 ## Manequim default: export/import
 
-O manequim é o personagem mais caro do estúdio (sul + 8 direções). O botão de export grava o resultado em `/home/ondokai/Projects/isometric-maker/packages/game-assets/manequim/` — `mannequin.json` + 12 PNGs (sul, 3 cardeais, 8 direções) — e o import restaura esse bundle num studio novo ou quebrado **sem chamar a API**: é filesystem e validação (dimensões e schema), nunca rede. Com um bundle presente nesse diretório, o wizard oferece o atalho "importar default do projeto".
+O manequim é o personagem mais caro do estúdio (sul + 3 rotações + 8 direções). O botão de export grava o resultado em `/home/ondokai/Projects/isometric-maker/packages/game-assets/manequim/` — `mannequin.json` + 12 PNGs (sul, 3 cardeais, 8 direções) — e o import restaura esse bundle num studio novo ou quebrado **sem chamar a API**: é filesystem e validação (dimensões e schema), nunca rede. Com o bundle presente, o wizard oferece o atalho "importar default do projeto".
 
-**O projeto não shipa mais esse bundle** (removido em 2026-08-03, onda `onda4-character`): era um personagem gerado pronto, e a geração passou a partir do **molde adulto** como referência (ADR 0035 — o manequim nasce com `mold: "adulto"` no `seedStudio`). O diretório fica vazio numa instalação fresca e o atalho não aparece — exportar manualmente após gerar volta a populá-lo, e o import continua funcionando para bundles do usuário.
+**Verificado em 2026-07-31:** o diretório ainda não existe — nenhum manequim foi exportado até aqui, então o atalho não aparece numa instalação fresca.
 
 ## Personagens derivados
 

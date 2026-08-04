@@ -480,13 +480,6 @@ export function seedStudio(): Studio {
 				// No modo from-scratch (direto) o teto é 256.
 				size: 128,
 				seed: 1,
-				// Molde adulto por padrão: é a referência de proporção do
-				// projeto (ADR 0035) — a sul nasce com o adulto em `init_image`
-				// (força 320) e o usuário pode trocar para criança ou nenhum no
-				// passo da sul. Antes do molde existir, a proporção dependia só
-				// do texto, e o projeto shipava um manequim gerado pronto; esse
-				// bundle foi removido — o corpo agora é gerado a partir do molde.
-				mold: "adulto",
 				wizard: { etapa: "sul", southVersions: [], activeSouth: 0 },
 				createdAt: now,
 			},
