@@ -17,6 +17,7 @@ import { describe, it } from 'node:test';
 import { DEFAULT_CATALOG } from './block-catalog.ts';
 import {
   entityAabb,
+  EPS,
   PLAYER_HALF,
   pressedCells,
   pushOut,
@@ -309,5 +310,162 @@ describe('pushPlayerOutOfCell — colocar bloco sobre o personagem', () => {
 
   it('o mapa sem o bloco não tem o que empurrar', () => {
     assert.equal(pushPlayerOutOfCell(BASE, DEFAULT_CATALOG, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 1 }), null);
+  });
+});
+
+// ------------------------------------------------------------------ contacto perfeito
+
+/**
+ * Penetração EXACTA da caixa em células sólidas, sem tolerância (em células).
+ * É o que a varredura NUNCA pode criar: se a caixa aterra com penetração
+ * maior que `EPS`, o "nunca entra num cubo sólido" falhou.
+ */
+function maxPenetration(map: FakeBoxMap, box: EntityBox): number {
+  const a = entityAabb(box);
+  let worst = 0;
+  for (let x = Math.floor(a.minX); x <= Math.floor(a.maxX); x++) {
+    for (let y = Math.floor(a.minY); y <= Math.floor(a.maxY); y++) {
+      if (!map.solidAt(x, y, box.z)) continue;
+      const ox = Math.min(a.maxX, x + 1) - Math.max(a.minX, x);
+      const oy = Math.min(a.maxY, y + 1) - Math.max(a.minY, y);
+      if (ox > 0 && oy > 0) worst = Math.max(worst, Math.min(ox, oy));
+    }
+  }
+  return worst;
+}
+
+describe('contacto perfeito — a face da caixa pára na face do cubo, nunca dentro', () => {
+  it('regressão do fuzz: o clamp em −x não enterra a face no muro (1 ulp)', () => {
+    // A cadeia `cx + (faceClampada − (cx − half))` arredondava a face em
+    // −4,4e-16 — DENTRO do muro — e o span sem tolerância no lado inferior
+    // via a coluna do muro: o deslizar ficava preso para sempre.
+    const map = new FakeBoxMap().addSolid(-1, 0, 1).addSolid(-1, 1, 1);
+    const box = boxAt(0.8975374926812947, 1.2885855599306524, 1);
+    const r = resolveMovement(map, box, -1, -0.3333333333333333);
+    const faceX = r.x - PLAYER_HALF;
+    assert.ok(faceX >= -EPS, `face ${faceX} entrou no muro em −x`);
+    assert.ok(Math.abs(faceX) < 1e-9, `face ${faceX} devia estar colada a 0`);
+    assert.ok(maxPenetration(map, boxAt(r.x, r.y, 1)) <= EPS, 'nada além da tolerância dentro do sólido');
+  });
+
+  it('movimento que terminaria a 1e-12 DENTRO da fronteira clampa colado nela (+x)', () => {
+    const map = new FakeBoxMap().addSolid(2, 0, 1);
+    const box = boxAt(0.5, 0.5, 1);
+    const dx = 2 - (0.5 + PLAYER_HALF) + 1e-12; // face + dx = 2,000000000001
+    const r = resolveMovement(map, box, dx, 0);
+    assert.ok(Math.abs(r.x + PLAYER_HALF - 2) < 1e-9, `face ${r.x + PLAYER_HALF} devia ser 2`);
+    assert.equal(r.blockedX, true, 'o clamp disparou');
+    assert.ok(maxPenetration(map, boxAt(r.x, r.y, 1)) <= EPS);
+  });
+
+  it('movimento que terminaria a 1e-12 DENTRO da fronteira clampa colado nela (−x)', () => {
+    const map = new FakeBoxMap().addSolid(-1, 0, 1);
+    const box = boxAt(0.5, 0.5, 1);
+    const dx = 0 - (0.5 - PLAYER_HALF) - 1e-12; // face + dx = −1e-12
+    const r = resolveMovement(map, box, dx, 0);
+    assert.ok(Math.abs(r.x - PLAYER_HALF - 0) < 1e-9, `face ${r.x - PLAYER_HALF} devia ser 0`);
+    assert.equal(r.blockedX, true);
+    assert.ok(maxPenetration(map, boxAt(r.x, r.y, 1)) <= EPS);
+  });
+
+  it('a célula terminal da varredura é sempre o destino real — até a ε da fronteira', () => {
+    // O `to` antigo com EPS puxava a terminal para K ∓ 1 quando face + dx
+    // caía a menos de EPS da fronteira: a célula de destino nunca era
+    // varrida e a caixa aterraria embutida nela. Com `to = floor(face + dx)`
+    // os dois lados da fronteira são varridos.
+    const map = new FakeBoxMap().addSolid(2, 0, 1);
+    const box = boxAt(0.5, 0.5, 1);
+    // face + dx = 2 − 1e-12 (a 1e-12 do muro): continua livre, face em 1,999999999999
+    const dx = 2 - (0.5 + PLAYER_HALF) - 1e-12;
+    const r = resolveMovement(map, box, dx, 0);
+    assert.equal(r.blockedX, false, 'terminar antes da face não é bloquear');
+    assert.ok(r.x + PLAYER_HALF <= 2, `face ${r.x + PLAYER_HALF} não pode passar de 2`);
+  });
+});
+
+describe('estabilidade de contacto — encostado no muro, assenta e não vibra', () => {
+  it('pressionar o muro 200 quadros assenta na face (x = 1,675) e fica', () => {
+    const map = new FakeBoxMap().addSolid(2, 0, 1).addSolid(2, 1, 1).addSolid(2, 2, 1);
+    let box = boxAt(0.5, 0.5, 1);
+    const xs: number[] = [];
+    for (let f = 0; f < 200; f++) {
+      const r = resolveMovement(map, box, 0.06666666666666667, 0);
+      box = { ...box, cx: r.x, cy: r.y };
+      xs.push(box.cx);
+    }
+    for (const x of xs) {
+      assert.ok(x + PLAYER_HALF <= 2 + EPS, `frame: face ${x + PLAYER_HALF} passou do muro`);
+    }
+    assert.ok(Math.abs(xs[xs.length - 1]! - 1.675) < 1e-9, 'assentou na face do muro (2 − half)');
+    // depois do assentamento, nenhum quadro move a caixa — não há vibração
+    for (let i = 25; i < xs.length; i++) {
+      assert.ok(Math.abs(xs[i]! - xs[i - 1]!) < 1e-12, `vibrou entre ${i - 1} e ${i}`);
+    }
+  });
+
+  it('caixa com a face colada ao muro desliza ao longo dele sem entrar', () => {
+    const map = new FakeBoxMap().addSolid(2, 0, 1).addSolid(2, 1, 1).addSolid(2, 2, 1);
+    const box = boxAt(1.675, 0.5, 1); // maxX = 2,0 exactamente
+    const r = resolveMovement(map, box, 0.05, 0.4);
+    assert.equal(r.blockedX, true, 'o eixo do muro continua bloqueado');
+    assert.equal(r.blockedY, false, 'o eixo livre desliza');
+    assert.ok(Math.abs(r.x - 1.675) < 1e-12, 'a face não se moveu');
+    assert.ok(Math.abs(r.y - 0.9) < 1e-9, 'deslizou em y');
+    assert.ok(maxPenetration(map, boxAt(r.x, r.y, 1)) <= EPS);
+  });
+
+  it('uma face a 1 ulp dentro do muro (pior caso do clamp) não trava o eixo livre', () => {
+    // cx = 0,325 − 1 ulp → minX = −4,4e-16: o pior caso medido do
+    // arredondamento do clamp. Sem tolerância no lado inferior do span, o
+    // eixo livre via a coluna do muro e ficava preso para sempre.
+    const map = new FakeBoxMap().addSolid(-1, 0, 1).addSolid(-1, 1, 1);
+    const box = boxAt(0.32499999999999996, 0.5, 1);
+    const r = resolveMovement(map, box, 0, 0.4);
+    assert.equal(r.blockedY, false, 'a face a −4,4e-16 não pode travar o deslizar');
+    assert.ok(Math.abs(r.y - 0.9) < 1e-9);
+    assert.ok(Math.abs(r.x - 0.32499999999999996) < 1e-12, 'a face não se moveu no eixo bloqueado');
+  });
+});
+
+describe('cantos internos — a quina de duas paredes perpendiculares', () => {
+  it('duas paredes perpendiculares param o personagem na quina, nos dois eixos', () => {
+    const map = new FakeBoxMap().addSolid(1, 0, 1).addSolid(1, 1, 1).addSolid(0, 1, 1);
+    const box = boxAt(0.5, 0.5, 1);
+    const r = resolveMovement(map, box, 0.3, 0.3);
+    assert.deepEqual(r, { x: 0.675, y: 0.675, blockedX: true, blockedY: true });
+    assert.ok(maxPenetration(map, boxAt(r.x, r.y, 1)) <= EPS, 'a quina não se corta');
+  });
+
+  it('o canto de um L não se corta: a face norte assenta na face sul do L e o leste desliza', () => {
+    // L comprido (a parede sul estende-se 20 colunas) para o deslize não sair
+    // do alcance do muro durante os 200 quadros.
+    const map = new FakeBoxMap().addSolid(1, 2, 1);
+    for (let x = 1; x <= 20; x++) map.addSolid(x, 1, 1);
+    let box = boxAt(0.6, 0.6, 1);
+    for (let f = 0; f < 200; f++) {
+      const r = resolveMovement(map, box, 0.05, 0.05);
+      box = { ...box, cx: r.x, cy: r.y };
+      assert.ok(maxPenetration(map, box) <= EPS, `frame ${f}: caixa dentro do L`);
+      assert.ok(box.cy + PLAYER_HALF <= 1 + EPS, `frame ${f}: face norte entrou no L`);
+    }
+    assert.ok(Math.abs(box.cy + PLAYER_HALF - 1) < 1e-6, 'a face norte assenta na face do L');
+    assert.ok(box.cx > 1, 'deslizou para leste ao longo da face sul');
+  });
+
+  it('bloco sólido: a diagonal desliza pela face mais próxima, nunca corta a quina', () => {
+    // Muro com 20 colunas: o deslize de 200 quadros (10 células) não o ultrapassa.
+    const map = new FakeBoxMap();
+    for (let x = 1; x <= 20; x++) {
+      map.addSolid(x, 1, 1);
+      map.addSolid(x, 2, 1);
+    }
+    let box = boxAt(0.6, 0.6, 1);
+    for (let f = 0; f < 200; f++) {
+      const r = resolveMovement(map, box, 0.05, 0.05);
+      box = { ...box, cx: r.x, cy: r.y };
+      assert.ok(maxPenetration(map, box) <= EPS, `frame ${f}: caixa dentro do bloco`);
+    }
+    assert.ok(Math.abs(box.cy + PLAYER_HALF - 1) < 1e-6, 'a face norte pára na face sul do bloco');
+    assert.ok(box.cx > 1, 'deslizou para leste ao longo da face sul');
   });
 });

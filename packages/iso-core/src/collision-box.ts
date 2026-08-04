@@ -26,6 +26,23 @@
  * numa parede em diagonal desliza ao longo dela. Esta é a decisão de
  * "sliding natural" — por eixo, nunca diagonal.
  *
+ * ## Garantia de contacto: a face pára na face do cubo
+ *
+ * A varredura clampa a face DIANTEIRA da caixa na fronteira da primeira célula
+ * sólida do percurso — a face da caixa pára na face do cubo, nunca deixa o
+ * centro cruzar. Duas propriedades fazem o contacto ser estável:
+ *
+ *   - a célula terminal da varredura é `floor(face + deslocamento)`, SEM
+ *     tolerância — é onde a face termina, e se não for varrida a caixa aterra
+ *     embutida por ε na célula que devia tê-la parado na face;
+ *   - as funções de span (`rowSpan`/`colSpan`) toleram `EPS` dos dois lados da
+ *     fronteira: a face colada ao muro (mesmo a 1 ulp, o pior caso do
+ *     arredondamento do clamp) não faz a varredura perpendicular ver o muro —
+ *     deslizar ao longo da parede nunca trava.
+ *
+ * Resultado: em movimento contínuo a caixa nunca fica embutida além de `EPS`, e
+ * encostada numa parede ela assenta na face e fica — não vibra.
+ *
  * ## Z é discreto e fora do varrimento
  *
  * A caixa tem um nível `z` inteiro (o piso). O varrimento é só em X/Y; o Z
@@ -47,6 +64,13 @@
  * editor, por exemplo), a varredura devolve movimento zero — ela não empurra
  * nem deixa aprofundar. Quem resolve o encaixe é {@link pushOut}: empurra no
  * eixo de menor penetração (MTV), limitado a {@link MAX_PUSH} células.
+ *
+ * O push-out é a FERRAMENTA DE REPARO do editor, não um passo da simulação.
+ * O movimento contínuo já garante o contacto (ver "Garantia de contacto"
+ * acima): a varredura nunca cria uma caixa embutida, logo não há o que
+ * reparar quadro a quadro — e chamar o MTV por passo custaria a varredura de
+ * O(área da caixa) no laço quente e mudaria o comportamento preso nos
+ * traços. O `fixedStepWithMap` não chama push-out de propósito.
  *
  * As varreduras assumem `half < 0.5` (caixa mais estreita que a célula). O
  * `PLAYER_HALF` satisfaz isso; um `half` maior precisa de revisitar a
@@ -83,8 +107,34 @@ export const PLAYER_HALF = 0.325;
  */
 export const MAX_PUSH = 0.9;
 
-/** Tolerância de fronteira: encostar na fronteira de célula não é penetrar. */
-const EPS = 1e-9;
+/**
+ * Tolerância de fronteira (estabilidade), em células.
+ *
+ * Uma face que termina a menos de `EPS` da fronteira de uma célula conta como
+ * contacto, não como penetração. O valor foi medido, não chutado:
+ *
+ *   - o arredondamento do clamp da face — a cadeia
+ *     `cx + (faceClampada - (cx ± half))` erra a fronteira em ±1-2 ulps
+ *     (~2e-15 com o `PLAYER_HALF`) — coberto com 5×10⁵ de folga;
+ *   - a deriva acumulada do passo fixo (`pos += vel·dt`, 4 células/s a 1/60 s)
+ *     é ~4,7e-9 em 10⁵ quadros — mas ela só cresce em movimento LIVRE, no
+ *     eixo livre: a face pressionada é reposta a K ± 2e-15 por cada clamp, e
+ *     uma travessia de fronteira com a caixa em movimento é legítima. A
+ *     deriva nunca chega a uma decisão de fronteira que importe.
+ *
+ * Um EPS maior (0,001, por exemplo) foi testado e REJEITADO: a tolerância dos
+ * spans deixaria passar uma caixa por um canto de muro a menos de EPS — medido
+ * em 0,0009 — e ela "nadaria" ao longo da parede a essa profundidade. É a
+ * antítese do "nunca entra num cubo sólido". O piso de ruído é ~2e-15; 1e-9 é
+ * a ordem de grandeza certa.
+ *
+ * A tolerância vale para as funções de span (`rowSpan`/`colSpan`), que decidem
+ * com que células a caixa está em contacto — o lado do eixo livre, onde o
+ * contacto não pode travar o deslizar. A verificação de caixa embutida (face
+ * dianteira dentro de célula sólida, em `sweepX`/`sweepY`) continua EXACTA:
+ * uma caixa penetrada não avança mais para dentro, aconteça o que acontecer.
+ */
+export const EPS = 1e-9;
 
 // ------------------------------------------------------------------ tipos
 
@@ -183,14 +233,32 @@ function anySolidAt(col: number, z: number, y0: number, y1: number, solidAt: Sol
   return false;
 }
 
-/** Linhas que a caixa ocupa (intervalo Y meio-aberto em cima). */
+/**
+ * Linhas que a caixa ocupa (intervalo Y meio-aberto em cima).
+ *
+ * `EPS` dos DOIS lados. Sem a tolerância no lado inferior, um clamp que aterra
+ * a face em K − 1 ulp (o pior caso medido do arredondamento) faz a caixa
+ * "ocupar" a linha do muro — a varredura perpendicular vê a parede e o
+ * deslizar trava. Dentro de `EPS`, encostar é encostar, não ocupar.
+ */
 function rowSpan(box: EntityBox): { y0: number; y1: number } {
-  return { y0: Math.floor(box.cy - box.half), y1: Math.floor(box.cy + box.half - EPS) };
+  return {
+    y0: Math.floor(box.cy - box.half + EPS),
+    y1: Math.floor(box.cy + box.half - EPS),
+  };
 }
 
-/** Colunas que a caixa ocupa (intervalo X meio-aberto em cima). */
+/**
+ * Colunas que a caixa ocupa (intervalo X meio-aberto em cima).
+ *
+ * Mesma tolerância dos dois lados que em {@link rowSpan}: a face colada à
+ * fronteira (a ±EPS) não pode fazer a varredura perpendicular ver o muro.
+ */
 function colSpan(box: EntityBox): { x0: number; x1: number } {
-  return { x0: Math.floor(box.cx - box.half), x1: Math.floor(box.cx + box.half - EPS) };
+  return {
+    x0: Math.floor(box.cx - box.half + EPS),
+    x1: Math.floor(box.cx + box.half - EPS),
+  };
 }
 
 /**
@@ -217,7 +285,12 @@ export function sweepX(
   // Face inicial já dentro de sólido → caixa embutida: não anda.
   if (anySolidAt(Math.floor(face), box.z, y0, y1, solidAt)) return 0;
 
-  const to = Math.floor(dir > 0 ? face + dx - EPS : face + dx + EPS);
+  // A célula terminal é ONDE a face termina — `floor(face + dx)`, sem EPS.
+  // Um EPS aqui alarga um buraco: com face + dx = K ± ε, o floor com EPS puxa
+  // a terminal para K ∓ 1 e a célula de destino nunca é varrida — a caixa
+  // aterraria embutida na célula onde deveria ter parado na face (ε dentro
+  // do muro, e o próximo quadro fica preso: a varredura recusa embutida).
+  const to = Math.floor(face + dx);
   for (let cell = Math.floor(face) + dir; dir > 0 ? cell <= to : cell >= to; cell += dir) {
     if (anySolidAt(cell, box.z, y0, y1, solidAt)) {
       // Primeira célula sólida: clampa a face na fronteira dela. O bloco
@@ -249,7 +322,7 @@ export function sweepY(
 
   if (anySolidAtY(Math.floor(face), box.z, x0, x1, solidAt)) return 0;
 
-  const to = Math.floor(dir > 0 ? face + dy - EPS : face + dy + EPS);
+  const to = Math.floor(face + dy); // ver sweepX: a terminal é o destino real
   for (let cell = Math.floor(face) + dir; dir > 0 ? cell <= to : cell >= to; cell += dir) {
     if (anySolidAtY(cell, box.z, x0, x1, solidAt)) {
       const clampedFace = dir > 0 ? cell : cell + 1;
