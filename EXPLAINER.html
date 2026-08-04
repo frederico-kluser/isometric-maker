@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Sprites 3D: dewarp → crop simples</title>
+<title>Sprites 3D: sprite única nas faces do cubo</title>
 
 <link rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
@@ -39,20 +39,21 @@
 
 <nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
   <div class="container">
-    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>Sprites 3D: dewarp → crop simples</span>
-    <span class="navbar-text small text-body-secondary d-none d-md-inline">onda1-sprite-stretch · commit 5c200da</span>
+    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>Sprites 3D: sprite única nas faces</span>
+    <span class="navbar-text small text-body-secondary d-none d-md-inline">onda1-sprite-stretch · onda2-single-sprite</span>
   </div>
 </nav>
 
 <main class="container py-4" style="max-width: 60rem">
 
   <header class="mb-4">
-    <h1 class="display-6 fw-semibold">Sprites 3D: dewarp → crop simples</h1>
-    <p class="lead text-body-secondary">Substituição do pipeline de de-warp (projeção inversa pixel a pixel) por crop simples (recorte 1:1 via <code>drawImage</code>) nas texturas dos cubos 3D do editor de mapa.</p>
+    <h1 class="display-6 fw-semibold">Sprites 3D: sprite única nas faces do cubo</h1>
+    <p class="lead text-body-secondary">A mesma sprite isométrica aplicada como textura única nas 3 faces visíveis do cubo (+X, +Z, +Y) — sem recortes, sem dewarp, sem separação por face.</p>
     <div class="d-flex flex-wrap gap-2">
       <span class="badge text-bg-secondary">Three.js</span>
       <span class="badge text-bg-secondary">cube3d.ts</span>
       <span class="badge text-bg-secondary">2026-08-04</span>
+      <span class="badge text-bg-success">onda2</span>
     </div>
   </header>
 
@@ -66,134 +67,124 @@
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tab-como-fazer" data-bs-toggle="tab" data-bs-target="#pane-como-fazer"
               type="button" role="tab" aria-controls="pane-como-fazer" aria-selected="false">
-        Antes e depois
+        Código final
       </button>
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tab-armadilhas" data-bs-toggle="tab" data-bs-target="#pane-armadilhas"
               type="button" role="tab" aria-controls="pane-armadilhas" aria-selected="false">
-        Armadilhas &amp; revisão
+        Histórico &amp; iterações
       </button>
     </li>
   </ul>
 
   <div class="tab-content border border-top-0 rounded-bottom p-4" id="doc-tabs-content">
 
-    <!-- TAB 1: Visão geral -->
+    <!-- TAB 1 -->
     <div class="tab-pane fade show active" id="pane-visao-geral" role="tabpanel"
          aria-labelledby="tab-visao-geral" tabindex="0" data-print-title="Visão geral">
-      <h2 class="h4">O que mudou</h2>
-      <p>O editor 3D usa <strong>cubos Three.js</strong> (<code>BoxGeometry</code>) para representar blocos no mapa. Blocos com arte gerada (PixelLab v2) têm sprites isométricos que mostram as 3 faces visíveis do cubo numa única imagem (projeção 2:1, 48×53 px).</p>
-      <p>O código anterior usava <strong>de-warp</strong>: uma função de 105 linhas que aplicava a inversa da projeção isométrica pixel a pixel para separar o sprite em 3 texturas quadradas independentes (topo, esquerda, direita), uma para cada face do <code>BoxGeometry</code>.</p>
-      <p>O novo código usa <strong>crop simples</strong>: 25 linhas que recortam 3 retângulos do sprite com <code>ctx.drawImage()</code> — sem transformação de pixels, sem projeção inversa. As texturas são aplicadas diretamente às faces do cubo; o mapeamento UV do <code>BoxGeometry</code> estica cada uma para preencher a face.</p>
-
-      <h3 class="h5 mt-4">Regiões de crop</h3>
+      <h2 class="h4">Abordagem final</h2>
+      <p>Blocos com arte gerada (PixelLab v2, <code>faceUrls</code>) têm sprites isométricos que mostram as 3 faces visíveis do cubo numa única imagem (projeção 2:1, 48×53 px).</p>
+      <p><strong>A sprite é carregada como UMA textura e aplicada nas 3 faces visíveis do <code>BoxGeometry</code>:</strong></p>
       <table class="table table-sm">
-        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Região do sprite (48×53)</th><th>Dimensões</th></tr></thead>
+        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Textura</th></tr></thead>
         <tbody>
-          <tr><td>Topo</td><td>+Y (índice 2)</td><td><code>cropRect(0, 0, 48, 24)</code></td><td>48×24</td></tr>
-          <tr><td>Direita (SE)</td><td>+X (índice 0)</td><td><code>cropRect(24, 24, 24, 29)</code></td><td>24×29</td></tr>
-          <tr><td>Esquerda (SW)</td><td>+Z (índice 4)</td><td><code>cropRect(0, 24, 24, 29)</code></td><td>24×29</td></tr>
+          <tr><td>Direita (SE)</td><td>+X (índice 0)</td><td>Sprite inteira</td></tr>
+          <tr><td>Topo</td><td>+Y (índice 2)</td><td>Sprite inteira</td></tr>
+          <tr><td>Esquerda (SW)</td><td>+Z (índice 4)</td><td>Sprite inteira</td></tr>
+          <tr><td>Ocultas</td><td>−X, −Z, −Y</td><td>Cor sólida HSL</td></tr>
         </tbody>
       </table>
-      <p>As laterais começam na linha 24 (<code>tileHeight</code>) para excluir a região do losango do topo. Faces ocultas (−X, −Z, −Y) continuam com cor sólida HSL.</p>
+      <p><strong>A mesma sprite</strong> — sem recortes, sem dewarp, sem separação em 3 texturas. Cada face visível mostra a sprite isométrica completa.</p>
+
+      <h3 class="h5 mt-4">O que foi removido</h3>
+      <ul>
+        <li><code>dewarpFaces</code> — 105 linhas de projeção inversa pixel a pixel (onda 1: substituída por crop)</li>
+        <li><code>cropFaces</code> — 65 linhas de recorte em 3 regiões (onda 2: substituída por sprite única)</li>
+        <li><code>extractFacesFromUrl</code> — carregamento + crop + 3 canvas textures</li>
+        <li><code>materialsFromExtractedFaces</code> — mapeamento de 3 texturas para 6 faces</li>
+        <li><code>loadImage</code> — carregamento de Image para canvas</li>
+      </ul>
 
       <h3 class="h5 mt-4">Impacto</h3>
       <div class="row g-3">
-        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−63</div><small class="text-body-secondary">linhas de código</small></div></div></div>
-        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−2</div><small class="text-body-secondary">imports do iso-core</small></div></div></div>
+        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−257</div><small class="text-body-secondary">linhas totais removidas</small></div></div></div>
+        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">1</div><small class="text-body-secondary">textura por cubo</small></div></div></div>
         <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2">401</div><small class="text-body-secondary">testes passando</small></div></div></div>
       </div>
     </div>
 
-    <!-- TAB 2: Antes e depois -->
+    <!-- TAB 2 -->
     <div class="tab-pane fade" id="pane-como-fazer" role="tabpanel"
-         aria-labelledby="tab-como-fazer" tabindex="0" data-print-title="Antes e depois">
-      <h2 class="h4">Antes: dewarp (105 linhas)</h2>
-      <p>A função <code>dewarpFaces</code> usava <code>getImageData</code> + iteração pixel a pixel com a inversa da projeção 2:1:</p>
-      <ul>
-        <li><strong>Topo:</strong> inversa exata do losango → quadrado W×W: <code>sx = (c − r + W) / 2</code>, <code>sy = (c + r) · H / (2W)</code></li>
-        <li><strong>Laterais:</strong> cada coluna do paralelogramo esticada para W linhas do quadrado, usando <code>columnBounds</code> e <code>diamondRow</code> do iso-core</li>
-        <li>Saída: 3 texturas quadradas W×W (48×48), 100% opacas</li>
-      </ul>
-
-      <h2 class="h4 mt-4">Depois: crop (25 linhas)</h2>
-      <p>A função <code>cropFaces</code> usa <code>ctx.drawImage()</code> para recorte 1:1:</p>
-      <pre><code class="language-ts">function cropFaces(
-  sourceImage: HTMLImageElement,
-  geom: IsoCubeGeometry,
-  hue: number,
-): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } {
-  const { spriteHeight: h, tileWidth, tileHeight } = geom;
-  const half = tileWidth / 2;
-
-  function cropRect(x: number, y: number, cw: number, ch: number, fill: string) {
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas 2d indisponível para recorte de face');
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = fill;
-    ctx.fillRect(0, 0, cw, ch);            // preenche fundo antes do sprite
-    ctx.drawImage(sourceImage, x, y, cw, ch, 0, 0, cw, ch);
-    return canvas;
+         aria-labelledby="tab-como-fazer" tabindex="0" data-print-title="Código final">
+      <h2 class="h4">createCubeMaterials — caminho faceUrls</h2>
+      <pre><code class="language-ts">// Face URLs (v2: 4 faces por direção) — sprite único nas 3 faces visíveis
+if (block.faceUrls) {
+  try {
+    const tex = await loadTexture(block.faceUrls.north);
+    return materialsWithSingleSprite(tex, block.hue ?? 210);
+  } catch {
+    // fallthrough → procedural se o carregamento falhar
   }
-
-  const topFill = `hsl(${hue}, 45%, 62%)`;
-  const sideFill = `hsl(${hue}, 45%, 47%)`;
-  const top = cropRect(0, 0, tileWidth, tileHeight, topFill);
-  const right = cropRect(half, tileHeight, half, h - tileHeight, sideFill);
-  const left = cropRect(0, tileHeight, half, h - tileHeight, sideFill);
-  return { top, left, right };
 }</code></pre>
 
-      <h3 class="h5 mt-4">Diferenças principais</h3>
-      <table class="table table-sm">
-        <thead><tr><th></th><th>dewarp (antes)</th><th>crop (depois)</th></tr></thead>
-        <tbody>
-          <tr><td>Linhas</td><td>105</td><td>25</td></tr>
-          <tr><td>Método</td><td><code>getImageData</code> + pixel loop</td><td><code>drawImage</code> (GPU)</td></tr>
-          <tr><td>Texturas</td><td>Quadradas W×W</td><td>Retangulares (proporção original)</td></tr>
-          <tr><td>Preenchimento</td><td>100% opaco (pixel a pixel)</td><td><code>fillRect</code> antes do <code>drawImage</code></td></tr>
-          <tr><td>Degradação</td><td><code>return null</code> em falha</td><td>try/catch → <code>return null</code></td></tr>
-        </tbody>
-      </table>
+      <h2 class="h4 mt-4">materialsWithSingleSprite</h2>
+      <pre><code class="language-ts">function materialsWithSingleSprite(
+  tex: THREE.Texture,
+  hue: number,
+): CubeMaterials {
+  const hiddenColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.34);
+  const bottomColor = new THREE.Color().setHSL(hue / 360, 0.45, 0.22);
+
+  const spriteMat = new THREE.MeshLambertMaterial({ map: tex });
+  const hidden = new THREE.MeshLambertMaterial({ color: hiddenColor });
+  const bottomMat = new THREE.MeshLambertMaterial({ color: bottomColor });
+
+  // [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z
+  return {
+    materials: [
+      spriteMat, // +X  — sprite inteira
+      hidden,    // −X  — oculta
+      spriteMat, // +Y  — sprite inteira
+      bottomMat, // −Y  — fundo
+      spriteMat, // +Z  — sprite inteira
+      hidden,    // −Z  — oculta
+    ],
+    hasTexture: true,
+  };
+}</code></pre>
     </div>
 
-    <!-- TAB 3: Armadilhas -->
+    <!-- TAB 3 -->
     <div class="tab-pane fade" id="pane-armadilhas" role="tabpanel"
-         aria-labelledby="tab-armadilhas" tabindex="0" data-print-title="Armadilhas &amp; revisão">
-      <h2 class="h4">Bugs encontrados na revisão adversarial</h2>
-      <p>A revisão adversarial renderizou os cubos em WebGL headless e comparou pixel a pixel. Três problemas foram encontrados e corrigidos:</p>
+         aria-labelledby="tab-armadilhas" tabindex="0" data-print-title="Histórico &amp; iterações">
+      <h2 class="h4">Iterações</h2>
 
       <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Bug 1 — Laterais incluíam arte do topo</div>
+        <div class="card-header fw-semibold">Onda 1 — dewarp → crop (commit <code>5c200da</code>)</div>
         <div class="card-body">
-          <p>O crop original das laterais <code>cropRect(0, 0, half, h)</code> começava na linha 0 e pegava todas as 53 linhas. As linhas 0–23 contêm a metade do losango do topo — essa arte aparecia na parede lateral.</p>
-          <p><strong>Correção:</strong> Laterais agora começam em <code>tileHeight</code> (linha 24), com altura <code>spriteHeight - tileHeight</code> (29 linhas).</p>
+          <p>Substituiu o dewarp de 105 linhas (projeção inversa pixel a pixel) por crop de 3 regiões retangulares do sprite. Cada região virava uma textura separada para a face correspondente.</p>
+          <p><strong>Problemas encontrados na revisão adversarial:</strong></p>
+          <ul>
+            <li>Laterais incluíam arte do topo (crop começava na linha 0)</li>
+            <li>Pixels transparentes viravam preto opaco</li>
+            <li>Exceção quebrava fallback procedural</li>
+          </ul>
+          <p>Corrigidos no mesmo agente (commit <code>83ed744</code> na worktree).</p>
         </div>
       </div>
 
       <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Bug 2 — Pixels transparentes viravam preto opaco</div>
+        <div class="card-header fw-semibold text-success">Onda 2 — sprite única (commit <code>c346332</code>)</div>
         <div class="card-body">
-          <p>As texturas de crop têm pixels transparentes (margens do losango, cantos fora da silhueta, linhas vazias no fim do sprite). <code>MeshLambertMaterial</code> com <code>transparent: false</code> (default) renderiza alpha=0 como preto (0,0,0). O dewarp anterior preenchia todos os pixels — saída 100% opaca.</p>
-          <p><strong>Correção:</strong> <code>ctx.fillRect()</code> com a cor HSL da face antes do <code>drawImage()</code>. Topo: 62% lightness; laterais: 47% — mesmas cores do cubo procedural.</p>
-        </div>
-      </div>
-
-      <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Bug 3 — Exceção quebrava fallback procedural</div>
-        <div class="card-body">
-          <p><code>cropFaces</code> lança <code>throw new Error</code> se <code>getContext('2d')</code> retornar null. O código antigo retornava null e o chamador fazia fallback para material procedural. A exceção subia até <code>createCubeMaterials</code> e quebrava a criação do bloco inteiro.</p>
-          <p><strong>Correção:</strong> try/catch em <code>extractFacesFromUrl</code> — exceção retorna null e cai no fallback procedural.</p>
+          <p>Removeu completamente o conceito de "recortar em 3 partes". A sprite isométrica é carregada como <strong>uma textura</strong> via <code>loadTexture</code> (que já existia no módulo) e aplicada diretamente nas 3 faces visíveis.</p>
+          <p><strong>Diferença fundamental:</strong> em vez de 3 texturas separadas (uma por face), a <strong>mesma</strong> textura cobre +X, +Z e +Y. Cada face mostra a sprite isométrica completa — a mesma imagem nos 3 lados visíveis do cubo.</p>
         </div>
       </div>
 
       <div class="alert alert-info mt-3">
         <i class="bi bi-info-circle me-1"></i>
-        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Todos os assets atuais são v3 — o bug não era visível no app, mas o código estava quebrado e precisava ser consertado.
+        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Assets atuais são v3 (<code>baseUrl</code>/<code>spritesheetUrl</code>) e usam <code>materialsWithSingleTexture</code> — que já aplica uma textura a todas as faces laterais. A mudança unifica o comportamento: tanto v2 quanto v3 agora usam textura única.
       </div>
     </div>
 
@@ -201,10 +192,9 @@
 
   <footer class="text-body-secondary small border-top mt-5 pt-3">
     <strong>Arquivo:</strong> <code>tools/character-builder/src/map/3d/cube3d.ts</code> ·
-    <strong>Commit:</strong> <code>onda1-sprite-stretch</code> ·
+    <strong>Commits:</strong> <code>5c200da</code> (onda1) · <code>c346332</code> (onda2) ·
     <strong>Data:</strong> 2026-08-04 ·
-    <strong>Revisor:</strong> adversarial (render headless, pixel a pixel).
-    Documento de arquivo único — salve, mande por anexo, abra offline.
+    <strong>Testes:</strong> 401/401 pass.
   </footer>
 
 </main>
