@@ -4,10 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Editor 3D Definitivo — Relatório de Migração</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
+<title>Sprites 3D: dewarp → crop simples</title>
+
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+      integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk"
+      crossorigin="anonymous">
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous">
+
 <style>
   [id] { scroll-margin-top: 5rem; }
   pre { position: relative; margin-bottom: 1rem; }
@@ -18,271 +29,264 @@
   @media print {
     .nav-tabs, .copy-btn { display: none !important; }
     .tab-content > .tab-pane { display: block !important; opacity: 1 !important; page-break-inside: avoid; }
-    .tab-pane::before { content: attr(data-print-title); display: block; font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
+    .tab-pane::before { content: attr(data-print-title); display: block;
+                        font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
   }
 </style>
 </head>
+
 <body class="bg-body">
 
-<nav class="navbar navbar-expand sticky-top bg-body-tertiary border-bottom mb-4">
-  <div class="container-fluid">
-    <span class="navbar-brand fs-5"><i class="bi bi-box-fill text-primary me-2"></i>Editor 3D Definitivo</span>
-    <span class="navbar-text text-body-secondary">Relatório de Migração · 2026-08-04</span>
+<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>Sprites 3D: dewarp → crop simples</span>
+    <span class="navbar-text small text-body-secondary d-none d-md-inline">onda1-sprite-stretch · commit 5c200da</span>
   </div>
 </nav>
 
-<main class="container mb-5">
+<main class="container py-4" style="max-width: 60rem">
 
-<h1 class="h3 mb-3">Editor 3D Definitivo — Relatório de Migração</h1>
+  <header class="mb-4">
+    <h1 class="display-6 fw-semibold">Sprites 3D: dewarp → crop simples</h1>
+    <p class="lead text-body-secondary">Substituição do pipeline de de-warp (projeção inversa pixel a pixel) por crop simples (recorte 1:1 via <code>drawImage</code>) nas texturas dos cubos 3D do editor de mapa.</p>
+    <div class="d-flex flex-wrap gap-2">
+      <span class="badge text-bg-secondary">Three.js</span>
+      <span class="badge text-bg-secondary">cube3d.ts</span>
+      <span class="badge text-bg-secondary">2026-08-04</span>
+    </div>
+  </header>
 
-<div class="alert alert-primary d-flex align-items-center gap-2" role="alert">
-  <i class="bi bi-info-circle-fill flex-shrink-0"></i>
-  <div><strong>915 testes verdes</strong> (514 iso-core + 401 character-builder) · Gate: <strong>13 PASS / 0 FAIL</strong> · 5 commits squash · 3 ondas, 5 agentes</div>
-</div>
+  <ul class="nav nav-tabs" id="doc-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-visao-geral" data-bs-toggle="tab" data-bs-target="#pane-visao-geral"
+              type="button" role="tab" aria-controls="pane-visao-geral" aria-selected="true">
+        Visão geral
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-como-fazer" data-bs-toggle="tab" data-bs-target="#pane-como-fazer"
+              type="button" role="tab" aria-controls="pane-como-fazer" aria-selected="false">
+        Antes e depois
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-armadilhas" data-bs-toggle="tab" data-bs-target="#pane-armadilhas"
+              type="button" role="tab" aria-controls="pane-armadilhas" aria-selected="false">
+        Armadilhas &amp; revisão
+      </button>
+    </li>
+  </ul>
 
-<div class="row g-4 mb-4">
-  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R1</h5><p class="card-text small">Física de contato perfeita</p></div></div></div>
-  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R4</h5><p class="card-text small">Sombra do personagem</p></div></div></div>
-  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R8</h5><p class="card-text small">ShadowMap nos cubos</p></div></div></div>
-  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R9</h5><p class="card-text small">Seta de direção + partículas</p></div></div></div>
-</div>
+  <div class="tab-content border border-top-0 rounded-bottom p-4" id="doc-tabs-content">
 
-<ul class="nav nav-tabs mb-4" role="tablist">
-  <li class="nav-item" role="presentation"><button class="nav-link active" id="tab-visao" data-bs-toggle="tab" data-bs-target="#pane-visao" type="button" role="tab" aria-controls="pane-visao" aria-selected="true">Visão Geral</button></li>
-  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda1" data-bs-toggle="tab" data-bs-target="#pane-onda1" type="button" role="tab" aria-controls="pane-onda1" aria-selected="false">Onda 1 — Física</button></li>
-  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda2" data-bs-toggle="tab" data-bs-target="#pane-onda2" type="button" role="tab" aria-controls="pane-onda2" aria-selected="false">Onda 2 — Sombras</button></li>
-  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda3" data-bs-toggle="tab" data-bs-target="#pane-onda3" type="button" role="tab" aria-controls="pane-onda3" aria-selected="false">Onda 3 — Fixes</button></li>
-  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-resultado" data-bs-toggle="tab" data-bs-target="#pane-resultado" type="button" role="tab" aria-controls="pane-resultado" aria-selected="false">Resultado</button></li>
-</ul>
+    <!-- TAB 1: Visão geral -->
+    <div class="tab-pane fade show active" id="pane-visao-geral" role="tabpanel"
+         aria-labelledby="tab-visao-geral" tabindex="0" data-print-title="Visão geral">
+      <h2 class="h4">O que mudou</h2>
+      <p>O editor 3D usa <strong>cubos Three.js</strong> (<code>BoxGeometry</code>) para representar blocos no mapa. Blocos com arte gerada (PixelLab v2) têm sprites isométricos que mostram as 3 faces visíveis do cubo numa única imagem (projeção 2:1, 48×53 px).</p>
+      <p>O código anterior usava <strong>de-warp</strong>: uma função de 105 linhas que aplicava a inversa da projeção isométrica pixel a pixel para separar o sprite em 3 texturas quadradas independentes (topo, esquerda, direita), uma para cada face do <code>BoxGeometry</code>.</p>
+      <p>O novo código usa <strong>crop simples</strong>: 25 linhas que recortam 3 retângulos do sprite com <code>ctx.drawImage()</code> — sem transformação de pixels, sem projeção inversa. As texturas são aplicadas diretamente às faces do cubo; o mapeamento UV do <code>BoxGeometry</code> estica cada uma para preencher a face.</p>
 
-<div class="tab-content">
+      <h3 class="h5 mt-4">Regiões de crop</h3>
+      <table class="table table-sm">
+        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Região do sprite (48×53)</th><th>Dimensões</th></tr></thead>
+        <tbody>
+          <tr><td>Topo</td><td>+Y (índice 2)</td><td><code>cropRect(0, 0, 48, 24)</code></td><td>48×24</td></tr>
+          <tr><td>Direita (SE)</td><td>+X (índice 0)</td><td><code>cropRect(24, 24, 24, 29)</code></td><td>24×29</td></tr>
+          <tr><td>Esquerda (SW)</td><td>+Z (índice 4)</td><td><code>cropRect(0, 24, 24, 29)</code></td><td>24×29</td></tr>
+        </tbody>
+      </table>
+      <p>As laterais começam na linha 24 (<code>tileHeight</code>) para excluir a região do losango do topo. Faces ocultas (−X, −Z, −Y) continuam com cor sólida HSL.</p>
 
-<!-- ============================================================ VISÃO GERAL -->
-<div class="tab-pane fade show active" id="pane-visao" role="tabpanel" aria-labelledby="tab-visao" data-print-title="Visão Geral" tabindex="0">
+      <h3 class="h5 mt-4">Impacto</h3>
+      <div class="row g-3">
+        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−63</div><small class="text-body-secondary">linhas de código</small></div></div></div>
+        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2 text-success">−2</div><small class="text-body-secondary">imports do iso-core</small></div></div></div>
+        <div class="col-md-4"><div class="card bg-body-tertiary"><div class="card-body text-center"><div class="fs-2">401</div><small class="text-body-secondary">testes passando</small></div></div></div>
+      </div>
+    </div>
 
-<h2 class="h4 mb-3">O que foi feito</h2>
-<p>Transformação do editor 3D (Three.js) no editor de mapa <strong>definitivo</strong>, com física de contato perfeita, sombras, partículas e polimento visual. O trabalho foi dividido em <strong>3 ondas</strong> executadas por <strong>5 sub-agentes</strong> em worktrees isoladas, com revisão adversarial entre ondas e recalibração dinâmica do plano (REPLAN).</p>
+    <!-- TAB 2: Antes e depois -->
+    <div class="tab-pane fade" id="pane-como-fazer" role="tabpanel"
+         aria-labelledby="tab-como-fazer" tabindex="0" data-print-title="Antes e depois">
+      <h2 class="h4">Antes: dewarp (105 linhas)</h2>
+      <p>A função <code>dewarpFaces</code> usava <code>getImageData</code> + iteração pixel a pixel com a inversa da projeção 2:1:</p>
+      <ul>
+        <li><strong>Topo:</strong> inversa exata do losango → quadrado W×W: <code>sx = (c − r + W) / 2</code>, <code>sy = (c + r) · H / (2W)</code></li>
+        <li><strong>Laterais:</strong> cada coluna do paralelogramo esticada para W linhas do quadrado, usando <code>columnBounds</code> e <code>diamondRow</code> do iso-core</li>
+        <li>Saída: 3 texturas quadradas W×W (48×48), 100% opacas</li>
+      </ul>
 
-<h3 class="h5 mt-4">Requisitos atendidos</h3>
-<div class="table-responsive">
-<table class="table table-sm">
-<thead><tr><th>ID</th><th>Requisito</th><th>Status</th><th>Onda</th></tr></thead>
-<tbody>
-<tr><td>R1</td><td>Física de contato perfeita — cubos são IMPENETRÁVEIS</td><td><span class="badge bg-success">Concluído</span></td><td>1</td></tr>
-<tr><td>R2</td><td>8 direções com sprite correto no modo teste 3D</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
-<tr><td>R3</td><td>Todas as ações (parado, caminhando, correndo, pulando, agachado)</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
-<tr><td>R4</td><td>Sombra do personagem no chão</td><td><span class="badge bg-success">Concluído</span></td><td>2.1 + 3</td></tr>
-<tr><td>R5</td><td>Depth-sort com actor interleaved entre cubos</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
-<tr><td>R6</td><td>Highlight da célula sob o cursor</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
-<tr><td>R7</td><td>Preview verde (válido) / vermelho (inválido)</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
-<tr><td>R8</td><td>Sombra dos cubos (shadowMap)</td><td><span class="badge bg-success">Concluído</span></td><td>2.2</td></tr>
-<tr><td>R9</td><td>Indicador de direção + partículas</td><td><span class="badge bg-success">Concluído</span></td><td>2.1 + 2.2 + 3</td></tr>
-<tr><td>R10</td><td>Não quebrar nada existente</td><td><span class="badge bg-success">915 ✅</span></td><td>Todas</td></tr>
-</tbody>
-</table>
-</div>
+      <h2 class="h4 mt-4">Depois: crop (25 linhas)</h2>
+      <p>A função <code>cropFaces</code> usa <code>ctx.drawImage()</code> para recorte 1:1:</p>
+      <pre><code class="language-ts">function cropFaces(
+  sourceImage: HTMLImageElement,
+  geom: IsoCubeGeometry,
+  hue: number,
+): { top: HTMLCanvasElement; left: HTMLCanvasElement; right: HTMLCanvasElement } {
+  const { spriteHeight: h, tileWidth, tileHeight } = geom;
+  const half = tileWidth / 2;
 
-<h3 class="h5 mt-4">Arquivos modificados (de-para)</h3>
-<div class="table-responsive">
-<table class="table table-sm">
-<thead><tr><th>Arquivo</th><th>Antes</th><th>Depois</th><th>Onda</th></tr></thead>
-<tbody>
-<tr><td><code>packages/iso-core/src/collision-box.ts</code></td><td>421 linhas, EPS privado, spans sem tolerância inferior</td><td>510 linhas, EPS exportado, spans com EPS bilateral, terminal sem EPS</td><td>1</td></tr>
-<tr><td><code>packages/iso-core/src/collision-box.test.ts</code></td><td>312 linhas, 28 testes</td><td>470 linhas, 38 testes (+10 regressão)</td><td>1</td></tr>
-<tr><td><code>tools/character-builder/src/map/actor.ts</code></td><td>232 linhas, sem buildActorVisual</td><td>290 linhas, +buildActorVisual() pura, +cameraTurn</td><td>2.1 + 3</td></tr>
-<tr><td><code>tools/character-builder/src/map/actor.test.ts</code></td><td>Sem testes de visual</td><td>+98 linhas, 13 testes (opacidade, ângulo, seta)</td><td>2.1 + 3</td></tr>
-<tr><td><code>.../3d/scene3d.ts</code></td><td>570 linhas, sem sombras, sem partículas</td><td>~990 linhas, ShadowMap, sombra ator, seta, partículas</td><td>2.1 + 2.2 + 3</td></tr>
-<tr><td><code>.../3d/map-editor-3d.tsx</code></td><td>1000 linhas, ticker passa 4 campos</td><td>1049 linhas, ticker passa 7 campos, +spawnParticles wiring</td><td>2.1 + 3</td></tr>
-<tr><td><code>.../3d/cube3d.ts</code></td><td>castShadow=false</td><td>castShadow=true</td><td>2.2</td></tr>
-<tr><td><code>.../3d/grid3d.ts</code></td><td>Só grid + ground plane invisível</td><td>+createShadowPlane, +updateGroundShadowPlane, piso visível</td><td>2.2</td></tr>
-</tbody>
-</table>
-</div>
+  function cropRect(x: number, y: number, cw: number, ch: number, fill: string) {
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d indisponível para recorte de face');
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, 0, cw, ch);            // preenche fundo antes do sprite
+    ctx.drawImage(sourceImage, x, y, cw, ch, 0, 0, cw, ch);
+    return canvas;
+  }
 
-</div>
+  const topFill = `hsl(${hue}, 45%, 62%)`;
+  const sideFill = `hsl(${hue}, 45%, 47%)`;
+  const top = cropRect(0, 0, tileWidth, tileHeight, topFill);
+  const right = cropRect(half, tileHeight, half, h - tileHeight, sideFill);
+  const left = cropRect(0, tileHeight, half, h - tileHeight, sideFill);
+  return { top, left, right };
+}</code></pre>
 
-<!-- ============================================================ ONDA 1 -->
-<div class="tab-pane fade" id="pane-onda1" role="tabpanel" aria-labelledby="tab-onda1" data-print-title="Onda 1 — Física de contato perfeita" tabindex="0">
+      <h3 class="h5 mt-4">Diferenças principais</h3>
+      <table class="table table-sm">
+        <thead><tr><th></th><th>dewarp (antes)</th><th>crop (depois)</th></tr></thead>
+        <tbody>
+          <tr><td>Linhas</td><td>105</td><td>25</td></tr>
+          <tr><td>Método</td><td><code>getImageData</code> + pixel loop</td><td><code>drawImage</code> (GPU)</td></tr>
+          <tr><td>Texturas</td><td>Quadradas W×W</td><td>Retangulares (proporção original)</td></tr>
+          <tr><td>Preenchimento</td><td>100% opaco (pixel a pixel)</td><td><code>fillRect</code> antes do <code>drawImage</code></td></tr>
+          <tr><td>Degradação</td><td><code>return null</code> em falha</td><td>try/catch → <code>return null</code></td></tr>
+        </tbody>
+      </table>
+    </div>
 
-<h2 class="h4 mb-3">Onda 1 — Física de contato perfeita (R1)</h2>
-<p><strong>Commit:</strong> <code>bfc1bb5</code> · <strong>Agente:</strong> onda1-physics-contact · <strong>Worktree:</strong> <code>wt/onda1-physics-contact</code></p>
+    <!-- TAB 3: Armadilhas -->
+    <div class="tab-pane fade" id="pane-armadilhas" role="tabpanel"
+         aria-labelledby="tab-armadilhas" tabindex="0" data-print-title="Armadilhas &amp; revisão">
+      <h2 class="h4">Bugs encontrados na revisão adversarial</h2>
+      <p>A revisão adversarial renderizou os cubos em WebGL headless e comparou pixel a pixel. Três problemas foram encontrados e corrigidos:</p>
 
-<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i><strong>2 bugs encontrados por fuzz</strong> (185 mil movimentos aleatórios contra 7 configurações de muro). Ambos corrigidos e verificados com o mesmo fuzz (0/184994 embuts, 0/3000 vibrações).</div>
+      <div class="card bg-body-tertiary mb-3">
+        <div class="card-header fw-semibold text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Bug 1 — Laterais incluíam arte do topo</div>
+        <div class="card-body">
+          <p>O crop original das laterais <code>cropRect(0, 0, half, h)</code> começava na linha 0 e pegava todas as 53 linhas. As linhas 0–23 contêm a metade do losango do topo — essa arte aparecia na parede lateral.</p>
+          <p><strong>Correção:</strong> Laterais agora começam em <code>tileHeight</code> (linha 24), com altura <code>spriteHeight - tileHeight</code> (29 linhas).</p>
+        </div>
+      </div>
 
-<h3 class="h5">Bug 1 — Span sem tolerância no lado inferior</h3>
-<p><code>rowSpan</code>/<code>colSpan</code> usavam <code>EPS</code> só no lado superior (<code>floor(cx + half − EPS)</code>). O lado inferior era exato (<code>floor(cx − half)</code>). Quando o clamp da face aterrava 1 ulp dentro do muro (<code>minX = −4.4e-16</code>), a span via a coluna do muro e o <strong>deslizar ao longo da parede travava para sempre</strong>.</p>
-<p><strong>Fix:</strong> <code>+EPS</code> nos dois lados: <code>floor(cx − half + EPS)</code> e <code>floor(cx + half − EPS)</code>. Com a face a ±EPS da fronteira, encostar é encostar — não ocupar.</p>
+      <div class="card bg-body-tertiary mb-3">
+        <div class="card-header fw-semibold text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Bug 2 — Pixels transparentes viravam preto opaco</div>
+        <div class="card-body">
+          <p>As texturas de crop têm pixels transparentes (margens do losango, cantos fora da silhueta, linhas vazias no fim do sprite). <code>MeshLambertMaterial</code> com <code>transparent: false</code> (default) renderiza alpha=0 como preto (0,0,0). O dewarp anterior preenchia todos os pixels — saída 100% opaca.</p>
+          <p><strong>Correção:</strong> <code>ctx.fillRect()</code> com a cor HSL da face antes do <code>drawImage()</code>. Topo: 62% lightness; laterais: 47% — mesmas cores do cubo procedural.</p>
+        </div>
+      </div>
 
-<h3 class="h5">Bug 2 — Célula terminal da varredura</h3>
-<p>A terminal era <code>floor(face + dx ± EPS)</code>. Com <code>face + dx = K + 1e-12</code>, o ±EPS puxava a terminal para <code>K − 1</code>: a <strong>célula de destino nunca era varrida</strong> e a caixa aterrava ε dentro do muro (e o quadro seguinte ficava preso, pois a varredura recusa caixa embutida).</p>
-<p><strong>Fix:</strong> <code>to = Math.floor(face + dx)</code> — sem EPS, o destino real é sempre varrido.</p>
+      <div class="card bg-body-tertiary mb-3">
+        <div class="card-header fw-semibold text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Bug 3 — Exceção quebrava fallback procedural</div>
+        <div class="card-body">
+          <p><code>cropFaces</code> lança <code>throw new Error</code> se <code>getContext('2d')</code> retornar null. O código antigo retornava null e o chamador fazia fallback para material procedural. A exceção subia até <code>createCubeMaterials</code> e quebrava a criação do bloco inteiro.</p>
+          <p><strong>Correção:</strong> try/catch em <code>extractFacesFromUrl</code> — exceção retorna null e cai no fallback procedural.</p>
+        </div>
+      </div>
 
-<h3 class="h5">Decisão sobre o EPS</h3>
-<p>EPS = <strong>0.001 foi testado e rejeitado</strong>: a tolerância das spans deixava a caixa passar por um canto de muro a menos de EPS (medido 0.0009) e "nadar" ao longo da parede. EPS = <strong>1e-9 mantido</strong> (piso de ruído ~2e-15; 5×10⁵ de folga).</p>
+      <div class="alert alert-info mt-3">
+        <i class="bi bi-info-circle me-1"></i>
+        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Todos os assets atuais são v3 — o bug não era visível no app, mas o código estava quebrado e precisava ser consertado.
+      </div>
+    </div>
 
-<h3 class="h5">Push-out por passo — rejeitado</h3>
-<p>Avaliado e <strong>não implementado</strong>: a varredura contínua já garante 0 embuts (fuzz-confirmed). Chamar MTV por passo custaria O(área da caixa) no laço quente e mudaria os traços presos. O push-out permanece como ferramenta de reparo do editor (<code>pushPlayerOutOfCell</code>), não passo da simulação.</p>
+  </div>
 
-</div>
-
-<!-- ============================================================ ONDA 2 -->
-<div class="tab-pane fade" id="pane-onda2" role="tabpanel" aria-labelledby="tab-onda2" data-print-title="Onda 2 — Sombras e polimento visual" tabindex="0">
-
-<h2 class="h4 mb-3">Onda 2 — Sombras e polimento visual</h2>
-<p><strong>2 agentes em paralelo</strong> (worktrees disjuntas, stubs como contrato). Commit prep (<code>14571e8</code>) criou 3 stubs em <code>scene3d.ts</code> para evitar conflito de merge.</p>
-
-<h3 class="h5 mt-4">2.1 — Sombra do ator + indicador de direção (R4, R9)</h3>
-<p><strong>Commit:</strong> <code>78700ad</code> · <strong>Agente:</strong> onda2-actor-shadow</p>
-
-<h4 class="h6">Sombra (R4)</h4>
-<ul>
-  <li><code>ActorSprite</code> estendido com <code>directionIndex</code>, <code>jumpProgress</code>, <code>floorY</code></li>
-  <li><code>buildActorVisual(directionIndex, floorY, jumpProgress, cameraTurn?)</code> — função pura em <code>actor.ts</code>, sem Three.js</li>
-  <li>Disco <code>CircleGeometry</code> preto semitransparente no chão real (<code>floorY + 0.01</code>)</li>
-  <li>Opacidade parabólica: <code>1 − 4·p·(1−p)</code> — plena no chão, zero no ápice do pulo</li>
-  <li>Raio = 0.3 unidades (proporcional ao personagem)</li>
-</ul>
-
-<h4 class="h6">Indicador de direção (R9)</h4>
-<ul>
-  <li>Triângulo âmbar (<code>0xef4444</code>, opacidade 0.6) na base do personagem</li>
-  <li>Ângulo: <code>π/4 + idx·π/4 − cameraTurn·π/2</code> — direção de tela corrigida para rotação da câmera</li>
-  <li>Geometria compartilhada (<code>BufferGeometry</code> manual), nunca disposta</li>
-</ul>
-
-<h3 class="h5 mt-4">2.2 — ShadowMap nos cubos + partículas (R8, R9)</h3>
-<p><strong>Commit:</strong> <code>1125634</code> · <strong>Agente:</strong> onda2-cube-shadows</p>
-
-<h4 class="h6">ShadowMap (R8)</h4>
-<ul>
-  <li><code>renderer.shadowMap.enabled = true</code> + <code>PCFSoftShadowMap</code></li>
-  <li><code>sun.castShadow</code>: mapSize 2048², bias −0.0005, frustum ortográfico dinâmico</li>
-  <li>Piso visível: <code>createShadowPlane</code> (MeshStandardMaterial 0x1a1a2e, receiveShadow, renderOrder=−1)</li>
-  <li>Cubos: <code>castShadow = true</code> (receiveShadow já era true)</li>
-  <li>Frustum redimensionado a cada <code>render()</code> — acompanha o crescimento do mapa</li>
-</ul>
-
-<h4 class="h6">Partículas (R9)</h4>
-<ul>
-  <li><code>spawnParticles(scene, position, count=8)</code>: cubinhos 0.1³, gravidade −9.8, fade out</li>
-  <li>Laço rAF próprio (editor é render-on-demand), cleanup seguro via <code>renderContexts</code> WeakMap</li>
-  <li><code>disposeParticles()</code> chamado no <code>destroy()</code></li>
-</ul>
-
-</div>
-
-<!-- ============================================================ ONDA 3 -->
-<div class="tab-pane fade" id="pane-onda3" role="tabpanel" aria-labelledby="tab-onda3" data-print-title="Onda 3 — Fixes de revisão adversarial" tabindex="0">
-
-<h2 class="h4 mb-3">Onda 3 — Fixes de revisão adversarial</h2>
-<p><strong>Commit:</strong> <code>d5951ef</code> · <strong>Agente:</strong> onda3-fix-reviews</p>
-<p>As revisões adversariais da Onda 2 encontraram <strong>3 problemas</strong>. A Onda 3 corrigiu todos.</p>
-
-<h3 class="h5">Fix 1 (🔴 crítico) — Disco da sombra vertical</h3>
-<p><code>THREE.CircleGeometry</code> gera vértices no plano <strong>XY</strong> (normal +Z). O disco estava em pé como uma moeda vertical — metade enterrada no chão pelo depth test. Adicionado <code>shadow.rotation.x = -Math.PI / 2</code> (mesmo giro do ground plane em <code>grid3d.ts</code>).</p>
-
-<h3 class="h5">Fix 2 (🔴 crítico) — Seta errada nas rotações 1, 2 e 3</h3>
-<p><code>buildActorVisual</code> mapeava índice de tela → ângulo de mundo sem descontar a rotação da câmera. Na rotação 2, o sprite olhava para sul e a seta apontava para norte (180° de erro). Adicionado parâmetro <code>cameraTurn</code>: <code>directionAngle = π/4 + idx·π/4 − cameraTurn·π/2</code>. Validado pela geometria da câmera real (<code>yaw = π/4 + turn·π/2</code>).</p>
-
-<h3 class="h5">Fix 3 (🟡 médio) — spawnParticles órfã</h3>
-<p>A função existia com <strong>zero call sites</strong>. Integrada ao <code>applyTool</code> do editor: chamada após <code>placeBlock</code>/<code>removeBlock</code>/<code>paintBlock</code> com guard <code>next !== current</code> (no-ops não disparam partículas). Posição world: <code>Vector3(cell.x, cell.z + 0.5, cell.y)</code> — convenção mapa→mundo.</p>
-
-</div>
-
-<!-- ============================================================ RESULTADO -->
-<div class="tab-pane fade" id="pane-resultado" role="tabpanel" aria-labelledby="tab-resultado" data-print-title="Resultado" tabindex="0">
-
-<h2 class="h4 mb-3">Resultado final</h2>
-
-<h3 class="h5">Testes</h3>
-<div class="table-responsive">
-<table class="table table-sm">
-<thead><tr><th>Suite</th><th>Antes</th><th>Depois</th><th>Delta</th></tr></thead>
-<tbody>
-<tr><td>iso-core</td><td>504</td><td>514</td><td>+10 (colisão)</td></tr>
-<tr><td>character-builder</td><td>388</td><td>401</td><td>+13 (ator visual + seta)</td></tr>
-<tr><td><strong>Total</strong></td><td><strong>892</strong></td><td><strong>915</strong></td><td><strong>+23</strong></td></tr>
-</tbody>
-</table>
-</div>
-
-<h3 class="h5">Gate final</h3>
-<pre><code class="language-text">PASS: 13  FAIL: 0  AUXILIAR: 3
-VEREDITO: PASS</code></pre>
-
-<h3 class="h5">Commits</h3>
-<pre><code class="language-text">d5951ef onda3-fix-reviews: fix shadow disk rotation, direction arrow on all rotations, wire spawnParticles
-1125634 onda2-cube-shadows: enable ShadowMap (PCFSoft) + visible shadow floor + spawnParticles
-78700ad onda2-actor-shadow: actor shadow disk + direction arrow + buildActorVisual
-14571e8 PREP-onda-2: stubs for actor visual + shadow system + particles
-bfc1bb5 onda1-physics-contact: perfect AABB contact — fix embed holes, stabilize wall sliding</code></pre>
-
-<h3 class="h5 mt-4">Pendências conhecidas (ADIADAS)</h3>
-<div class="alert alert-secondary">
-  <p class="mb-1"><strong>Caso de borda do degrau:</strong> caminho de degrau em <code>fixedStepWithMap</code> (quando <code>steppedZ !== newZ</code>) devolve posição NÃO clampada pela caixa. Se no z+1 a caixa sobrepuser um muro alto ao lado do degrau, o personagem fica preso para sempre com z flutuante. Fora do escopo — registrado para o futuro.</p>
-</div>
-<div class="alert alert-secondary">
-  <p class="mb-1"><strong>Skill <code>bootstrapping-threejs-scene</code> desatualizada:</strong> SKILL.md:36 ainda diz "shadows stay off: shadowMap.enabled = false" — falso desde o merge de R8. Correção de documentação, não de código.</p>
-</div>
-
-<h3 class="h5 mt-4">Decisões de design</h3>
-<ul>
-  <li><strong>EPS 1e-9, não 0.001:</strong> medido e documentado — 0.001 permite passar por cantos</li>
-  <li><strong>Push-out não é passo da simulação:</strong> a varredura contínua garante contato; MTV por passo custaria caro e mudaria traços</li>
-  <li><strong>Opacidade parabólica, não linear:</strong> <code>1−4p(1−p)</code> em vez de <code>1−p</code> porque <code>NO_JUMP.progress = 1.0</code> (a fórmula linear apagaria a sombra do personagem parado)</li>
-  <li><strong>MeshLambertMaterial mantido:</strong> recebe/projeta sombras normalmente; StandardMaterial seria overkill para pixel art</li>
-  <li><strong>Ângulo da seta: <code>worldAngle − turn·π/2</code>:</strong> o termo <code>BASE_YAW</code> se cancela algebricamente — a fórmula é pura, sem import de Three.js</li>
-</ul>
-
-</div>
-
-</div><!-- .tab-content -->
+  <footer class="text-body-secondary small border-top mt-5 pt-3">
+    <strong>Arquivo:</strong> <code>tools/character-builder/src/map/3d/cube3d.ts</code> ·
+    <strong>Commit:</strong> <code>onda1-sprite-stretch</code> ·
+    <strong>Data:</strong> 2026-08-04 ·
+    <strong>Revisor:</strong> adversarial (render headless, pixel a pixel).
+    Documento de arquivo único — salve, mande por anexo, abra offline.
+  </footer>
 
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-YB6YJjFRxUMGmyL1wdPG7BwcN5J4oHJa9BstOIlHwHC1/azOJK3gDrmFOwIyHr1" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-rj5UHyBScCsuSQUbXGZ4hIhNm+iJNQxVtogC+ADwMShXzgW3n3szhBIvBb0ADhVt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+        integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU"
+        crossorigin="anonymous"></script>
+
 <script>
-hljs.highlightAll();
-
-document.querySelectorAll('pre code').forEach(function(block) {
-  var btn = document.createElement('button');
-  btn.className = 'copy-btn btn btn-sm btn-outline-secondary';
-  btn.innerHTML = '<i class="bi bi-clipboard"></i>';
-  btn.title = 'Copiar';
-  btn.addEventListener('click', function() {
-    var text = block.textContent || '';
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>';
-        setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
-      }).catch(function() { fallbackCopy(text, btn); });
-    } else { fallbackCopy(text, btn); }
+(function () {
+  'use strict';
+  var sources = new WeakMap();
+  document.querySelectorAll('pre > code').forEach(function (code) {
+    sources.set(code, code.textContent.replace(/\n$/, ''));
   });
-  block.parentNode.insertBefore(btn, block);
-});
-
-function fallbackCopy(text, btn) {
-  var ta = document.createElement('textarea');
-  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>'; }
-  catch(e) { btn.innerHTML = '<i class="bi bi-x-lg text-danger"></i>'; }
-  document.body.removeChild(ta);
-  setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
-}
-
-// Aba ↔ URL deep-link
-(function() {
-  var tabs = document.querySelectorAll('.nav-tabs button[data-bs-toggle="tab"]');
-  function activate(hash) {
-    var target = hash && document.querySelector(hash);
-    if (!target) return;
-    var tab = document.querySelector('[data-bs-target="' + hash + '"]');
-    if (tab) { var bsTab = new bootstrap.Tab(tab); bsTab.show(); target.focus({preventScroll: true}); }
+  if (window.hljs) hljs.highlightAll();
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; },
+                                                      function () { return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
   }
-  if (location.hash) activate(location.hash);
-  tabs.forEach(function(t) { t.addEventListener('shown.bs.tab', function(e) { history.replaceState(null, '', '#' + e.target.getAttribute('aria-controls')); }); });
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  document.querySelectorAll('pre > code').forEach(function (code) {
+    var pre = code.parentElement;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline-secondary copy-btn';
+    btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+    btn.setAttribute('aria-label', 'Copiar código');
+    btn.addEventListener('click', function () {
+      copyText(sources.get(code) || code.textContent).then(function (ok) {
+        btn.innerHTML = ok ? '<i class="bi bi-check-lg"></i>' : '<i class="bi bi-x-lg"></i>';
+        btn.classList.toggle('btn-outline-success', ok);
+        btn.classList.toggle('btn-outline-danger', !ok);
+        btn.classList.remove('btn-outline-secondary');
+        setTimeout(function () {
+          btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+          btn.className = 'btn btn-sm btn-outline-secondary copy-btn';
+        }, 1500);
+      });
+    });
+    pre.appendChild(btn);
+  });
+  var tabs = document.querySelectorAll('[data-bs-toggle="tab"]');
+  if (!tabs.length) return;
+  function activateFromHash() {
+    var hash = window.location.hash;
+    if (!hash || hash.length < 2) return;
+    var target = document.querySelector(hash);
+    if (!target) return;
+    var pane = target.closest('.tab-pane') || (target.classList.contains('tab-pane') ? target : null);
+    if (!pane) return;
+    var trigger = document.querySelector('[data-bs-target="#' + CSS.escape(pane.id) + '"]');
+    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+    var scrollTo = target !== pane ? target : (trigger && trigger.closest('[role="tablist"]')) || pane;
+    requestAnimationFrame(function () { scrollTo.scrollIntoView({ block: 'start' }); });
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('shown.bs.tab', function (e) {
+      var id = (e.target.getAttribute('data-bs-target') || '').slice(1);
+      if (id) history.replaceState(null, '', '#' + id);
+    });
+  });
+  window.addEventListener('hashchange', activateFromHash);
+  activateFromHash();
 })();
 </script>
 </body>
