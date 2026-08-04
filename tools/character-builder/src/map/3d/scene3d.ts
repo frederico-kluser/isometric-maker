@@ -62,6 +62,24 @@ export interface Scene3DState {
   readonly highlight: Cell3D | null;
   /** Rotação da câmera (0-3). */
   readonly rotation: Rotation;
+  /**
+   * Ator do modo teste. Ausente ou null = sem ator na cena.
+   *
+   * `x` e `z` são a posição do iso-core (`pos.x`, `pos.y`) mapeada para o
+   * mundo do Three.js; `y` é a altura dos pés (nível `z` do iso-core + arco
+   * visual do pulo).
+   */
+  readonly actor?: ActorSprite | null;
+}
+
+/** Ator do modo teste: um sprite billboard com o quadro atual. */
+export interface ActorSprite {
+  /** URL do quadro a desenhar (PNG com transparência). */
+  readonly url: string;
+  /** Posição no mundo 3D — pés do personagem. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 }
 
 export interface IsoScene3D {
@@ -93,6 +111,8 @@ const BG_COLOR = 0x0b1020;
 const GRID_MARGIN = 4;
 /** BoxGeometry(1,1,1) tem centro na origem — base fica em -0.5. */
 const HALF_CUBE = 0.5;
+/** Altura do personagem em unidades de mundo (~1.5 blocos). */
+const ACTOR_HEIGHT = 1.6;
 
 // ------------------------------------------------------------------ animação
 
@@ -167,6 +187,66 @@ export async function createIsoScene3D(
   // Preview e highlight — recriados a cada frame
   let previewMesh: THREE.Mesh | null = null;
   let highlightMesh: THREE.LineSegments | null = null;
+
+  // --- ator do modo teste ---
+  // Sprite billboard: sempre de frente para a câmera, com depth test contra os
+  // cubos (um prédio na frente oculta o personagem). Texturas cacheadas por
+  // URL — o ticker troca de quadro a 60 fps e recarregar a mesma imagem a cada
+  // frame travaria a rede e o disco.
+  let actorSprite: THREE.Sprite | null = null;
+  let actorUrl: string | null = null;
+  const actorTextures = new Map<string, THREE.Texture>();
+  const actorLoader = new THREE.TextureLoader();
+
+  /** Aplica uma textura ao sprite, ajustando a escala à proporção do PNG. */
+  const applyActorTexture = (sprite: THREE.Sprite, tex: THREE.Texture): void => {
+    const mat = sprite.material as THREE.SpriteMaterial;
+    mat.map = tex;
+    mat.needsUpdate = true;
+    const image = tex.image as { width?: number; height?: number } | null;
+    const aspect =
+      image && image.width && image.height ? image.width / image.height : 1;
+    sprite.scale.set(ACTOR_HEIGHT * aspect, ACTOR_HEIGHT, 1);
+  };
+
+  const updateActor = (actor: ActorSprite | null): void => {
+    if (!actor) {
+      if (actorSprite) {
+        scene.remove(actorSprite);
+        actorSprite = null;
+      }
+      actorUrl = null;
+      return;
+    }
+    if (!actorSprite) {
+      const material = new THREE.SpriteMaterial({
+        transparent: true,
+        depthWrite: false,
+      });
+      actorSprite = new THREE.Sprite(material);
+      // Desenha depois dos cubos (o depth test ainda oculta o que está atrás).
+      actorSprite.renderOrder = 10;
+      scene.add(actorSprite);
+    }
+    const sprite = actorSprite;
+    // O sprite é centrado na origem: desloca meio corpo para os pés no chão.
+    sprite.position.set(actor.x, actor.y + ACTOR_HEIGHT / 2, actor.z);
+    if (actor.url === actorUrl) return;
+    actorUrl = actor.url;
+    const cached = actorTextures.get(actor.url);
+    if (cached) {
+      applyActorTexture(sprite, cached);
+    } else {
+      const url = actor.url;
+      actorLoader.load(url, (tex) => {
+        actorTextures.set(url, tex);
+        // O ticker pode ter avançado para outro quadro enquanto a imagem
+        // carregava — aplicar uma textura velha depois de trocar a URL erra
+        // a animação.
+        if (actorUrl === url) applyActorTexture(sprite, tex);
+      });
+    }
+  };
 
   // --- carregamento de paleta ---
   const setPalette = async (blocks: readonly BlockDef[]): Promise<void> => {
@@ -279,6 +359,9 @@ export async function createIsoScene3D(
       scene.add(highlightMesh);
     }
 
+    // Ator do modo teste
+    updateActor(state.actor ?? null);
+
     // Desenha
     renderer.render(scene, camera);
   };
@@ -365,6 +448,12 @@ export async function createIsoScene3D(
   // --- destroy ---
   const destroy = (): void => {
     cancelRotationAnim();
+    if (actorSprite) {
+      scene.remove(actorSprite);
+      actorSprite = null;
+    }
+    for (const tex of actorTextures.values()) tex.dispose();
+    actorTextures.clear();
     renderer.dispose();
     for (const [, mesh] of blockMeshes) {
       scene.remove(mesh);

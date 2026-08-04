@@ -34,12 +34,32 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from 'lucide-react';
+import type { CollisionMap } from '../../../../../packages/iso-core/src/collision.ts';
+import {
+  createMovementState,
+  DEFAULT_CONFIG,
+  type MovementInput,
+  type MovementState,
+} from '../../../../../packages/iso-core/src/movement.ts';
+import { stepWithMap } from '../../../../../packages/iso-core/src/simulate.ts';
+import { visualOffsetY } from '../../../../../packages/iso-core/src/jump.ts';
 import type { MapData } from '../../../../../packages/iso-core/src/map.ts';
 import {
   ROTATION_LABELS,
   turn,
   type Rotation,
 } from '../../../../../packages/iso-core/src/rotation.ts';
+import { buildCollisionMap, spawnZAt } from '../collision-map.ts';
+import {
+  actionFor,
+  directionNameFor,
+  frameUrl,
+  viewDirectionIndex,
+  worldDirectionFromKeys,
+  type ActorFrames,
+  type HeldDirections,
+} from '../actor.ts';
+import type { Studio } from '../../../server/model.ts';
 import { buildExport } from '../../../../../packages/iso-core/src/map-instances.ts';
 import {
   pushPlayerOutOfCell,
@@ -124,18 +144,44 @@ export function MapEditor3D() {
   const toasts = useMessages();
 
   /**
-   * Personagem de teste — o modo teste (onda futura) escreve aqui. Enquanto
-   * existir, colocar um bloco sólido sobre ele empurra-o para fora (push-out),
-   * em vez de o deixar dentro da pedra. Hoje só o setter existe: nada lê a
-   * posição ainda.
+   * Personagem de teste — o modo teste escreve aqui, e colocar um bloco sólido
+   * sobre ele empurra-o para fora (push-out), em vez de o deixar dentro da
+   * pedra. Nada lê a posição ainda; o estado existe para o push-out ter dados.
    */
   const [, setTestPlayer] = useState<PlayerCell | null>(null);
+  const lastPlayerCellRef = useRef<PlayerCell | null>(null);
+
+  // Modo teste: 'editar' edita o mapa; 'testar' roda o personagem com WASD.
+  const [mode, setMode] = useState<'editar' | 'testar'>('editar');
+  const [actorState, setActorState] = useState<MovementState | null>(null);
+
+  // Refs do ticker: o laço roda fora do React (requestAnimationFrame) e lê o
+  // valor atual destes refs — reconciliar a árvore 60×/s por causa da posição
+  // do personagem seria pagar caro por um estado que só o desenho consome.
+  const actorRef = useRef<MovementState | null>(null);
+  const actorFramesRef = useRef<ActorFrames | null>(null);
+  const actorBaseRef = useRef<Record<string, readonly string[]> | null>(null);
+  const collisionRef = useRef<CollisionMap | null>(null);
+  const heldRef = useRef<HeldDirections>({
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+  });
+  const jumpRef = useRef(false);
+  const crouchRef = useRef(false);
+  const walkRef = useRef(false);
+  const testTickRef = useRef(0);
+  const lastTickTimeRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  /** true entre o clique em Testar e o fim do fetch — evita dois laços. */
+  const enteringTestRef = useRef(false);
 
   const map = history.present;
 
   // Refs espelhando o estado para os handlers de ponteiro
-  const stateRef = useRef({ map, rotation, tool, selectedBlock, zoom });
-  stateRef.current = { map, rotation, tool, selectedBlock, zoom };
+  const stateRef = useRef({ map, rotation, tool, selectedBlock, zoom, mode });
+  stateRef.current = { map, rotation, tool, selectedBlock, zoom, mode };
 
   // ---------------------------------------------------------------- paleta
 
@@ -214,6 +260,8 @@ export function MapEditor3D() {
   useEffect(() => {
     const s3d = scene3dRef.current;
     if (!s3d || !ready) return;
+    // No modo teste o ticker desenha a cada quadro — este efeito não compete.
+    if (mode === 'testar') return;
 
     let previewCell: Pick3DCell | null = null;
     let previewInvalid = false;
@@ -237,7 +285,14 @@ export function MapEditor3D() {
     });
     // Nota: a rotação da câmera é controlada por animateRotation/rotateTo,
     // não por este efeito — senão o render queimaria a animação em curso.
-  }, [map, rotation, pickState, tool, ready]);
+  }, [map, rotation, pickState, tool, ready, mode]);
+
+  // O CollisionMap é um índice do documento: reconstruir quando o mapa muda
+  // durante o teste (o push-out e a física precisam do índice novo).
+  useEffect(() => {
+    if (mode !== 'testar') return;
+    collisionRef.current = buildCollisionMap(map);
+  }, [map, mode]);
 
   // ---------------------------------------------------------------- ponteiro
 
@@ -321,6 +376,8 @@ export function MapEditor3D() {
         s3d.pan(-dx, dy, host.clientWidth, host.clientHeight);
         return;
       }
+      // No modo teste o ponteiro não edita — só o pan (já tratado acima).
+      if (stateRef.current.mode === 'testar') return;
       const result = pickAt(e.clientX, e.clientY);
       setPickState(result);
       if (dragging.current && result) applyTool(result);
@@ -331,6 +388,13 @@ export function MapEditor3D() {
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
+      // No modo teste o ponteiro não edita: botão esquerdo e do meio pan.
+      if (stateRef.current.mode === 'testar') {
+        if (e.button === 0 || e.button === 1) {
+          panning.current = { x: e.clientX, y: e.clientY };
+        }
+        return;
+      }
       // Botão do meio ou shift+arrasto = pan
       if (e.button === 1 || e.shiftKey) {
         panning.current = { x: e.clientX, y: e.clientY };
@@ -403,12 +467,183 @@ export function MapEditor3D() {
     });
   }, []);
 
-  // Teclado: R gira, Z/Y desfazem, 1-4 escolhem vista
+  // ---------------------------------------------------------------- modo teste
+
+  const enterTestMode = useCallback(async () => {
+    // Clique duplo antes do fetch terminar criaria dois laços rAF: o segundo
+    // sobrescreveria o frameId do primeiro e o exit não conseguiria cancelá-lo.
+    if (enteringTestRef.current || rafRef.current !== null) return;
+    enteringTestRef.current = true;
+    try {
+      const res = await fetch('/api/studio');
+      if (!res.ok) throw new Error(`${res.status}`);
+      const studio: Studio = await res.json();
+      const character = studio.characters[0];
+      if (!character) {
+        toasts.push(T.modo.semPersonagem);
+        return;
+      }
+
+      // Monta ActorFrames a partir das células do estúdio: cada pose embutida
+      // é uma ação (parado, caminhando, ...) com quadros por direção.
+      const frames: Record<string, Readonly<Record<string, readonly string[]>>> = {};
+      for (const pose of studio.poses) {
+        const cell = studio.cells[`${character.id}::${pose.id}`];
+        if (cell?.frames) frames[pose.id] = cell.frames;
+      }
+      // Direções base: as 8 estáticas que sempre existem depois do wizard.
+      const baseKey = `${character.id}::__directions8__`;
+      const baseCell = studio.cells[baseKey];
+      const baseDirs: Record<string, readonly string[]> =
+        (baseCell?.frames as Record<string, readonly string[]> | undefined) ?? {};
+
+      actorFramesRef.current = frames;
+      actorBaseRef.current = Object.keys(baseDirs).length > 0 ? baseDirs : null;
+
+      const colisao = buildCollisionMap(stateRef.current.map);
+      collisionRef.current = colisao;
+
+      const z = spawnZAt(colisao, 5, 5);
+      const initial = createMovementState(5, 5, z);
+      actorRef.current = initial;
+      setActorState(initial);
+      setTestPlayer({ x: 5, y: 5, z });
+      lastPlayerCellRef.current = { x: 5, y: 5, z };
+      testTickRef.current = 0;
+      lastTickTimeRef.current = performance.now();
+      setPickState(null);
+
+      // Laço por requestAnimationFrame: o editor 3D não tem ticker próprio
+      // (o 2D usava o do PixiJS). O laço lê refs e escreve só na cena — o
+      // React recebe a posição apenas quando a célula do personagem muda.
+      const tick = (now: number): void => {
+        const s3d = scene3dRef.current;
+        const col = collisionRef.current;
+        const actor = actorRef.current;
+        const framesNow = actorFramesRef.current;
+        if (!s3d || !col || !actor || !framesNow) return;
+
+        // dt clampado: voltar de uma aba inativa daria um dt enorme e o
+        // motor processaria centenas de passos de uma vez.
+        const dt = Math.min((now - lastTickTimeRef.current) / 1000, 0.1);
+        lastTickTimeRef.current = now;
+
+        const held = heldRef.current;
+        const dir = worldDirectionFromKeys(held, stateRef.current.rotation);
+        const input: MovementInput = {
+          dir,
+          jump: jumpRef.current,
+          stepUp: false,
+          stepDown: false,
+          ...(walkRef.current ? { walk: true as const } : {}),
+          ...(crouchRef.current ? { crouch: true as const } : {}),
+        };
+        const next = stepWithMap(actor, input, dt, DEFAULT_CONFIG, col);
+        actorRef.current = next;
+
+        // Push-out (bloco colocado sobre o personagem) só precisa do React
+        // quando a célula muda — reconciliar a árvore 60×/s seria jogado fora.
+        const cell: PlayerCell = {
+          x: Math.floor(next.pos.x),
+          y: Math.floor(next.pos.y),
+          z: next.z,
+        };
+        const prev = lastPlayerCellRef.current;
+        if (!prev || prev.x !== cell.x || prev.y !== cell.y || prev.z !== cell.z) {
+          lastPlayerCellRef.current = cell;
+          setTestPlayer(cell);
+          setActorState(next);
+        }
+
+        const action = actionFor(next);
+        const vIdx = viewDirectionIndex(next.facing, stateRef.current.rotation);
+        const vName = directionNameFor(vIdx);
+        const url = frameUrl(
+          framesNow,
+          actorBaseRef.current ?? undefined,
+          action,
+          vName,
+          testTickRef.current,
+        );
+        testTickRef.current += 1;
+
+        if (url) {
+          // y dos pés = nível z do iso-core + arco visual do pulo (o sinal
+          // inverte: visualOffsetY é em coordenada de tela, Y cresce para
+          // baixo lá e para cima aqui).
+          s3d.render({
+            map: stateRef.current.map,
+            rotation: stateRef.current.rotation,
+            preview: null,
+            highlight: null,
+            actor: {
+              url,
+              x: next.pos.x,
+              y: next.z - visualOffsetY(next.jump.progress, 1),
+              z: next.pos.y,
+            },
+          });
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+
+      rafRef.current = requestAnimationFrame(tick);
+      setMode('testar');
+    } catch (err) {
+      toasts.push(T.modo.erroCarregar);
+      // eslint-disable-next-line no-console
+      console.error('[test-mode] erro ao carregar personagem:', err);
+    } finally {
+      enteringTestRef.current = false;
+    }
+  }, [toasts]);
+
+  const exitTestMode = useCallback(() => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    actorRef.current = null;
+    collisionRef.current = null;
+    actorFramesRef.current = null;
+    actorBaseRef.current = null;
+    heldRef.current = { up: false, down: false, left: false, right: false };
+    jumpRef.current = false;
+    crouchRef.current = false;
+    walkRef.current = false;
+    lastPlayerCellRef.current = null;
+    setTestPlayer(null);
+    setActorState(null);
+    setMode('editar');
+    // Redesenha sem o personagem.
+    scene3dRef.current?.render({
+      map: stateRef.current.map,
+      rotation: stateRef.current.rotation,
+      preview: null,
+      highlight: null,
+      actor: null,
+    });
+  }, []);
+
+  // O laço do modo teste não pode sobreviver ao desmonte do editor.
+  useEffect(
+    () => () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    },
+    [],
+  );
+
+  // Teclado: Esc sai do teste, R gira, Z/Y desfazem, 1-4 escolhem vista.
+  // A rotação funciona nos dois modos; editar (desfazer/refazer) só no modo
+  // de edição.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
+      if (e.key === 'Escape' && stateRef.current.mode === 'testar') {
+        exitTestMode();
+        return;
+      }
       if (e.key === 'r' || e.key === 'R') {
         rotateTo(turn(stateRef.current.rotation, e.shiftKey ? -1 : 1));
         return;
@@ -417,6 +652,7 @@ export function MapEditor3D() {
         rotateTo((Number(e.key) - 1) as Rotation);
         return;
       }
+      if (stateRef.current.mode === 'testar') return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         setHistory((h) => (e.shiftKey ? redo(h) : undo(h)));
@@ -427,7 +663,44 @@ export function MapEditor3D() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rotateTo]);
+  }, [rotateTo, exitTestMode]);
+
+  // Teclas do personagem: WASD/setas + modificadores. Rastreia keydown/keyup
+  // para movimento contínuo — keydown sozinho não sabe quando a tecla soltou.
+  useEffect(() => {
+    const updateHeld = (key: string, pressed: boolean): boolean => {
+      switch (key) {
+        case 'w': case 'W': case 'ArrowUp':
+          heldRef.current = { ...heldRef.current, up: pressed }; return true;
+        case 's': case 'S': case 'ArrowDown':
+          heldRef.current = { ...heldRef.current, down: pressed }; return true;
+        case 'a': case 'A': case 'ArrowLeft':
+          heldRef.current = { ...heldRef.current, left: pressed }; return true;
+        case 'd': case 'D': case 'ArrowRight':
+          heldRef.current = { ...heldRef.current, right: pressed }; return true;
+        case ' ': jumpRef.current = pressed; return true;
+        case 'Control': crouchRef.current = pressed; return true;
+        case 'Shift': walkRef.current = pressed; return true;
+      }
+      return false;
+    };
+
+    const onDown = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (updateHeld(e.key, true)) e.preventDefault();
+    };
+    const onUp = (e: KeyboardEvent): void => {
+      updateHeld(e.key, false);
+    };
+
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, []);
 
   // ---------------------------------------------------------------- render
 
@@ -520,6 +793,28 @@ export function MapEditor3D() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          {mode === 'editar' ? (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void enterTestMode()}
+              disabled={!ready}
+              aria-label={T.modo.botaoTestar}
+            >
+              <PlayIcon className="size-4" />
+              <span className="ml-1.5">{T.modo.botaoTestar}</span>
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exitTestMode}
+              aria-label={T.modo.botaoEditar}
+            >
+              <PencilIcon className="size-4" />
+              <span className="ml-1.5">{T.modo.botaoEditar}</span>
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -622,14 +917,24 @@ export function MapEditor3D() {
               {T.status.vista}{' '}
               <strong>{ROTATION_LABELS[rotation]}</strong>
             </span>
-            <span>
-              {T.status.alvo}{' '}
-              <strong>
-                {pickState
-                  ? `x ${pickState.placement.x} · y ${pickState.placement.y} · z ${pickState.placement.z}`
-                  : '—'}
-              </strong>
-            </span>
+            {mode === 'testar' && actorState ? (
+              <span>
+                Personagem{' '}
+                <strong>
+                  x {actorState.pos.x.toFixed(1)} · y {actorState.pos.y.toFixed(1)} · z{' '}
+                  {actorState.z}
+                </strong>
+              </span>
+            ) : (
+              <span>
+                {T.status.alvo}{' '}
+                <strong>
+                  {pickState
+                    ? `x ${pickState.placement.x} · y ${pickState.placement.y} · z ${pickState.placement.z}`
+                    : '—'}
+                </strong>
+              </span>
+            )}
             <span>
               {T.status.pecas} <strong>{total}</strong>
               {selected ? ` · ${selected.label}` : ''}
@@ -637,7 +942,7 @@ export function MapEditor3D() {
           </div>
 
           <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg border border-border bg-card/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
-            {T.status.atalhos}
+            {mode === 'testar' ? T.modo.atalhos : T.status.atalhos}
           </div>
         </main>
       </div>
