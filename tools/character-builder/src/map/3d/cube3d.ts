@@ -467,7 +467,9 @@ function materialsProcedural(hue: number): CubeMaterials {
  */
 export function createCubeMesh(mats: CubeMaterials): THREE.Mesh {
   const mesh = new THREE.Mesh(sharedBox, mats.materials as THREE.Material[]);
-  mesh.castShadow = false;
+  // Projeta sombra nos blocos abaixo/ao lado e recebe a sombra dos blocos
+  // acima — sem receiveShadow um cubo sob outro não escurece (R8).
+  mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
 }

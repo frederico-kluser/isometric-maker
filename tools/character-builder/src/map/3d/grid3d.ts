@@ -1,12 +1,14 @@
 /**
- * Grid do chão e plano de raycasting para o editor 3D.
+ * Grid do chão, plano de raycasting e piso visível para o editor 3D.
  *
- * Dois elementos:
+ * Três elementos:
  * 1. GridHelper — malha visual no plano Y=0 para orientação
  * 2. Plano invisível para raycasting — captura cliques no espaço vazio
+ * 3. Piso visível (shadow plane) — recebe as sombras projetadas pelos cubos
  *
- * O grid é redesenhado conforme o mapa cresce, para que sempre haja
- * superfície de clique ao redor do conteúdo.
+ * O grid e os dois planos são redimensionados conforme o mapa cresce, para
+ * que sempre haja superfície de clique ao redor do conteúdo e as sombras
+ * nunca cortem na borda.
  */
 import * as THREE from 'three';
 
@@ -97,6 +99,32 @@ export function createGroundPlane(size: number): THREE.Mesh {
 }
 
 /**
+ * Calcula tamanho e centro do piso a partir dos bounds ocupados do mapa.
+ *
+ * Compartilhado entre o ground plane (raycasting) e o shadow plane
+ * (sombra): os dois cobrem exatamente a mesma área, para a sombra nunca
+ * cortar onde o clique ainda funciona.
+ */
+function computePlaneExtent(
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  margin: number,
+): { size: number; centerX: number; centerZ: number } {
+  const size = Math.max(
+    maxX - minX + margin * 2,
+    maxZ - minZ + margin * 2,
+    20,
+  );
+  return {
+    size,
+    centerX: (minX + maxX) / 2,
+    centerZ: (minZ + maxZ) / 2,
+  };
+}
+
+/**
  * Expande o plano de chão para cobrir a área do mapa.
  */
 export function resizeGroundPlane(
@@ -107,14 +135,55 @@ export function resizeGroundPlane(
   maxZ: number,
   margin: number,
 ): void {
-  const size = Math.max(
-    maxX - minX + margin * 2,
-    maxZ - minZ + margin * 2,
-    20,
+  const { size, centerX, centerZ } = computePlaneExtent(
+    minX, maxX, minZ, maxZ, margin,
   );
-  const centerX = (minX + maxX) / 2;
-  const centerZ = (minZ + maxZ) / 2;
+  plane.position.x = centerX;
+  plane.position.z = centerZ;
+  plane.scale.set(size / 10, size / 10, 1);
+}
 
+// ------------------------------------------------------------------ piso visível (sombra)
+
+/**
+ * Cria o piso VISÍVEL do editor (Y=0) que recebe as sombras dos cubos.
+ *
+ * O ground plane de raycasting é invisível por design; sem um piso visível
+ * as sombras não teriam onde pousar. Material standard (e não basic) porque
+ * o MeshBasicMaterial ignora o shadow map — ele é a única superfície que
+ * precisa de `receiveShadow` além dos próprios cubos.
+ */
+export function createShadowPlane(size: number): THREE.Mesh {
+  const geom = new THREE.PlaneGeometry(size, size);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a2e, // escuro — as sombras precisam de contraste para aparecer
+  });
+  const plane = new THREE.Mesh(geom, mat);
+  plane.rotation.x = -Math.PI / 2; // plano XZ
+  plane.position.y = 0; // nível do chão
+  plane.receiveShadow = true;
+  plane.renderOrder = -1; // desenha antes dos cubos
+  plane.name = 'shadow-plane';
+  return plane;
+}
+
+/**
+ * Expande o piso de sombra para cobrir a área do mapa.
+ *
+ * Mesmos bounds do ground plane de raycasting — se o piso visível fosse
+ * menor que a área clicável, a sombra cortaria em cima de terreno jogável.
+ */
+export function updateGroundShadowPlane(
+  plane: THREE.Mesh,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  margin: number,
+): void {
+  const { size, centerX, centerZ } = computePlaneExtent(
+    minX, maxX, minZ, maxZ, margin,
+  );
   plane.position.x = centerX;
   plane.position.z = centerZ;
   plane.scale.set(size / 10, size / 10, 1);

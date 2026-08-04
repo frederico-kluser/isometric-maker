@@ -16,7 +16,9 @@
  *
  * 3. **Picking**: Raycaster com interseção de mesh, não aritmética diagonal.
  *
- * 4. **Iluminação**: DirectionalLight + AmbientLight para shading.
+ * 4. **Iluminação**: DirectionalLight + AmbientLight para shading; a
+ *    DirectionalLight projeta sombras (shadowMap 2048², PCF suave) sobre o
+ *    piso visível e sobre os outros cubos.
  *
  * ## O que NÃO muda
  *
@@ -37,7 +39,14 @@ import {
   disposeCubeCache,
   type CubeMaterials,
 } from './cube3d.ts';
-import { createGrid, createGroundPlane, resizeGrid, resizeGroundPlane } from './grid3d.ts';
+import {
+  createGrid,
+  createGroundPlane,
+  createShadowPlane,
+  resizeGrid,
+  resizeGroundPlane,
+  updateGroundShadowPlane,
+} from './grid3d.ts';
 import {
   BASE_YAW,
   createEditorCamera,
@@ -177,7 +186,8 @@ export async function createIsoScene3D(
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(BG_COLOR);
-  renderer.shadowMap.enabled = false; // sem sombras por enquanto
+  // Sombras ativadas em configureShadowSystem, abaixo — o shadowMap precisa
+  // do `sun` e do piso visível prontos antes de ser configurado.
 
   // --- cena ---
   const scene = new THREE.Scene();
@@ -196,11 +206,22 @@ export async function createIsoScene3D(
     canvas.clientHeight || 600,
   );
 
+  // Registra o contexto de render para o laço de partículas (spawnParticles
+  // só recebe a scene, mas precisa de renderer+câmera para animar on-demand).
+  renderContexts.set(scene, { renderer, camera });
+
   // --- grid e chão ---
   let grid = createGrid(10, 10);
   scene.add(grid);
-  const groundPlane = createGroundPlane(20);
+  const groundPlane = createGroundPlane(20); // invisível: só raycasting
   scene.add(groundPlane);
+  // Piso visível que recebe as sombras (R8). Complementa o ground plane —
+  // o de raycasting continua invisível e intocado.
+  const shadowPlane = createShadowPlane(20);
+  scene.add(shadowPlane);
+
+  // --- sombras (R8) ---
+  configureShadowSystem(renderer, sun, shadowPlane);
 
   // --- cache de materiais ---
   const materialsByBlock = new Map<string, CubeMaterials>();
@@ -402,12 +423,15 @@ export async function createIsoScene3D(
       }
     }
 
-    // Atualiza grid e ground plane
-    updateGridAndPlane(map, grid, groundPlane, scene, () => {
-      const g = createGrid(10, 10);
-      scene.add(g);
-      return g;
-    });
+    // Atualiza grid, ground planes e a luz de sombra conforme o mapa cresce
+    updateGridAndPlane(
+      map, grid, groundPlane, shadowPlane, sun, scene,
+      () => {
+        const g = createGrid(10, 10);
+        scene.add(g);
+        return g;
+      },
+    );
 
     // Preview
     if (state.preview) {
@@ -520,6 +544,10 @@ export async function createIsoScene3D(
   // --- destroy ---
   const destroy = (): void => {
     cancelRotationAnim();
+    // Desregistra o contexto ANTES de renderer.dispose(): o laço de
+    // partículas em voo checa o WeakMap a cada frame e aborta ao ver o
+    // contexto sumir — nunca renderiza num renderer já disposto.
+    renderContexts.delete(scene);
     if (actorSprite) {
       detachActorVisualMeshes(actorSprite);
       scene.remove(actorSprite);
@@ -537,6 +565,7 @@ export async function createIsoScene3D(
     }
     materialsByBlock.clear();
     disposeCubeCache();
+    disposeParticles();
     scene.clear();
     renderer.domElement?.remove();
   };
@@ -606,12 +635,19 @@ function sharedArrowGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Atualiza grid e ground plane para cobrir a área ocupada do mapa.
+ * Atualiza grid, piso de raycasting, piso de sombra e luz para cobrir a
+ * área ocupada do mapa.
+ *
+ * O frustum da sombra acompanha o piso: sem isso, um mapa que cresce para
+ * fora do frustum inicial teria a sombra cortada na borda (e a luz
+ * continuaria mirando a origem em mapas deslocados).
  */
 function updateGridAndPlane(
   map: MapData,
   grid: THREE.GridHelper,
   plane: THREE.Mesh,
+  shadowPlane: THREE.Mesh,
+  sun: THREE.DirectionalLight,
   scene: THREE.Scene,
   createNewGrid: () => THREE.GridHelper,
 ): void {
@@ -640,6 +676,8 @@ function updateGridAndPlane(
     grid, minX, maxX, minZ, maxZ, GRID_MARGIN, scene,
   );
   resizeGroundPlane(plane, minX, maxX, minZ, maxZ, GRID_MARGIN);
+  updateGroundShadowPlane(shadowPlane, minX, maxX, minZ, maxZ, GRID_MARGIN);
+  sizeShadowFrustum(sun, shadowPlane);
 }
 
 // ------------------------------------------------------------------ raycaster helpers
@@ -676,6 +714,60 @@ export function findGroundPlane(scene: THREE.Scene): THREE.Mesh | null {
   });
   return found;
 }
+
+// ------------------------------------------------------------------ sombras (R8)
+
+/**
+ * Ajusta a luz e o frustum da câmera de sombra ao tamanho e posição do piso.
+ *
+ * A câmera da sombra é ortográfica e fica na posição da luz olhando para o
+ * alvo (ver `DirectionalLightShadow.updateMatrices`). O frustum precisa
+ * cobrir o mapa inteiro na projeção da luz — que é maior que a projeção
+ * axis-aligned do piso (o mapa visto em 45° tem a diagonal ~1.4× maior),
+ * por isso o padding de 60% + 2 unidades.
+ */
+function sizeShadowFrustum(
+  sun: THREE.DirectionalLight,
+  plane: THREE.Mesh,
+): void {
+  const geometry = plane.geometry as THREE.PlaneGeometry;
+  const half = (geometry.parameters.width / 2) * plane.scale.x;
+  const centerX = plane.position.x;
+  const centerZ = plane.position.z;
+  const pad = half * 0.6 + 2;
+
+  const cam = sun.shadow.camera;
+  cam.left = -(half + pad);
+  cam.right = half + pad;
+  cam.top = half + pad;
+  cam.bottom = -(half + pad);
+  cam.near = 0.5;
+  cam.far = Math.max(100, half * 4);
+  cam.updateProjectionMatrix();
+
+  // Luz e alvo acompanham o centro do mapa: a direção da luz (offset fixo
+  // de 10,20,5) não muda, mas a sombra deixa de apontar para a origem quando
+  // o mapa cresce fora dela.
+  sun.position.set(centerX + 10, 20, centerZ + 5);
+  sun.target.position.set(centerX, 0, centerZ);
+  // O alvo não está na cena — sem o update manual o matrixWorld fica parado
+  // na identidade e o shadow camera continuaria mirando a origem.
+  sun.target.updateMatrixWorld();
+}
+
+// ------------------------------------------------------------------ partículas (R9)
+
+/**
+ * Renderer e câmera por cena, para o laço de animação de partículas.
+ *
+ * `spawnParticles` recebe só a scene (contrato do stub), mas o editor é
+ * render-on-demand — sem estas referências a animação não teria como
+ * desenhar. WeakMap: a entrada some sozinha quando a cena é coletada.
+ */
+const renderContexts = new WeakMap<
+  THREE.Scene,
+  { readonly renderer: THREE.WebGLRenderer; readonly camera: THREE.OrthographicCamera }
+>();
 
 // ------------------------------------------------------------------ stubs Onda 2
 // Estes stubs existem como contrato entre os agentes 2.1 e 2.2.
@@ -726,24 +818,172 @@ export function updateActorVisual(
 }
 
 /**
- * Configura shadowMap, luzes e piso visível.
- * PREENCHER: onda2-cube-shadows (agente 2.2).
+ * Configura shadowMap, luz e piso visível (R8).
+ *
+ * - shadowMap ativado com PCF suave (bordas de sombra difusas).
+ * - `sun` projeta sombra em 2048×2048 — caro, mas só custa nas renders
+ *   on-demand do editor; não há loop contínuo. O `autoUpdate` da sombra
+ *   fica no default (true) de propósito: com false, um cubo colocado depois
+ *   da primeira render nunca projetaria sombra (mapa estático e velho).
+ * - Frustum, posição da luz e alvo acompanham o piso (bounds do mapa).
+ *
+ * `groundPlane` deve ser o piso VISÍVEL (createShadowPlane), já adicionado à
+ * cena — a função lê posição e escala dele para dimensionar a sombra.
  */
 export function configureShadowSystem(
-  _renderer: THREE.WebGLRenderer,
-  _sun: THREE.DirectionalLight,
-  _groundPlane: THREE.Mesh,
+  renderer: THREE.WebGLRenderer,
+  sun: THREE.DirectionalLight,
+  groundPlane: THREE.Mesh,
 ): void {
-  // stub — preenchido pelo agente 2.2
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 100;
+  // Bias negativo: afasta o depth da superfície que recebe a sombra, para
+  // a própria luz não marcar acne no cubo que a projeta.
+  sun.shadow.bias = -0.0005;
+
+  sizeShadowFrustum(sun, groundPlane);
 }
 
 /**
- * Dispara partículas ao colocar/remover bloco.
- * PREENCHER: onda2-cube-shadows (agente 2.2).
+ * Dispara partículas na posição de um bloco colocado/removido (R9).
+ *
+ * Cubinhos 0.1³ (geometria compartilhada) com material básico colorido —
+ * sem luz, para o efeito não depender do rig de iluminação. Sobem com
+ * velocidade inicial, caem com gravidade (−9.8 units/s²) e somem por fade
+ * out em ~0.5 s.
+ *
+ * O editor é render-on-demand: o laço de animação é um rAF próprio que
+ * renderiza a cena a cada frame e se limpa sozinho no fim (remove os
+ * meshes, descarta os materiais, renderiza um frame final limpo e para).
+ * Se a cena for destruída no meio, o laço detecta e aborta sem renderizar.
+ *
+ * `position` é o centro do bloco em world units (y com o offset de meio
+ * cubo, como em `render()`). A integração com o editor (chamar ao
+ * colocar/remover) fica para depois — esta função é o contrato.
+ *
+ * @param count Número de partículas (default 8).
  */
 export function spawnParticles(
-  _scene: THREE.Scene,
-  _position: THREE.Vector3,
+  scene: THREE.Scene,
+  position: THREE.Vector3,
+  count = 8,
 ): void {
-  // stub — preenchido pelo agente 2.2
+  const ctx = renderContexts.get(scene);
+  if (!ctx || count <= 0) return; // cena sem renderer registrado → não anima
+
+  if (!particleBox) {
+    particleBox = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+  }
+
+  // Material próprio por partícula: o fade (opacity) é individual, então
+  // materiais compartilhados sumiriam todos juntos.
+  const particles: Particle[] = [];
+  const materials: THREE.MeshBasicMaterial[] = [];
+  for (let i = 0; i < count; i++) {
+    const color = PARTICLE_COLORS[i % PARTICLE_COLORS.length]!;
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      depthWrite: false, // transparência não deve ocultar o que está atrás
+    });
+    materials.push(material);
+    const mesh = new THREE.Mesh(particleBox, material);
+    // Espalha num cubo de 0.3 ao redor do centro do bloco.
+    mesh.position.set(
+      position.x + (Math.random() - 0.5) * 0.3,
+      position.y + (Math.random() - 0.5) * 0.3,
+      position.z + (Math.random() - 0.5) * 0.3,
+    );
+    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+    mesh.renderOrder = 10; // desenha por cima dos cubos
+    scene.add(mesh);
+    particles.push({
+      mesh,
+      velY: 1.6 + Math.random() * 1.8,
+      lifetime: 0.35 + Math.random() * 0.25,
+      age: 0,
+    });
+  }
+
+  const cleanup = (): void => {
+    for (const p of particles) scene.remove(p.mesh);
+    for (const m of materials) m.dispose();
+  };
+
+  let last = performance.now();
+
+  const tick = (now: number): void => {
+    // Cena destruída durante a animação (destroy chamou renderContexts.delete)
+    // → aborta sem renderizar num renderer já disposto.
+    if (renderContexts.get(scene) !== ctx) {
+      cleanup();
+      return;
+    }
+
+    // Clamp do dt: após uma aba inativa o primeiro frame saltaria e as
+    // partículas atravessariam o chão.
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    let alive = false;
+    for (const p of particles) {
+      p.age += dt;
+      if (p.age >= p.lifetime) {
+        p.mesh.visible = false;
+        continue;
+      }
+      alive = true;
+      p.velY -= 9.8 * dt; // gravidade
+      p.mesh.position.y += p.velY * dt; // sobem e depois caem
+      (p.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - p.age / p.lifetime; // fade out
+    }
+
+    ctx.renderer.render(scene, ctx.camera);
+
+    if (alive) {
+      requestAnimationFrame(tick);
+    } else {
+      // Fim: remove tudo e renderiza uma última vez para o frame final
+      // (sem partículas) aparecer.
+      cleanup();
+      ctx.renderer.render(scene, ctx.camera);
+    }
+  };
+
+  requestAnimationFrame(tick);
+}
+
+/** Partícula individual da animação de `spawnParticles`. */
+interface Particle {
+  mesh: THREE.Mesh;
+  /** Velocidade vertical atual, em units/s (positivo = sobe). */
+  velY: number;
+  /** Tempo de vida total em segundos. */
+  lifetime: number;
+  /** Idade acumulada em segundos. */
+  age: number;
+}
+
+/** Geometria compartilhada dos cubinhos de partícula (0.1³). */
+let particleBox: THREE.BoxGeometry | null = null;
+
+/** Cores vivas das partículas — visíveis porque o material ignora luz. */
+const PARTICLE_COLORS: readonly number[] = [
+  0xffd166, 0xff6b6b, 0x4ecdc4, 0xffa94d, 0x74c0fc,
+];
+
+/**
+ * Descarta a geometria compartilhada das partículas. Chamar no destroy da
+ * cena — como `disposeCubeCache` do cube3d.
+ */
+export function disposeParticles(): void {
+  if (particleBox) {
+    particleBox.dispose();
+    particleBox = null;
+  }
 }
