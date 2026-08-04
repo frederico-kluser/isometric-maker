@@ -4,19 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>EXPLAINER — Migração 3D e Colisão Sólida</title>
-<link rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
-      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
-      crossorigin="anonymous">
-<link rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
-      integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk"
-      crossorigin="anonymous">
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
-      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
-      crossorigin="anonymous">
+<title>Editor 3D Definitivo — Relatório de Migração</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
 <style>
   [id] { scroll-margin-top: 5rem; }
   pre { position: relative; margin-bottom: 1rem; }
@@ -32,180 +23,266 @@
 </style>
 </head>
 <body class="bg-body">
-<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
-  <div class="container">
-    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>isometric-maker</span>
-    <span class="navbar-text small text-body-secondary d-none d-md-inline">Ondas 1–5 · 9 agentes · 2026-08-03</span>
+
+<nav class="navbar navbar-expand sticky-top bg-body-tertiary border-bottom mb-4">
+  <div class="container-fluid">
+    <span class="navbar-brand fs-5"><i class="bi bi-box-fill text-primary me-2"></i>Editor 3D Definitivo</span>
+    <span class="navbar-text text-body-secondary">Relatório de Migração · 2026-08-04</span>
   </div>
 </nav>
-<main class="container py-4" style="max-width: 60rem">
-  <header class="mb-4">
-    <h1 class="display-6 fw-semibold">Migração para editor 3D, colisão sólida e molde adulto</h1>
-    <p class="lead text-body-secondary">Remoção completa do modo sprite 2D, engine de colisão AABB com cubos intransponíveis, e personagem baseado no molde adulto em 8 direções.</p>
-    <div class="d-flex flex-wrap gap-2">
-      <span class="badge text-bg-secondary">5 ondas</span>
-      <span class="badge text-bg-secondary">9 agentes</span>
-      <span class="badge text-bg-success">13 PASS gate.sh</span>
-    </div>
-  </header>
-  <ul class="nav nav-tabs mb-3" id="tabs" role="tablist">
-    <li class="nav-item" role="presentation"><button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview" type="button" role="tab" aria-controls="pane-overview" aria-selected="true">Visão Geral</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda1" data-bs-toggle="tab" data-bs-target="#pane-onda1" type="button" role="tab" aria-controls="pane-onda1" aria-selected="false">Onda 1 · Fundação</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda2" data-bs-toggle="tab" data-bs-target="#pane-onda2" type="button" role="tab" aria-controls="pane-onda2" aria-selected="false">Onda 2 · Remoção 2D</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda3" data-bs-toggle="tab" data-bs-target="#pane-onda3" type="button" role="tab" aria-controls="pane-onda3" aria-selected="false">Onda 3 · Colisão</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda4" data-bs-toggle="tab" data-bs-target="#pane-onda4" type="button" role="tab" aria-controls="pane-onda4" aria-selected="false">Onda 4 · Personagem</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda5" data-bs-toggle="tab" data-bs-target="#pane-onda5" type="button" role="tab" aria-controls="pane-onda5" aria-selected="false">Onda 5 · Docs</button></li>
-  </ul>
-  <div class="tab-content" id="tabContent">
-    <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0" data-print-title="Visão Geral">
-      <div class="alert alert-info"><i class="bi bi-info-circle me-1"></i><strong>Tarefa original:</strong> remover por completo o modo de construção de mapa em sprites, suportar apenas 3D, melhorar a engine com cubos sólidos, deletar sprite de personagem e usar molde adulto como referência em 8 direções e todas as ações.</div>
-      <h5 class="mt-4">O que foi entregue</h5>
-      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Onda</th><th>Agentes</th><th>O que fez</th><th>Status</th></tr></thead><tbody>
-        <tr><td>1 · Fundação</td><td>2</td><td>Pesquisa AABB collision + auditoria de 9+ skills</td><td><span class="badge text-bg-success">OK</span></td></tr>
-        <tr><td>2 · Remoção 2D</td><td>3</td><td>24 arquivos deletados (~6200 linhas), tipos migrados, rotas consolidadas, pixi.js removido, skills reescritos</td><td><span class="badge text-bg-success">OK</span></td></tr>
-        <tr><td>3 · Colisão</td><td>1</td><td>Swept AABB per-axis, caixa 0.65, flag solid, push-out MTV, 504 testes</td><td><span class="badge text-bg-success">OK</span></td></tr>
-        <tr><td>4 · Personagem</td><td>1</td><td>13 sprites deletados, molde adulto default, 364 testes</td><td><span class="badge text-bg-success">OK</span></td></tr>
-        <tr><td>5 · Docs</td><td>2</td><td>ADR 0037+0038, doc colisão, catalog.md+router atualizados</td><td><span class="badge text-bg-success">OK</span></td></tr>
-      </tbody></table></div>
-      <h5 class="mt-4">Gate final</h5>
-      <pre><code class="language-text">═══ gate.sh ═══
-PASS: 13  FAIL: 0  AUXILIAR: 3
-VEREDITO: PASS
 
-iso-core          · 504/504 testes
-character-builder · 364/364 testes + typecheck
-pixellab-pipeline · 76/76 testes + typecheck
-runtime           · typecheck OK
-docs              · 54 docs conformes
-skills            · lint 0 erros, evals 34/34
-pixi pin          · 2 fontes OK
-ledger            · OK</code></pre>
-      <h5 class="mt-4">Commits (9)</h5>
-      <ol class="small">
-        <li><code>onda2-remove-2d</code> — remove 2D sprite map editor, keep only 3D</li>
-        <li><code>onda2-skill-maps</code> — rewrite editing-isometric-maps for 3D</li>
-        <li><code>onda2-skills-threejs</code> — formalize 4 Three.js skills</li>
-        <li><code>onda2-skills-threejs</code> — fix cube-canvas.ts path</li>
-        <li><code>onda4-character</code> — delete mannequin sprites, adult mold default</li>
-        <li><code>onda3-solid-collision</code> — AABB swept per-axis collision with push-out</li>
-        <li><code>onda5-adrs-docs</code> — ADR 0037 + 0038 + collision doc</li>
-        <li><code>onda5-skills-catalog</code> — update catalog, project-router, routing-pixijs-work</li>
-        <li><code>fix(pin)</code> — remove character-builder from pixi pin check</li>
-      </ol>
-      <h5 class="mt-4">Decisões autônomas</h5>
-      <ul class="small">
-        <li><strong>Caixa da entidade:</strong> half=0.325 (total ~0.65) — tunneling impossível com passo 0.067</li>
-        <li><strong>Sliding de parede:</strong> existe (separação por eixo)</li>
-        <li><strong>Família PixiJS:</strong> re-escopada para runtime, não retirada</li>
-        <li><strong>Zero dinheiro gasto</strong> — 0 chamadas à API PixelLab</li>
-      </ul>
-    </div>
-    <div class="tab-pane fade" id="pane-onda1" role="tabpanel" aria-labelledby="tab-onda1" tabindex="0" data-print-title="Onda 1 · Fundação">
-      <h5>Pesquisa de colisão AABB</h5>
-      <p>Recomendação: <strong>Swept AABB com separação por eixo + push-out MTV</strong> — a combinação Minecraft/voxel-engine.</p>
-      <div class="table-responsive"><table class="table table-sm small"><thead><tr><th>Abordagem</th><th>Complexidade</th><th>Adequação</th></tr></thead><tbody>
-        <tr><td>Swept AABB per-axis</td><td>Média</td><td><span class="badge text-bg-success">Alta</span></td></tr>
-        <tr><td>Push-out MTV</td><td>Baixa</td><td><span class="badge text-bg-success">Alta</span> — caso editor</td></tr>
-        <tr><td>Motor de física</td><td>Alta</td><td><span class="badge text-bg-danger">Baixa</span></td></tr>
-      </tbody></table></div>
-      <p class="small">Descoberta: <code>GridAabb</code>/<code>aabbOf</code>/<code>aabbOverlaps</code>/<code>blocksMovement</code> já existiam em <code>map-instances.ts</code> — nunca consumidos.</p>
-      <h5 class="mt-4">Auditoria de skills</h5>
-      <ul class="small">
-        <li><code>pixi.js</code> importado APENAS por <code>scene.ts</code> e <code>renderer.ts</code></li>
-        <li>4 skills Three.js: 12 erros de lint (frontmatter, PT-BR, sem citações)</li>
-        <li>Código morto: <code>map/tools/</code>, <code>export.ts</code>, <code>autotile.ts</code>, <code>picking.ts</code></li>
-        <li>Família PixiJS: re-escorpar para runtime</li>
-      </ul>
-    </div>
-    <div class="tab-pane fade" id="pane-onda2" role="tabpanel" aria-labelledby="tab-onda2" tabindex="0" data-print-title="Onda 2 · Remoção 2D">
-      <h5>3 agentes paralelos</h5>
-      <p>Remoção de código 2D + reescrita de skill + formalização Three.js.</p>
-      <h6>24 arquivos deletados (~6200 linhas)</h6>
-      <pre><code class="language-text">map/editor/map-editor.tsx    map/actor.ts          map/pick3d.ts
-map/scene.ts                 map/autotile.ts       map/export.ts
-map/renderer.ts              map/camera.ts         map/collision-map.ts
-map/app.ts                   map/picking.ts        map/components/compass.tsx
-map/cube.ts                  map/placement.ts      map/tools/{paint,stack,wall}.ts
-+ 6 test files correspondentes</code></pre>
-      <h6>Tipos extraídos</h6>
-      <p><code>BlockDef</code>, <code>Facing</code>, <code>Cell3D</code> → <code>map/3d/block-def.ts</code>. Canvas helpers → <code>map/3d/cube-canvas.ts</code>. <code>pixi.js</code> removido de <code>package.json</code>.</p>
-      <h6>Skills</h6>
-      <p><code>editing-isometric-maps</code>: 39 citações, picking Raycaster, render scene3d.ts. 4 skills Three.js: 0 erros lint, 60 citações, 4 eval suites.</p>
-    </div>
-    <div class="tab-pane fade" id="pane-onda3" role="tabpanel" aria-labelledby="tab-onda3" tabindex="0" data-print-title="Onda 3 · Colisão sólida">
-      <h5>collision-box.ts — Swept AABB per-axis</h5>
-      <pre><code class="language-typescript">export const PLAYER_HALF = 0.325;  // caixa total ~0.65
-export function resolveMovement(map, box, dx, dy, solidAt): ResolvedMove
-export function pushOut(map, box, solidAt): EntityBox | null
-export function solidAtFromBlocks(columns): SolidAtFn  // honra flag solid</code></pre>
-      <p>Move X → clampa → atualiza caixa → move Y. Sliding natural. Degrau por face (pressedCells). Push-out MTV (max 0.9). Água/lava/folhagem não bloqueiam.</p>
-      <div class="alert alert-success small"><strong>Gate:</strong> 504/504 iso-core (+31 collision-box) · typecheck limpo</div>
-    </div>
-    <div class="tab-pane fade" id="pane-onda4" role="tabpanel" aria-labelledby="tab-onda4" tabindex="0" data-print-title="Onda 4 · Personagem">
-      <h5>13 sprites deletados</h5>
-      <p><code>packages/game-assets/manequim/</code> removido. Molde <code>adulto.png</code> e <code>crianca.png</code> preservados.</p>
-      <h5>Molde adulto como default</h5>
-      <p><code>seedStudio()</code> com <code>mold: "adulto"</code>. Derivados herdam molde. ADR 0035 já definia <code>init_image</code> 320.</p>
-      <h5>8 direções + 5 poses</h5>
-      <p><code>generateDirections8</code> via v3. Poses: parado, caminhando, correndo, pulando, atacando.</p>
-      <div class="alert alert-success small"><strong>Gate:</strong> 364/364 testes · zero chamadas PixelLab</div>
-    </div>
-    <div class="tab-pane fade" id="pane-onda5" role="tabpanel" aria-labelledby="tab-onda5" tabindex="0" data-print-title="Onda 5 · Documentação">
-      <h5>ADRs</h5>
-      <p><strong>ADR 0037:</strong> Editor 3D apenas — remoção do modo sprite 2D.<br>
-      <strong>ADR 0038:</strong> Colisão sólida AABB com swept per-axis e push-out MTV.</p>
-      <h5>Docs</h5>
-      <p><code>docs/03-mapa/colisao-solida.md</code> em PT-BR. <code>docs/README.md</code> atualizado (54 docs).</p>
-      <h5>Skills</h5>
-      <p>Catalog.md: seção Three.js. Project-router: 4 mapeamentos. <code>routing-pixijs-work</code>: re-escopado. <code>check-pixi-pin.mjs</code>: 2 fontes.</p>
-    </div>
-  </div>
-  <footer class="border-top pt-3 mt-5 text-body-secondary small">
-    <p>Gerado pelo orquestrador deep-orchestrator. <strong>Última atualização:</strong> 2026-08-03.</p>
-  </footer>
+<main class="container mb-5">
+
+<h1 class="h3 mb-3">Editor 3D Definitivo — Relatório de Migração</h1>
+
+<div class="alert alert-primary d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+  <div><strong>915 testes verdes</strong> (514 iso-core + 401 character-builder) · Gate: <strong>13 PASS / 0 FAIL</strong> · 5 commits squash · 3 ondas, 5 agentes</div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R1</h5><p class="card-text small">Física de contato perfeita</p></div></div></div>
+  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R4</h5><p class="card-text small">Sombra do personagem</p></div></div></div>
+  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R8</h5><p class="card-text small">ShadowMap nos cubos</p></div></div></div>
+  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center"><h5 class="card-title text-success">R9</h5><p class="card-text small">Seta de direção + partículas</p></div></div></div>
+</div>
+
+<ul class="nav nav-tabs mb-4" role="tablist">
+  <li class="nav-item" role="presentation"><button class="nav-link active" id="tab-visao" data-bs-toggle="tab" data-bs-target="#pane-visao" type="button" role="tab" aria-controls="pane-visao" aria-selected="true">Visão Geral</button></li>
+  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda1" data-bs-toggle="tab" data-bs-target="#pane-onda1" type="button" role="tab" aria-controls="pane-onda1" aria-selected="false">Onda 1 — Física</button></li>
+  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda2" data-bs-toggle="tab" data-bs-target="#pane-onda2" type="button" role="tab" aria-controls="pane-onda2" aria-selected="false">Onda 2 — Sombras</button></li>
+  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-onda3" data-bs-toggle="tab" data-bs-target="#pane-onda3" type="button" role="tab" aria-controls="pane-onda3" aria-selected="false">Onda 3 — Fixes</button></li>
+  <li class="nav-item" role="presentation"><button class="nav-link" id="tab-resultado" data-bs-toggle="tab" data-bs-target="#pane-resultado" type="button" role="tab" aria-controls="pane-resultado" aria-selected="false">Resultado</button></li>
+</ul>
+
+<div class="tab-content">
+
+<!-- ============================================================ VISÃO GERAL -->
+<div class="tab-pane fade show active" id="pane-visao" role="tabpanel" aria-labelledby="tab-visao" data-print-title="Visão Geral" tabindex="0">
+
+<h2 class="h4 mb-3">O que foi feito</h2>
+<p>Transformação do editor 3D (Three.js) no editor de mapa <strong>definitivo</strong>, com física de contato perfeita, sombras, partículas e polimento visual. O trabalho foi dividido em <strong>3 ondas</strong> executadas por <strong>5 sub-agentes</strong> em worktrees isoladas, com revisão adversarial entre ondas e recalibração dinâmica do plano (REPLAN).</p>
+
+<h3 class="h5 mt-4">Requisitos atendidos</h3>
+<div class="table-responsive">
+<table class="table table-sm">
+<thead><tr><th>ID</th><th>Requisito</th><th>Status</th><th>Onda</th></tr></thead>
+<tbody>
+<tr><td>R1</td><td>Física de contato perfeita — cubos são IMPENETRÁVEIS</td><td><span class="badge bg-success">Concluído</span></td><td>1</td></tr>
+<tr><td>R2</td><td>8 direções com sprite correto no modo teste 3D</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
+<tr><td>R3</td><td>Todas as ações (parado, caminhando, correndo, pulando, agachado)</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
+<tr><td>R4</td><td>Sombra do personagem no chão</td><td><span class="badge bg-success">Concluído</span></td><td>2.1 + 3</td></tr>
+<tr><td>R5</td><td>Depth-sort com actor interleaved entre cubos</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
+<tr><td>R6</td><td>Highlight da célula sob o cursor</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
+<tr><td>R7</td><td>Preview verde (válido) / vermelho (inválido)</td><td><span class="badge bg-secondary">Já existia</span></td><td>—</td></tr>
+<tr><td>R8</td><td>Sombra dos cubos (shadowMap)</td><td><span class="badge bg-success">Concluído</span></td><td>2.2</td></tr>
+<tr><td>R9</td><td>Indicador de direção + partículas</td><td><span class="badge bg-success">Concluído</span></td><td>2.1 + 2.2 + 3</td></tr>
+<tr><td>R10</td><td>Não quebrar nada existente</td><td><span class="badge bg-success">915 ✅</span></td><td>Todas</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 class="h5 mt-4">Arquivos modificados (de-para)</h3>
+<div class="table-responsive">
+<table class="table table-sm">
+<thead><tr><th>Arquivo</th><th>Antes</th><th>Depois</th><th>Onda</th></tr></thead>
+<tbody>
+<tr><td><code>packages/iso-core/src/collision-box.ts</code></td><td>421 linhas, EPS privado, spans sem tolerância inferior</td><td>510 linhas, EPS exportado, spans com EPS bilateral, terminal sem EPS</td><td>1</td></tr>
+<tr><td><code>packages/iso-core/src/collision-box.test.ts</code></td><td>312 linhas, 28 testes</td><td>470 linhas, 38 testes (+10 regressão)</td><td>1</td></tr>
+<tr><td><code>tools/character-builder/src/map/actor.ts</code></td><td>232 linhas, sem buildActorVisual</td><td>290 linhas, +buildActorVisual() pura, +cameraTurn</td><td>2.1 + 3</td></tr>
+<tr><td><code>tools/character-builder/src/map/actor.test.ts</code></td><td>Sem testes de visual</td><td>+98 linhas, 13 testes (opacidade, ângulo, seta)</td><td>2.1 + 3</td></tr>
+<tr><td><code>.../3d/scene3d.ts</code></td><td>570 linhas, sem sombras, sem partículas</td><td>~990 linhas, ShadowMap, sombra ator, seta, partículas</td><td>2.1 + 2.2 + 3</td></tr>
+<tr><td><code>.../3d/map-editor-3d.tsx</code></td><td>1000 linhas, ticker passa 4 campos</td><td>1049 linhas, ticker passa 7 campos, +spawnParticles wiring</td><td>2.1 + 3</td></tr>
+<tr><td><code>.../3d/cube3d.ts</code></td><td>castShadow=false</td><td>castShadow=true</td><td>2.2</td></tr>
+<tr><td><code>.../3d/grid3d.ts</code></td><td>Só grid + ground plane invisível</td><td>+createShadowPlane, +updateGroundShadowPlane, piso visível</td><td>2.2</td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+
+<!-- ============================================================ ONDA 1 -->
+<div class="tab-pane fade" id="pane-onda1" role="tabpanel" aria-labelledby="tab-onda1" data-print-title="Onda 1 — Física de contato perfeita" tabindex="0">
+
+<h2 class="h4 mb-3">Onda 1 — Física de contato perfeita (R1)</h2>
+<p><strong>Commit:</strong> <code>bfc1bb5</code> · <strong>Agente:</strong> onda1-physics-contact · <strong>Worktree:</strong> <code>wt/onda1-physics-contact</code></p>
+
+<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i><strong>2 bugs encontrados por fuzz</strong> (185 mil movimentos aleatórios contra 7 configurações de muro). Ambos corrigidos e verificados com o mesmo fuzz (0/184994 embuts, 0/3000 vibrações).</div>
+
+<h3 class="h5">Bug 1 — Span sem tolerância no lado inferior</h3>
+<p><code>rowSpan</code>/<code>colSpan</code> usavam <code>EPS</code> só no lado superior (<code>floor(cx + half − EPS)</code>). O lado inferior era exato (<code>floor(cx − half)</code>). Quando o clamp da face aterrava 1 ulp dentro do muro (<code>minX = −4.4e-16</code>), a span via a coluna do muro e o <strong>deslizar ao longo da parede travava para sempre</strong>.</p>
+<p><strong>Fix:</strong> <code>+EPS</code> nos dois lados: <code>floor(cx − half + EPS)</code> e <code>floor(cx + half − EPS)</code>. Com a face a ±EPS da fronteira, encostar é encostar — não ocupar.</p>
+
+<h3 class="h5">Bug 2 — Célula terminal da varredura</h3>
+<p>A terminal era <code>floor(face + dx ± EPS)</code>. Com <code>face + dx = K + 1e-12</code>, o ±EPS puxava a terminal para <code>K − 1</code>: a <strong>célula de destino nunca era varrida</strong> e a caixa aterrava ε dentro do muro (e o quadro seguinte ficava preso, pois a varredura recusa caixa embutida).</p>
+<p><strong>Fix:</strong> <code>to = Math.floor(face + dx)</code> — sem EPS, o destino real é sempre varrido.</p>
+
+<h3 class="h5">Decisão sobre o EPS</h3>
+<p>EPS = <strong>0.001 foi testado e rejeitado</strong>: a tolerância das spans deixava a caixa passar por um canto de muro a menos de EPS (medido 0.0009) e "nadar" ao longo da parede. EPS = <strong>1e-9 mantido</strong> (piso de ruído ~2e-15; 5×10⁵ de folga).</p>
+
+<h3 class="h5">Push-out por passo — rejeitado</h3>
+<p>Avaliado e <strong>não implementado</strong>: a varredura contínua já garante 0 embuts (fuzz-confirmed). Chamar MTV por passo custaria O(área da caixa) no laço quente e mudaria os traços presos. O push-out permanece como ferramenta de reparo do editor (<code>pushPlayerOutOfCell</code>), não passo da simulação.</p>
+
+</div>
+
+<!-- ============================================================ ONDA 2 -->
+<div class="tab-pane fade" id="pane-onda2" role="tabpanel" aria-labelledby="tab-onda2" data-print-title="Onda 2 — Sombras e polimento visual" tabindex="0">
+
+<h2 class="h4 mb-3">Onda 2 — Sombras e polimento visual</h2>
+<p><strong>2 agentes em paralelo</strong> (worktrees disjuntas, stubs como contrato). Commit prep (<code>14571e8</code>) criou 3 stubs em <code>scene3d.ts</code> para evitar conflito de merge.</p>
+
+<h3 class="h5 mt-4">2.1 — Sombra do ator + indicador de direção (R4, R9)</h3>
+<p><strong>Commit:</strong> <code>78700ad</code> · <strong>Agente:</strong> onda2-actor-shadow</p>
+
+<h4 class="h6">Sombra (R4)</h4>
+<ul>
+  <li><code>ActorSprite</code> estendido com <code>directionIndex</code>, <code>jumpProgress</code>, <code>floorY</code></li>
+  <li><code>buildActorVisual(directionIndex, floorY, jumpProgress, cameraTurn?)</code> — função pura em <code>actor.ts</code>, sem Three.js</li>
+  <li>Disco <code>CircleGeometry</code> preto semitransparente no chão real (<code>floorY + 0.01</code>)</li>
+  <li>Opacidade parabólica: <code>1 − 4·p·(1−p)</code> — plena no chão, zero no ápice do pulo</li>
+  <li>Raio = 0.3 unidades (proporcional ao personagem)</li>
+</ul>
+
+<h4 class="h6">Indicador de direção (R9)</h4>
+<ul>
+  <li>Triângulo âmbar (<code>0xef4444</code>, opacidade 0.6) na base do personagem</li>
+  <li>Ângulo: <code>π/4 + idx·π/4 − cameraTurn·π/2</code> — direção de tela corrigida para rotação da câmera</li>
+  <li>Geometria compartilhada (<code>BufferGeometry</code> manual), nunca disposta</li>
+</ul>
+
+<h3 class="h5 mt-4">2.2 — ShadowMap nos cubos + partículas (R8, R9)</h3>
+<p><strong>Commit:</strong> <code>1125634</code> · <strong>Agente:</strong> onda2-cube-shadows</p>
+
+<h4 class="h6">ShadowMap (R8)</h4>
+<ul>
+  <li><code>renderer.shadowMap.enabled = true</code> + <code>PCFSoftShadowMap</code></li>
+  <li><code>sun.castShadow</code>: mapSize 2048², bias −0.0005, frustum ortográfico dinâmico</li>
+  <li>Piso visível: <code>createShadowPlane</code> (MeshStandardMaterial 0x1a1a2e, receiveShadow, renderOrder=−1)</li>
+  <li>Cubos: <code>castShadow = true</code> (receiveShadow já era true)</li>
+  <li>Frustum redimensionado a cada <code>render()</code> — acompanha o crescimento do mapa</li>
+</ul>
+
+<h4 class="h6">Partículas (R9)</h4>
+<ul>
+  <li><code>spawnParticles(scene, position, count=8)</code>: cubinhos 0.1³, gravidade −9.8, fade out</li>
+  <li>Laço rAF próprio (editor é render-on-demand), cleanup seguro via <code>renderContexts</code> WeakMap</li>
+  <li><code>disposeParticles()</code> chamado no <code>destroy()</code></li>
+</ul>
+
+</div>
+
+<!-- ============================================================ ONDA 3 -->
+<div class="tab-pane fade" id="pane-onda3" role="tabpanel" aria-labelledby="tab-onda3" data-print-title="Onda 3 — Fixes de revisão adversarial" tabindex="0">
+
+<h2 class="h4 mb-3">Onda 3 — Fixes de revisão adversarial</h2>
+<p><strong>Commit:</strong> <code>d5951ef</code> · <strong>Agente:</strong> onda3-fix-reviews</p>
+<p>As revisões adversariais da Onda 2 encontraram <strong>3 problemas</strong>. A Onda 3 corrigiu todos.</p>
+
+<h3 class="h5">Fix 1 (🔴 crítico) — Disco da sombra vertical</h3>
+<p><code>THREE.CircleGeometry</code> gera vértices no plano <strong>XY</strong> (normal +Z). O disco estava em pé como uma moeda vertical — metade enterrada no chão pelo depth test. Adicionado <code>shadow.rotation.x = -Math.PI / 2</code> (mesmo giro do ground plane em <code>grid3d.ts</code>).</p>
+
+<h3 class="h5">Fix 2 (🔴 crítico) — Seta errada nas rotações 1, 2 e 3</h3>
+<p><code>buildActorVisual</code> mapeava índice de tela → ângulo de mundo sem descontar a rotação da câmera. Na rotação 2, o sprite olhava para sul e a seta apontava para norte (180° de erro). Adicionado parâmetro <code>cameraTurn</code>: <code>directionAngle = π/4 + idx·π/4 − cameraTurn·π/2</code>. Validado pela geometria da câmera real (<code>yaw = π/4 + turn·π/2</code>).</p>
+
+<h3 class="h5">Fix 3 (🟡 médio) — spawnParticles órfã</h3>
+<p>A função existia com <strong>zero call sites</strong>. Integrada ao <code>applyTool</code> do editor: chamada após <code>placeBlock</code>/<code>removeBlock</code>/<code>paintBlock</code> com guard <code>next !== current</code> (no-ops não disparam partículas). Posição world: <code>Vector3(cell.x, cell.z + 0.5, cell.y)</code> — convenção mapa→mundo.</p>
+
+</div>
+
+<!-- ============================================================ RESULTADO -->
+<div class="tab-pane fade" id="pane-resultado" role="tabpanel" aria-labelledby="tab-resultado" data-print-title="Resultado" tabindex="0">
+
+<h2 class="h4 mb-3">Resultado final</h2>
+
+<h3 class="h5">Testes</h3>
+<div class="table-responsive">
+<table class="table table-sm">
+<thead><tr><th>Suite</th><th>Antes</th><th>Depois</th><th>Delta</th></tr></thead>
+<tbody>
+<tr><td>iso-core</td><td>504</td><td>514</td><td>+10 (colisão)</td></tr>
+<tr><td>character-builder</td><td>388</td><td>401</td><td>+13 (ator visual + seta)</td></tr>
+<tr><td><strong>Total</strong></td><td><strong>892</strong></td><td><strong>915</strong></td><td><strong>+23</strong></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 class="h5">Gate final</h3>
+<pre><code class="language-text">PASS: 13  FAIL: 0  AUXILIAR: 3
+VEREDITO: PASS</code></pre>
+
+<h3 class="h5">Commits</h3>
+<pre><code class="language-text">d5951ef onda3-fix-reviews: fix shadow disk rotation, direction arrow on all rotations, wire spawnParticles
+1125634 onda2-cube-shadows: enable ShadowMap (PCFSoft) + visible shadow floor + spawnParticles
+78700ad onda2-actor-shadow: actor shadow disk + direction arrow + buildActorVisual
+14571e8 PREP-onda-2: stubs for actor visual + shadow system + particles
+bfc1bb5 onda1-physics-contact: perfect AABB contact — fix embed holes, stabilize wall sliding</code></pre>
+
+<h3 class="h5 mt-4">Pendências conhecidas (ADIADAS)</h3>
+<div class="alert alert-secondary">
+  <p class="mb-1"><strong>Caso de borda do degrau:</strong> caminho de degrau em <code>fixedStepWithMap</code> (quando <code>steppedZ !== newZ</code>) devolve posição NÃO clampada pela caixa. Se no z+1 a caixa sobrepuser um muro alto ao lado do degrau, o personagem fica preso para sempre com z flutuante. Fora do escopo — registrado para o futuro.</p>
+</div>
+<div class="alert alert-secondary">
+  <p class="mb-1"><strong>Skill <code>bootstrapping-threejs-scene</code> desatualizada:</strong> SKILL.md:36 ainda diz "shadows stay off: shadowMap.enabled = false" — falso desde o merge de R8. Correção de documentação, não de código.</p>
+</div>
+
+<h3 class="h5 mt-4">Decisões de design</h3>
+<ul>
+  <li><strong>EPS 1e-9, não 0.001:</strong> medido e documentado — 0.001 permite passar por cantos</li>
+  <li><strong>Push-out não é passo da simulação:</strong> a varredura contínua garante contato; MTV por passo custaria caro e mudaria traços</li>
+  <li><strong>Opacidade parabólica, não linear:</strong> <code>1−4p(1−p)</code> em vez de <code>1−p</code> porque <code>NO_JUMP.progress = 1.0</code> (a fórmula linear apagaria a sombra do personagem parado)</li>
+  <li><strong>MeshLambertMaterial mantido:</strong> recebe/projeta sombras normalmente; StandardMaterial seria overkill para pixel art</li>
+  <li><strong>Ângulo da seta: <code>worldAngle − turn·π/2</code>:</strong> o termo <code>BASE_YAW</code> se cancela algebricamente — a fórmula é pura, sem import de Three.js</li>
+</ul>
+
+</div>
+
+</div><!-- .tab-content -->
+
 </main>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-kOsK60qEjNMDEjR+E4JQqQG55eWpBOuqwFRY7LE3vNY3ZuYy5w6kIFXhK5HxryO5"
-        crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
-        integrity="sha384-nYrDQMqAyBEjFnGFJwpLwXZJGjgawVe1FXGwPcj/B5dXf6YvLHSsPOF1WpE2s7yq"
-        crossorigin="anonymous"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-YB6YJjFRxUMGmyL1wdPG7BwcN5J4oHJa9BstOIlHwHC1/azOJK3gDrmFOwIyHr1" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-rj5UHyBScCsuSQUbXGZ4hIhNm+iJNQxVtogC+ADwMShXzgW3n3szhBIvBb0ADhVt" crossorigin="anonymous"></script>
 <script>
 hljs.highlightAll();
-document.querySelectorAll('pre code').forEach(function(b) {
+
+document.querySelectorAll('pre code').forEach(function(block) {
   var btn = document.createElement('button');
   btn.className = 'copy-btn btn btn-sm btn-outline-secondary';
   btn.innerHTML = '<i class="bi bi-clipboard"></i>';
   btn.title = 'Copiar';
   btn.addEventListener('click', function() {
-    var t = b.textContent || '';
-    function ok() { btn.innerHTML = '<i class="bi bi-check-lg"></i>'; setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500); }
+    var text = block.textContent || '';
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(t).then(ok).catch(function() {
-        var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand('copy'); ok(); } catch(e) { btn.innerHTML = '<i class="bi bi-x-lg"></i>'; }
-        document.body.removeChild(ta);
-      });
-    } else {
-      var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); ok(); } catch(e) { btn.innerHTML = '<i class="bi bi-x-lg"></i>'; }
-      document.body.removeChild(ta);
-    }
+      navigator.clipboard.writeText(text).then(function() {
+        btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>';
+        setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+      }).catch(function() { fallbackCopy(text, btn); });
+    } else { fallbackCopy(text, btn); }
   });
-  b.parentNode.insertBefore(btn, b);
+  block.parentNode.insertBefore(btn, block);
 });
+
+function fallbackCopy(text, btn) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); btn.innerHTML = '<i class="bi bi-check-lg text-success"></i>'; }
+  catch(e) { btn.innerHTML = '<i class="bi bi-x-lg text-danger"></i>'; }
+  document.body.removeChild(ta);
+  setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+}
+
+// Aba ↔ URL deep-link
 (function() {
-  var hash = window.location.hash;
-  if (!hash) return;
-  var target = document.querySelector(hash);
-  if (!target || !target.classList.contains('tab-pane')) return;
-  var tabBtn = document.querySelector('[data-bs-target="' + hash + '"]');
-  if (tabBtn) { var tab = new bootstrap.Tab(tabBtn); tab.show(); target.scrollIntoView(); }
-  window.addEventListener('shown.bs.tab', function(e) {
-    history.replaceState(null, '', '#' + e.target.getAttribute('aria-controls'));
-  });
+  var tabs = document.querySelectorAll('.nav-tabs button[data-bs-toggle="tab"]');
+  function activate(hash) {
+    var target = hash && document.querySelector(hash);
+    if (!target) return;
+    var tab = document.querySelector('[data-bs-target="' + hash + '"]');
+    if (tab) { var bsTab = new bootstrap.Tab(tab); bsTab.show(); target.focus({preventScroll: true}); }
+  }
+  if (location.hash) activate(location.hash);
+  tabs.forEach(function(t) { t.addEventListener('shown.bs.tab', function(e) { history.replaceState(null, '', '#' + e.target.getAttribute('aria-controls')); }); });
 })();
 </script>
 </body>
