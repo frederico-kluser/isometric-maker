@@ -14,7 +14,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync, readdirSync, rmSync, existsSync, readFileSync, writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -130,6 +132,15 @@ class FakeClient extends PixelLabClient {
   editSeq = 0;
   /** Atraso do /rotate para que E e N só se sobreponham se forem concorrentes. */
   rotateDelayMs = 5;
+  /**
+   * A QUEDA DEPOIS DA COBRANÇA, que é o cenário inteiro da ADR 0023: a
+   * submissão foi aceita (dinheiro fora) e o caminho até os pixels falha.
+   * `GET /characters/{id}` responde 'failed'; ligar e desligar reproduz
+   * "o servidor caiu no meio" sem precisar matar processo nenhum.
+   */
+  characterFails = false;
+  /** Mesma ideia para a edição: o job da /edit-image volta 'failed'. */
+  editPollFails = false;
 
   constructor() {
     super('fake-token-for-test-only');
@@ -185,6 +196,13 @@ class FakeClient extends PixelLabClient {
     if (method === 'GET' && path.startsWith('/background-jobs/')) {
       const id = path.slice('/background-jobs/'.length);
       if (id.startsWith('job-edit-')) {
+        if (this.editPollFails) {
+          return this.ok<T>({
+            id,
+            status: 'failed',
+            error: 'queda simulada DEPOIS da cobrança',
+          });
+        }
         return this.ok<T>({
           id,
           status: 'completed',
@@ -212,6 +230,9 @@ class FakeClient extends PixelLabClient {
     if (method === 'GET' && path.startsWith('/characters/')) {
       const id = decodeURIComponent(path.slice('/characters/'.length));
       this.characterReads.push(id);
+      if (this.characterFails) {
+        return this.ok<T>({ id, status: 'failed', rotation_urls: null });
+      }
       const rotation: Record<string, string> = {};
       for (const d of DIRECTIONS) rotation[d] = `${FAKE_STORAGE}/${d}.png`;
       return this.ok<T>({
@@ -768,6 +789,143 @@ test('fitFrames: false no lock deixa os quadros como vieram, sem raw/', async ()
     const disco = join(opts.assetsDir, primeiro.replace(/^\/assets\//, ''));
     assert.equal(readFileSync(disco).toString('base64'), PNG_DIAGONAL);
     assert.ok(!existsSync(join(dirname(disco), 'raw')), 'sem recorte, sem raw/');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ retomada gratuita (ADR 0023)
+//
+// O cenário é o da ADR 0023, e ele é o único que importa aqui: a submissão foi
+// ACEITA — o dinheiro saiu — e o caminho até os pixels caiu depois. A segunda
+// execução tem de re-sondar o identificador guardado e NUNCA submeter de novo.
+//
+// Estes testes têm dentes porque contam SUBMISSÕES (`client.count`), com token
+// falso e cliente dublado. Um teste que só olhasse "deu certo" ficaria verde
+// com duas cobranças pelo mesmo personagem.
+
+test('retomada: 8 direções pagas cujo download caiu NÃO ressubmetem o create-character-v3', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base para retomada', opts);
+
+    // 1ª execução: submissão aceita (COBRADA) e o GET /characters/{id} cai.
+    client.characterFails = true;
+    await assert.rejects(
+      () => generateDirections8(client, store, CHAR_ID, opts),
+      /failed|cobrada/i,
+      'a primeira execução tem de falhar DEPOIS da submissão, como em 2026-08-01',
+    );
+    assert.equal(
+      client.count('/create-character-v3'),
+      1,
+      'a primeira execução submeteu uma vez — é ela que custou dinheiro',
+    );
+    assert.notEqual(
+      store.studio.cells[directions8Key(CHAR_ID)]?.status,
+      'pronto',
+      'sem frames em disco a célula não pode estar pronta: senão a idempotência ' +
+        'de célula mascararia a retomada e o teste ficaria vacuamente verde',
+    );
+
+    // 2ª execução, com o fornecedor de volta: RE-SONDA, não ressubmete.
+    client.characterFails = false;
+    await generateDirections8(client, store, CHAR_ID, opts);
+
+    assert.equal(
+      client.count('/create-character-v3'),
+      1,
+      'a retomada NÃO pode submeter de novo — o character_id já estava guardado',
+    );
+    const frames = store.studio.cells[directions8Key(CHAR_ID)]?.frames ?? {};
+    assert.equal(
+      Object.values(frames).flat().length,
+      8,
+      'e a retomada tem de ENTREGAR o artefato pago, não só evitar a cobrança',
+    );
+    assert.equal(
+      store.studio.characters[0]?.remoteId,
+      'remote-char-1',
+      'o character_id da submissão paga fica no personagem depois da retomada',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retomada: edição da sul já paga cujo poll caiu NÃO ressubmete a /edit-image', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base para editar', opts);
+
+    client.editPollFails = true;
+    await assert.rejects(
+      () => editSouth(client, store, CHAR_ID, 'colocar um chapéu', opts),
+      /queda simulada/i,
+    );
+    assert.equal(client.count('/edit-image'), 1, 'a edição foi submetida e cobrada');
+    assert.equal(wizardOf(store).southVersions.length, 1, 'a v1 não chegou a existir');
+
+    client.editPollFails = false;
+    await editSouth(client, store, CHAR_ID, 'colocar um chapéu', opts);
+
+    assert.equal(
+      client.count('/edit-image'),
+      1,
+      'a retomada re-sonda o background_job_id guardado — nada de submissão nova',
+    );
+    assert.ok(existsSync(southFile(opts, 1)), 'a v1 paga chegou ao disco na retomada');
+    assert.equal(wizardOf(store).activeSouth, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('o caminho de volta é do PEDIDO: outro prompt de edição não retoma o stub alheio', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
+
+    client.editPollFails = true;
+    await assert.rejects(
+      () => editSouth(client, store, CHAR_ID, 'chapéu', opts),
+      /queda simulada/i,
+    );
+    assert.equal(client.count('/edit-image'), 1);
+
+    // Pedido DIFERENTE: retomar o stub do outro entregaria a arte errada de
+    // graça, que é pior do que comprar a arte certa. Submete — e isso é
+    // trabalho novo, não segunda cobrança pela mesma coisa.
+    client.editPollFails = false;
+    await editSouth(client, store, CHAR_ID, 'bota', opts);
+    assert.equal(
+      client.count('/edit-image'),
+      2,
+      'prompt novo é pedido novo: tem de submeter',
+    );
+    assert.equal(wizardOf(store).southVersions[1]?.prompt, 'bota');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('o stub some quando o artefato chega — nenhuma retomada fantasma fica em disco', async () => {
+  const { dir, store, opts } = makeHarness();
+  try {
+    const client = new FakeClient();
+    await generateSouthFromText(client, store, CHAR_ID, 'base', opts);
+    await generateDirections8(client, store, CHAR_ID, opts);
+
+    const wizardDir = join(opts.assetsDir, 'wizard', CHAR_ID);
+    const pendentes = readdirSync(wizardDir).filter((f) => f.endsWith('.pending.json'));
+    assert.deepEqual(
+      pendentes,
+      [],
+      `com o artefato em disco não pode sobrar stub: ${pendentes.join(', ')}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

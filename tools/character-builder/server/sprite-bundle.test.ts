@@ -866,8 +866,14 @@ test('import — reimportar o mesmo bundle no mesmo alvo produz as mesmas escrit
 		const assets = join(dir, 'assets');
 		const bundle = parseSpriteBundle(validWizardBundle());
 		const target = { kind: 'existing', characterId: 'manequim' } as const;
-		const { store, saves, current } = memoryStore(seedStudio());
-		const createdAtAntes = seedStudio().characters[0]!.createdAt;
+		// A MESMA semente dos dois lados. Chamar `seedStudio()` de novo para ler o
+		// `createdAt` esperado dependia do relógio: o campo é `new Date()
+		// .toISOString()`, e quando o milissegundo virava entre as duas chamadas o
+		// teste falhava por 1 ms. Reproduzido em ~1 de 25 execuções deste arquivo,
+		// e nada tem a ver com o que ele mede.
+		const semente = seedStudio();
+		const { store, saves, current } = memoryStore(semente);
+		const createdAtAntes = semente.characters[0]!.createdAt;
 
 		await importSpriteBundle(store, bundle, target, assets);
 		const first = current();

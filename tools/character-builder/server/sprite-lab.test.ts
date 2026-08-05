@@ -48,6 +48,7 @@ import {
   runSpriteLab,
   listSpriteLabRuns,
   readSpriteLabResult,
+  spriteLabHash,
   SpriteLabValidationError,
   type SpriteLabConfig,
   type SpriteLabErrorCode,
@@ -1046,6 +1047,105 @@ test('regressão v3: character_id vai ao ledger E ao manifesto (caminho de volta
       manifest.candidates.map((c) => c['characterId']),
       ['char-7', 'char-8'],
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ retomada gratuita (ADR 0023)
+
+test('retomada: candidato PAGO cujo download caiu NÃO ressubmete o create-character-v3', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: SpriteLabConfig = { ...baseConfig(), seed: 7, outputs: 2 };
+
+    // 1ª execução: as duas submissões são ACEITAS (dinheiro fora) e o
+    // GET /characters/{id} vem 'failed'. É o 2026-08-01 exato: pago, sem PNG.
+    client.characterStatus = 'failed';
+    await assert.rejects(
+      () => runSpriteLab(client, config, opts(dir)),
+      /failed|cobrada/i,
+    );
+    assert.equal(
+      client.bodies.length,
+      2,
+      'as duas submissões saíram na primeira execução — foram elas que custaram',
+    );
+    // `Promise.all` rejeita no PRIMEIRO candidato e não espera o irmão. Curar o
+    // fornecedor aqui, com o irmão ainda em voo, o deixaria terminar com
+    // sucesso e o teste mediria outra coisa. Duas leituras de personagem = os
+    // dois candidatos já tomaram o 'failed'.
+    for (let i = 0; i < 200 && client.characterReads.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.equal(
+      client.characterReads.length,
+      2,
+      'os dois candidatos tinham de tentar buscar o personagem e falhar',
+    );
+    assert.equal(
+      await readSpriteLabResult(spriteLabHash(config), join(dir, 'assets')),
+      null,
+      'nenhum PNG em disco: sem isso a idempotência por candidato mascararia a ' +
+        'retomada e o teste ficaria vacuamente verde',
+    );
+
+    // 2ª execução, fornecedor de volta: RE-SONDA os character_ids guardados.
+    client.characterStatus = undefined;
+    const result = await runSpriteLab(client, config, opts(dir));
+
+    assert.equal(
+      client.bodies.length,
+      2,
+      'a retomada NÃO pode submeter de novo — os character_id já estavam em disco',
+    );
+    assert.equal(result.candidates.length, 2);
+    assert.deepEqual(
+      result.candidates.map((c) => c.characterId),
+      ['char-7', 'char-8'],
+      'a retomada devolve o caminho de volta ao artefato pago, por candidato',
+    );
+    for (let i = 0; i < 2; i += 1) {
+      const png = join(dir, 'assets', 'sprite-lab', `${result.hash}-cand${i}`, 'south-00.png');
+      assert.ok(existsSync(png), `o PNG pago do candidato ${i} chegou na retomada`);
+      assert.ok(
+        !existsSync(`${png}.pending.json`),
+        `com o PNG em disco não pode sobrar stub do candidato ${i}`,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retomada parcial: só o candidato que caiu re-sonda; o outro é cache e nenhum submete', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: SpriteLabConfig = { ...baseConfig(), seed: 21, outputs: 2 };
+
+    // Execução completa e sadia: dois candidatos em disco, duas submissões.
+    const primeiro = await runSpriteLab(client, config, opts(dir));
+    assert.equal(client.bodies.length, 2);
+
+    // O candidato 1 perde o PNG mas guarda o stub — é o estado exato de
+    // "pago, download caiu" para UMA posição só.
+    const png1 = join(dir, 'assets', 'sprite-lab', `${primeiro.hash}-cand1`, 'south-00.png');
+    rmSync(png1);
+    writeFileSync(
+      `${png1}.pending.json`,
+      `${JSON.stringify({ characterId: 'char-22', jobIds: ['job-22'] })}\n`,
+    );
+
+    const segundo = await runSpriteLab(client, config, opts(dir));
+    assert.equal(
+      client.bodies.length,
+      2,
+      'nem o cache nem a retomada podem submeter — as duas posições já foram pagas',
+    );
+    assert.equal(segundo.candidates.length, 2);
+    assert.ok(existsSync(png1), 'o PNG pago do candidato 1 voltou pela retomada');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

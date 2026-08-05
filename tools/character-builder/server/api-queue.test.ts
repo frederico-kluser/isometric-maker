@@ -19,12 +19,18 @@
  * ## Rede: IMPOSSÍVEL aqui, e a prova é local
  *
  * `globalThis.fetch` é substituído por um dublê que NUNCA sai da máquina: ele
- * anota o caminho pedido, guarda o `AbortSignal` recebido e devolve uma promessa
- * que o teste resolve na hora que quiser — primeiro pendurada (o job fica
- * deterministicamente `'gerando'`), depois com um 400 sintético (que
- * `PixelLabClient` não retenta em POST, então a falha é imediata e sem backoff).
- * O token é falso e só existe para `client()` não recusar antes da hora. Mesma
- * técnica que `api.test.ts` já usa no teste do 409 do bloco em geração.
+ * anota o MÉTODO e o caminho pedido, guarda o `AbortSignal` recebido e devolve
+ * uma promessa que o teste resolve na hora que quiser — pendurada (o job fica
+ * deterministicamente `'gerando'`), com um 400 sintético (que `PixelLabClient`
+ * não retenta em POST, então a falha é imediata e sem backoff), com um job já
+ * concluído, ou com um 429 de `Retry-After: 0`. O token é falso e só existe para
+ * `client()` não recusar antes da hora.
+ *
+ * **O critério de dinheiro deste arquivo é ZERO SUBMISSÕES, não zero chamadas.**
+ * A retomada gratuita PRECISA fazer chamadas — ela re-sonda, e `GET` é grátis.
+ * Por isso o dublê separa `submissoes()` (os POST) do resto. Contar chamadas
+ * mediria a coisa errada nos dois sentidos: acusaria um poll inofensivo e
+ * absolveria um POST escondido entre GETs.
  *
  * ## O que está sob verificação, e por que cada item é sobre dinheiro
  *
@@ -40,10 +46,16 @@
  *     que o transporte recebeu para provar isso.
  *   - O recheque de idempotência (`stillNeeded`) dispensa, sem chamar o
  *     executor, um bloco que ficou pronto enquanto o pedido esperava.
- *   - Retomada depois de "reinício": um job PAGO reaberto do disco NÃO é
- *     redespachado. Ele vira `'interrompido'` — terminal, nomeado — com `paid` e
- *     `remote` intactos, e ZERO chamadas saem. Este teste rodava com o token
- *     APAGADO e media a coisa errada; ver a nota em `PIXELLAB_SECRET`, acima.
+ *   - **Retomada GRATUITA depois de "reinício"**: um job de pose PAGO reaberto
+ *     do disco é redespachado, RE-SONDA o `background_job_id` guardado e entrega
+ *     o artefato — com ZERO submissões. Este teste rodava com o token APAGADO e
+ *     media a coisa errada; ver a nota em `PIXELLAB_SECRET`, acima.
+ *   - **E a sul do wizard NÃO**: `/create-image-bitforge` é síncrono e não
+ *     devolve identificador nenhum, então ela para em `'interrompido'`. O
+ *     fixture semeia as duas para que a diferença seja verificada, não afirmada.
+ *   - **429 no POLL depois de uma submissão aceita** não vira segunda cobrança:
+ *     o job está `paid`, o veto de dinheiro impede a retentativa, e o clique
+ *     seguinte do usuário é gratuito.
  *
  * Execute com: node --test server/api-queue.test.ts
  */
@@ -149,12 +161,18 @@ writeFileSync(STUDIO_PATH, `${JSON.stringify(studio, null, 2)}\n`);
 /** O job que o "reinício" deixou pela metade — e que JÁ FOI COBRADO. */
 const JOB_RETOMADO = cellKey('manequim', 'atacando');
 const REMOTE_JA_COBRADO = 'bg-job-que-ja-custou-dinheiro';
+/**
+ * O outro lado da moeda: uma sul do wizard interrompida do mesmo jeito. Ela NÃO
+ * tem retomada gratuita — `/create-image-bitforge` é síncrono e sua resposta não
+ * carrega identificador nenhum —, então ela tem de parar em `'interrompido'`.
+ */
+const JOB_SUL_INTERROMPIDA = southKey('manequim');
 writeFileSync(
   QUEUE_PATH,
   `${JSON.stringify(
     {
       version: 1,
-      nextSeq: 1,
+      nextSeq: 2,
       jobs: [
         {
           key: JOB_RETOMADO,
@@ -167,6 +185,22 @@ writeFileSync(
           attempts: 1,
           paid: true,
           remote: { jobIds: [REMOTE_JA_COBRADO] },
+          startedAt: Date.now() - 60_000,
+        },
+        {
+          key: JOB_SUL_INTERROMPIDA,
+          label: 'Manequim base · Sul',
+          seq: 1,
+          enqueuedAt: AGORA,
+          descriptor: {
+            kind: 'wizard-south',
+            characterId: 'manequim',
+            description: 'sul que o reinício pegou no meio',
+          },
+          cellKeys: [JOB_SUL_INTERROMPIDA],
+          status: 'gerando',
+          attempts: 1,
+          paid: true,
           startedAt: Date.now() - 60_000,
         },
       ],
@@ -184,12 +218,39 @@ const { handle } = await import('./api.ts');
 
 /** Caminhos pedidos ao `fetch`. Nenhum deles sai da máquina. */
 const caminhosPedidos: string[] = [];
+/**
+ * O MÉTODO de cada caminho pedido, na mesma ordem. Existe porque a retomada
+ * gratuita PRECISA fazer chamadas — ela re-sonda — e "zero chamadas" deixou de
+ * ser o critério. O que não pode sair é SUBMISSÃO, e submissão é POST.
+ */
+const metodosPedidos: string[] = [];
 /** Resolvedores das chamadas penduradas — o teste decide quando cada uma cai. */
 let penduradas: Array<(res: unknown) => void> = [];
 /** O signal que o transporte recebeu na última chamada. */
 let signalRecebido: AbortSignal | undefined;
+/**
+ * O signal da última SUBMISSÃO. Separado de `signalRecebido` porque a retomada
+ * gratuita faz GETs de poll, e capturar o signal de um poll de outro job era
+ * como o teste de cancelamento passava a medir a coisa errada.
+ */
+let signalDaSubmissao: AbortSignal | undefined;
 /** A partir daqui toda chamada nova falha na hora, sem pendurar. */
 let falharNaHora = false;
+
+/** As submissões — e só elas custam dinheiro. GET de poll é grátis. */
+function submissoes(): string[] {
+  return caminhosPedidos.filter((_, i) => metodosPedidos[i] === 'POST');
+}
+
+/**
+ * PNGs sintéticos para o `last_response` do poll da retomada.
+ * `extractImages` (api.ts) reconhece base64 de PNG por prefixo e tamanho; o
+ * conteúdo não é decodificado em lugar nenhum deste caminho.
+ */
+const IMAGENS_DO_JOB_PAGO = Array.from(
+  { length: 8 },
+  (_, i) => `iVBORw0KGgo${'A'.repeat(300 + i)}`,
+);
 
 /**
  * 400 sintético. `PixelLabClient.request` NÃO retenta 4xx em POST ("the request
@@ -207,9 +268,80 @@ function respostaRecusada(): unknown {
   };
 }
 
-globalThis.fetch = ((input: unknown, init?: { signal?: AbortSignal }) => {
-  caminhosPedidos.push(String(input));
+/** A partir daqui o POLL responde 429 — a recusa que chega DEPOIS do submit. */
+let pollDevolve429 = false;
+/** A partir daqui o POST é ACEITO: o dinheiro sai de verdade. */
+let submissaoAceita = false;
+/** O id que a submissão aceita devolve — o caminho de volta ao que foi pago. */
+const JOB_DO_429 = 'bg-job-aceito-antes-do-429';
+
+/**
+ * 429 com `Retry-After: 0`. O 0 é o que torna o teste rápido: `PixelLabClient`
+ * honra o hint do servidor em vez do backoff exponencial dele, então as seis
+ * tentativas de GET acontecem na hora. O código é o que importa, não a espera.
+ */
+function resposta429(): unknown {
+  return {
+    ok: false,
+    status: 429,
+    headers: {
+      get: (k: string): string | null =>
+        k.toLowerCase() === 'retry-after' ? '0' : null,
+    },
+    text: async (): Promise<string> => JSON.stringify({ detail: 'Too many requests' }),
+  };
+}
+
+/** 200 de `animate-character`: um job POR DIREÇÃO, e a cobrança em `usage`. */
+function respostaSubmissaoAceita(): unknown {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: (): string | null => null },
+    text: async (): Promise<string> =>
+      JSON.stringify({
+        background_job_ids: [JOB_DO_429],
+        status: 'processing',
+        usage: { type: 'usd', usd: 0.02 },
+      }),
+  };
+}
+
+/** 200 sintético com um background job JÁ CONCLUÍDO — o poll da retomada. */
+function respostaDeJobConcluido(): unknown {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: (): string | null => null },
+    text: async (): Promise<string> =>
+      JSON.stringify({
+        status: 'completed',
+        last_response: { images: IMAGENS_DO_JOB_PAGO },
+      }),
+  };
+}
+
+globalThis.fetch = ((
+  input: unknown,
+  init?: { signal?: AbortSignal; method?: string },
+) => {
+  const url = String(input);
+  const metodo = init?.method ?? 'GET';
+  caminhosPedidos.push(url);
+  metodosPedidos.push(metodo);
   signalRecebido = init?.signal;
+  if (metodo === 'POST') signalDaSubmissao = init?.signal;
+  // O poll de um job já pago responde de verdade: a retomada gratuita só é
+  // observável se ela conseguir CHEGAR ao artefato. Pendurar aqui esconderia a
+  // diferença entre "re-sondou" e "travou".
+  if (metodo === 'GET' && url.includes('/background-jobs/')) {
+    return Promise.resolve(
+      (pollDevolve429 ? resposta429() : respostaDeJobConcluido()) as Response,
+    );
+  }
+  if (metodo === 'POST' && submissaoAceita) {
+    return Promise.resolve(respostaSubmissaoAceita() as Response);
+  }
   if (falharNaHora) return Promise.resolve(respostaRecusada() as Response);
   return new Promise<Response>((resolve) => {
     penduradas.push(resolve as (r: unknown) => void);
@@ -347,55 +479,52 @@ function semearBloco(hash: string): void {
 
 // ------------------------------------------------------------------ retomada (ADR 0023)
 
-test('retomada: job PAGO reaberto do disco NÃO ressubmete, MESMO com token válido', async () => {
+test('retomada GRATUITA: job PAGO reaberto do disco RE-SONDA e NUNCA ressubmete', async () => {
   // A primeira rota abre a fila, que reconcilia o `'gerando'` interrompido. O
-  // token EXISTE e o `fetch` está dublado: se o executor for redespachado, a
-  // submissão aparece em `caminhosPedidos` — foi assim que o defeito foi
-  // reproduzido, com este mesmo fixture e uma linha de diferença.
-  const antes = caminhosPedidos.length;
-  assert.equal(antes, 0, 'este é o primeiro teste do arquivo: nada pode ter saído antes');
+  // token EXISTE e o `fetch` está dublado: se o executor ressubmeter, o
+  // `POST /animate-character` aparece em `submissoes()` — foi assim que o
+  // defeito foi reproduzido, com este mesmo fixture e uma linha de diferença.
+  //
+  // A ONDA ANTERIOR PARAVA AQUI, em `'interrompido'`, porque o ramo `pose` não
+  // sabia voltar ao artefato. Agora ele sabe: `ctx.markPaid` guardou o
+  // `background_job_id` antes do primeiro poll e o executor o LÊ antes de
+  // submeter. O critério deixou de ser "zero chamadas" — a retomada faz
+  // chamadas, todas GET e todas de graça — e passou a ser ZERO SUBMISSÕES.
+  assert.equal(
+    caminhosPedidos.length,
+    0,
+    'este é o primeiro teste do arquivo: nada pode ter saído antes',
+  );
 
   await get('/api/studio');
 
-  // Espera um estado OBSERVÁVEL: ou a fila concluiu o job, ou uma chamada saiu.
-  // Determinístico dos dois lados — não é paciência de teste.
-  await esperarAte(
-    async () => {
-      if (caminhosPedidos.length > 0) return true;
-      const s = (await jobsDoEstudio())[JOB_RETOMADO]?.status;
-      return s === 'interrompido' || s === 'falhou' || s === 'cancelado' || s === 'pronto';
-    },
-    'a retomada nunca chegou a um estado observável',
-    100,
+  const fim = await esperarJob(JOB_RETOMADO, (j) =>
+    ['pronto', 'falhou', 'interrompido', 'cancelado'].includes(j.status),
   );
 
   assert.deepEqual(
-    caminhosPedidos,
+    submissoes(),
     [],
     'NENHUMA submissão pode sair na retomada de um job já pago — ' +
-      `saíram: ${caminhosPedidos.join(', ')}`,
+      `saíram: ${submissoes().join(', ')}`,
+  );
+  assert.ok(
+    caminhosPedidos.some((p) => p.includes(`/background-jobs/${REMOTE_JA_COBRADO}`)),
+    'e a retomada tem de RE-SONDAR o id guardado, não só evitar a submissão — ' +
+      `pedidos: ${caminhosPedidos.join(', ')}`,
   );
 
-  const fim = await esperarJob(
-    JOB_RETOMADO,
-    (j) => j.status === 'interrompido' || j.status === 'falhou',
+  assert.equal(
+    fim.status,
+    'pronto',
+    'com o caminho de volta em mãos, a retomada ENTREGA o artefato já pago',
   );
-  assert.equal(fim.status, 'interrompido', 'estado terminal NOMEADO: a fila parou de propósito');
   assert.equal(fim.paid, true, 'o registro do que já foi cobrado sobrevive à reabertura');
   assert.equal(
     fim.attempts,
-    1,
-    'a tentativa que ficou em disco, e nenhuma nova: o executor não foi chamado',
-  );
-  assert.match(
-    String(fim.message),
-    /cobrada/i,
-    'a mensagem tem de dizer que a geração já foi paga, senão o usuário compra de novo',
-  );
-  assert.match(
-    String(fim.message),
-    /gerar de novo/i,
-    'e tem de dizer que refazer é decisão do usuário — o servidor não decide sozinho',
+    2,
+    'o executor rodou de novo — e é exatamente por isso que o teste conta POSTs, ' +
+      'não invocações',
   );
 
   const job = lerEstadoDaFila().jobs.find((j) => j.key === JOB_RETOMADO);
@@ -407,17 +536,50 @@ test('retomada: job PAGO reaberto do disco NÃO ressubmete, MESMO com token vál
     'o identificador remoto é o ÚNICO caminho de volta ao artefato pago',
   );
 
-  // E a célula acompanhou, com a mensagem que explica a cobrança. `CellStatus`
-  // não tem valor para `'interrompido'`, então `cellStatusFor` o colapsa em
-  // `'falhou'` — que é onde a UI oferece "gerar de novo", o clique deliberado
-  // que substitui a retomada automática. O espelho é SERIALIZADO e assíncrono de
-  // propósito (ver `syncJobCells`), então ele chega DEPOIS do status do job —
-  // esperar por ele é parte do contrato, não paciência de teste.
+  // E a célula acompanhou: o espelho é SERIALIZADO e assíncrono de propósito
+  // (ver `syncJobCells`), então ele chega DEPOIS do status do job — esperar por
+  // ele é parte do contrato, não paciência de teste.
   await esperarAte(
-    () => lerStudio().cells[JOB_RETOMADO]?.status === 'falhou',
-    'a célula tinha de acompanhar o job interrompido',
+    () => lerStudio().cells[JOB_RETOMADO]?.status === 'pronto',
+    'a célula tinha de acompanhar o job retomado',
   );
-  assert.match(String(lerStudio().cells[JOB_RETOMADO]?.error), /cobrada/i);
+});
+
+test('a sul do wizard CONTINUA em "interrompido": o bitforge não devolve id nenhum', async () => {
+  // Não é esquecimento, é o spec: `CreateImageBitforgeResponse` tem exatamente
+  // `usage` e `image`. Sem `background_job_id`, sem `character_id` e sem rota de
+  // recuperação, não há o que anotar na submissão — logo não há o que procurar
+  // depois. Parar é o único erro barato disponível, e este teste é o que impede
+  // alguém de "consertar" isso ligando o ramo em `canResumeWithoutSpending`.
+  const fim = await esperarJob(JOB_SUL_INTERROMPIDA, (j) =>
+    ['pronto', 'falhou', 'interrompido', 'cancelado'].includes(j.status),
+  );
+  assert.equal(fim.status, 'interrompido', 'terminal NOMEADO: a fila parou de propósito');
+  assert.equal(fim.attempts, 1, 'a tentativa que ficou em disco, e nenhuma nova');
+  assert.match(
+    String(fim.message),
+    /cobrada/i,
+    'a mensagem tem de dizer que a geração já foi paga, senão o usuário compra de novo',
+  );
+  assert.match(
+    String(fim.message),
+    /gerar de novo/i,
+    'e tem de dizer que refazer é decisão do usuário — o servidor não decide sozinho',
+  );
+  assert.deepEqual(
+    submissoes(),
+    [],
+    `nenhuma submissão até aqui; saíram: ${submissoes().join(', ')}`,
+  );
+
+  // A célula acompanha: `CellStatus` não tem valor para `'interrompido'`, então
+  // `cellStatusFor` o colapsa em `'falhou'` — que é onde a UI oferece "gerar de
+  // novo", o clique deliberado que substitui a retomada automática.
+  await esperarAte(
+    () => lerStudio().cells[JOB_SUL_INTERROMPIDA]?.status === 'falhou',
+    'a célula tinha de acompanhar a sul interrompida',
+  );
+  assert.match(String(lerStudio().cells[JOB_SUL_INTERROMPIDA]?.error), /cobrada/i);
 });
 
 // ------------------------------------------------------------------ FIFO observável
@@ -438,10 +600,10 @@ test('202 traz a POSIÇÃO na fila; o excedente fica "na-fila" e a célula acomp
   // O job A toma a única vaga e fica pendurado no submit. Daqui para baixo
   // NADA drena, e por isso as posições abaixo são fato e não corrida.
   await esperarAte(
-    () => caminhosPedidos.length === 1,
+    () => submissoes().length === 1,
     'o job A precisava chegar ao submit e ficar pendurado lá',
   );
-  signalDoJobA = signalRecebido;
+  signalDoJobA = signalDaSubmissao;
   assert.ok(signalDoJobA, 'o submit da pose tem de receber um AbortSignal');
   assert.equal(signalDoJobA.aborted, false);
 
@@ -497,14 +659,14 @@ test('POST repetido sobre job "na-fila" NÃO submete de novo', async () => {
   // O defeito que este teste tranca: o registro anterior só reconhecia
   // 'gerando', então um segundo clique sobre um pedido ENFILEIRADO passava reto
   // e submetia — segunda cobrança pela mesma coisa.
-  const antes = caminhosPedidos.length;
+  const antes = submissoes().length;
   const r = await post('/api/generate', { characterId: 'manequim', poseId: 'caminhando' });
   assert.equal(r.status, 202, 'duplicata não é erro: a chave já está na fila');
   assert.equal(r.json['duplicate'], true);
   assert.equal(r.json['status'], 'na-fila');
   await sleep(50);
   assert.equal(
-    caminhosPedidos.length,
+    submissoes().length,
     antes,
     'submissão duplicada de job enfileirado NÃO pode sair — é dinheiro',
   );
@@ -670,6 +832,85 @@ test('a fila drena o resto em ordem e o bloco já pronto conclui SEM chamar o ex
   );
 
   // Fila quieta ao fim: o `after` pode apagar o tmpdir sem job escrevendo nele.
+  await esperarAte(async () => {
+    const finais = await jobsDoEstudio();
+    return !Object.values(finais).some(
+      (j) => j.status === 'na-fila' || j.status === 'gerando',
+    );
+  }, 'a fila tinha de ficar vazia ao fim do arquivo');
+});
+
+// ------------------------------------------------------------------ o 429 que chega DEPOIS da cobrança
+
+/**
+ * O buraco residual que esta onda fecha, e ele é sutil: 429 e 529 são recusa
+ * EXPLÍCITA e por isso retentáveis — a chamada não foi processada, nada foi
+ * gerado, nada foi cobrado. Isso vale para o 429 da SUBMISSÃO.
+ *
+ * Um 429 vindo do POLL é outra coisa: a submissão já foi ACEITA, o dinheiro já
+ * saiu, e a fila não retenta uma requisição HTTP — ela reexecuta o JOB INTEIRO,
+ * cuja primeira linha é submeter. Enquanto o ramo não chamava `markPaid`, o
+ * registro dizia `paid: false` e o veto de dinheiro de `#handleFailure` não
+ * disparava: três gerações pagas por um clique.
+ *
+ * Com `markPaid` ligado nos seis ramos, o veto dispara sozinho. Este teste conta
+ * SUBMISSÕES dos dois lados da falha.
+ */
+test('429 no POLL, depois de uma submissão ACEITA, não vira segunda submissão', async () => {
+  submissaoAceita = true;
+  pollDevolve429 = true;
+  const antes = submissoes().length;
+
+  const chave = cellKey('manequim', 'pulando');
+  const r = await post('/api/generate', { characterId: 'manequim', poseId: 'pulando' });
+  assert.equal(r.status, 202, `esperava 202, veio ${r.status}: ${JSON.stringify(r.json)}`);
+
+  const falhou = await esperarJob(chave, (j) =>
+    ['pronto', 'falhou', 'cancelado', 'interrompido'].includes(j.status),
+  );
+  assert.equal(falhou.status, 'falhou', 'o 429 no poll derruba o job — e só isso');
+  assert.equal(
+    submissoes().length - antes,
+    1,
+    'UMA submissão, e só uma: o 429 do poll não pode virar cobrança nova — ' +
+      `saíram: ${submissoes().slice(antes).join(', ')}`,
+  );
+  assert.equal(
+    falhou.attempts,
+    1,
+    'o veto de dinheiro impede a RETENTATIVA: um job pago nunca reexecuta sozinho',
+  );
+  assert.equal(falhou.paid, true, 'e o registro sabe que foi cobrado');
+  assert.match(
+    String(falhou.message),
+    /cobrada/i,
+    'a mensagem tem de dizer que já foi pago',
+  );
+
+  const job = lerEstadoDaFila().jobs.find((j) => j.key === chave);
+  assert.deepEqual(
+    job?.remote?.jobIds,
+    [JOB_DO_429],
+    'o identificador da submissão aceita ficou guardado — é ele o caminho de volta',
+  );
+
+  // E o clique deliberado do usuário depois disso é GRATUITO: o executor acha o
+  // identificador e re-sonda. Sem esta metade, o veto acima só trocaria "cobrar
+  // sozinho" por "cobrar quando o usuário clicar".
+  pollDevolve429 = false;
+  const depois = submissoes().length;
+  const r2 = await post('/api/generate', { characterId: 'manequim', poseId: 'pulando' });
+  assert.equal(r2.status, 202);
+
+  const pronto = await esperarJob(chave, (j) => j.status === 'pronto');
+  assert.equal(pronto.status, 'pronto', 'a retomada entrega o artefato já pago');
+  assert.equal(
+    submissoes().length,
+    depois,
+    'e ZERO submissões novas — a retomada re-sonda, jamais ressubmete',
+  );
+
+  submissaoAceita = false;
   await esperarAte(async () => {
     const finais = await jobsDoEstudio();
     return !Object.values(finais).some(

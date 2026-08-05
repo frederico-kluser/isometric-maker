@@ -14,6 +14,11 @@
  *   - Guard de orçamento (ADR 0012): estima, loga, escreve ledger — nunca recusa.
  *   - Idempotência POR CANDIDATO: PNG de `${hash}-cand${i}` existente = aquela
  *     posição não chama a API de novo.
+ *   - **Retomada POR CANDIDATO (ADR 0023):** o candidato PAGO cujo download não
+ *     chegou não tem PNG, então a idempotência acima não o pega — era ele que
+ *     ressubmetia. Cada submissão grava `<hash>-cand<i>/south-00.png.pending.json`
+ *     com o `character_id`, e a execução seguinte re-sonda em vez de pagar de
+ *     novo. Ver `server/pending-stub.ts`.
  *   - Seeds determinísticas: base = seed informada ou derivada do hash;
  *     candidato i = base + i.
  *   - enhance_prompt é OMITIDO do request quando false (F0-09).
@@ -48,6 +53,12 @@ import {
 import { trackSpend } from './estimate.ts';
 import { waitForCharacterRotations } from './character-detail.ts';
 import { parseAndWriteFrames } from './frames.ts';
+import {
+  discardPendingStub,
+  pendingStubPath,
+  readPendingStub,
+  writePendingStub,
+} from './pending-stub.ts';
 import {
   DETAIL_OPTIONS, OUTLINE_OPTIONS, TEMPLATE_OPTIONS, VIEW_OPTIONS,
   type DetailOption, type OutlineOption, type TemplateOption, type ViewOption,
@@ -357,6 +368,19 @@ function southPngPath(assetsDir: string, hash: string, index: number): string {
   return join(candidateDir(assetsDir, hash, index), 'south-00.png');
 }
 
+/**
+ * Caminho de volta ao candidato PAGO cujo download não chegou (ADR 0023).
+ *
+ * Um stub POR CANDIDATO, ao lado do PNG que ele substitui, porque é essa a
+ * granularidade do dinheiro aqui: `outputs: 4` são quatro submissões
+ * independentes, cada uma com o seu `character_id`. Como o `hash` da config já
+ * está no diretório, o stub é do PEDIDO por construção — outra config, outro
+ * diretório, nenhum risco de retomar o candidato de outra corrida.
+ */
+function candidateStubPath(assetsDir: string, hash: string, index: number): string {
+  return pendingStubPath(southPngPath(assetsDir, hash, index));
+}
+
 function manifestPath(assetsDir: string, hash: string): string {
   return join(assetsDir, 'sprite-lab', `${hash}.json`);
 }
@@ -563,6 +587,21 @@ export async function runSpriteLab(
     readonly assetsDir: string;
     readonly ledgerPath: string;
     readonly onLog?: (m: string) => void;
+    /**
+     * "O dinheiro saiu." Ver `WizardOpts.onPaid` em `server/mannequin.ts`: é
+     * `ctx.markPaid` da fila, passado por `dispatch`, e o que ele fecha é a
+     * RETENTATIVA automática depois de uma submissão já aceita.
+     *
+     * O caminho de volta POR CANDIDATO não cabe num `RemoteHandle` — ele é um
+     * objeto plano por job e aqui há até quatro `character_id`. Por isso a
+     * recuperação mora no stub em disco e este callback carrega o conjunto dos
+     * job ids mais um `note` que aponta onde estão os stubs.
+     */
+    readonly onPaid?: (remote: {
+      readonly jobIds?: readonly string[];
+      readonly characterId?: string;
+      readonly note?: string;
+    }) => Promise<void>;
   },
 ): Promise<SpriteLabResult> {
   validate(config);
@@ -573,30 +612,49 @@ export async function runSpriteLab(
   const noBackground = config.noBackground ?? true;
   const hasReference = config.referenceImageBase64 !== undefined;
 
-  // Quais posições ainda precisam de chamada — o resto é cache.
+  // Quais posições ainda precisam de trabalho — o resto é cache. E das que
+  // precisam, quais já foram PAGAS e só precisam ser re-sondadas: elas não
+  // entram na estimativa, porque não vão custar nada.
   const pending: number[] = [];
+  const retomaveis: number[] = [];
   for (let i = 0; i < config.outputs; i += 1) {
-    if (!existsSync(southPngPath(opts.assetsDir, hash, i))) pending.push(i);
+    if (existsSync(southPngPath(opts.assetsDir, hash, i))) continue;
+    pending.push(i);
+    if ((await readPendingStub(candidateStubPath(opts.assetsDir, hash, i))) !== null) {
+      retomaveis.push(i);
+    }
   }
+  const aPagar = pending.length - retomaveis.length;
 
   if (pending.length === 0) {
     opts.onLog?.(`[sprite-lab] ${config.outputs} candidato(s) já em disco para hash=${hash}. Sem chamada à API.`);
   } else {
-    // Estimativa informativa (COST_TABLE por área × posições pendentes) —
-    // loga, nunca recusa (ADR 0012). Preço estimado, como a própria PixelLab rotula.
-    const single = estimateByArea(COST_TABLE['create-character-v3'], config.size * config.size);
-    const estimate: CostEstimate = {
-      low: single.low * pending.length,
-      point: single.point * pending.length,
-      high: single.high * pending.length,
-      confidence: single.confidence,
-    };
-    logGuard(
-      `create-character-v3 (${pending.length}× sprite-lab; preço estimado)`,
-      guardFor(estimate, single.point),
-      opts.onLog,
-    );
+    if (retomaveis.length > 0) {
+      opts.onLog?.(
+        `[sprite-lab] ${retomaveis.length} candidato(s) já PAGOS com download pendente ` +
+          `(${retomaveis.join(', ')}) — serão re-sondados, sem custo, e ficam fora da estimativa.`,
+      );
+    }
+    if (aPagar > 0) {
+      // Estimativa informativa (COST_TABLE por área × posições a PAGAR) —
+      // loga, nunca recusa (ADR 0012). Preço estimado, como a própria PixelLab rotula.
+      const single = estimateByArea(COST_TABLE['create-character-v3'], config.size * config.size);
+      const estimate: CostEstimate = {
+        low: single.low * aPagar,
+        point: single.point * aPagar,
+        high: single.high * aPagar,
+        confidence: single.confidence,
+      };
+      logGuard(
+        `create-character-v3 (${aPagar}× sprite-lab; preço estimado)`,
+        guardFor(estimate, single.point),
+        opts.onLog,
+      );
+    }
   }
+
+  /** Ids das submissões desta execução, para o registro de dinheiro da fila. */
+  const jobIdsPagos: string[] = [];
 
   if (hasReference && (config.outline !== undefined || config.detail !== undefined)) {
     opts.onLog?.(
@@ -607,6 +665,31 @@ export async function runSpriteLab(
   const runCandidate = async (index: number): Promise<SpriteLabCandidate> => {
     const seed = base + index;
     const pngPath = southPngPath(opts.assetsDir, hash, index);
+    const stubPath = candidateStubPath(opts.assetsDir, hash, index);
+
+    /** Do job concluído até os PNGs em disco. Comum ao caminho novo e à retomada. */
+    const colher = async (characterId: string): Promise<string> => {
+      // O job concluído da v3 traz SÓ metadado — os pixels moram em
+      // GET /characters/{id}.rotation_urls (ver server/character-detail.ts).
+      // Ler o last_response direto aqui era o bug: 14 submissões pagas, zero PNG.
+      const detail = await waitForCharacterRotations(client, characterId, {
+        onLog: opts.onLog,
+      });
+      // Extrair frames POR CHAVE, nunca por índice. parseAndWriteFrames grava os
+      // PNGs em disco ANTES de qualquer pós-processamento — a cobrança já aconteceu.
+      const { frames } = await parseAndWriteFrames(
+        detail,
+        'sprite-lab',
+        `${hash}-cand${index}`,
+        opts.assetsDir,
+      );
+      if (!frames['south']?.[0]) {
+        throw new Error(`candidato ${index}: resposta sem frame "south"`);
+      }
+      // O artefato chegou: só agora o caminho de volta pode ser descartado.
+      await discardPendingStub(stubPath);
+      return (await readFile(pngPath)).toString('base64');
+    };
 
     // Idempotência por candidato: PNG existente → zero gasto nesta posição.
     if (existsSync(pngPath)) {
@@ -615,6 +698,26 @@ export async function runSpriteLab(
         index,
         seed,
         southB64: (await readFile(pngPath)).toString('base64'),
+      };
+    }
+
+    /**
+     * RETOMADA GRATUITA (ADR 0023): a submissão deste candidato foi ACEITA — o
+     * dinheiro saiu — e o download não chegou. O PNG não existe, então a
+     * idempotência acima não pega este caso; era justamente ele que ressubmetia.
+     * `GET /characters/{id}` reentrega os frames sem custo.
+     */
+    const retomada = await readPendingStub(stubPath);
+    if (retomada?.characterId !== undefined) {
+      opts.onLog?.(
+        `[sprite-lab] retomando candidato ${index} já pago (${retomada.characterId}) — ` +
+          'nenhuma submissão nova.',
+      );
+      return {
+        index,
+        seed,
+        characterId: retomada.characterId,
+        southB64: await colher(retomada.characterId),
       };
     }
 
@@ -663,8 +766,39 @@ export async function runSpriteLab(
     });
 
     const jobId = res.data?.background_job_id;
-    if (!jobId) throw new Error('a API não devolveu background_job_id');
     const characterId = res.data?.character_id;
+
+    /**
+     * O CAMINHO DE VOLTA, GRAVADO ANTES DO PRIMEIRO POLL.
+     *
+     * Duas anotações, e cada uma fecha uma coisa diferente:
+     *   - `onPaid` (a fila) impede a RETENTATIVA automática: um job `paid` nunca
+     *     volta para a fila, então um 429 vindo do poll deixa de reexecutar um
+     *     executor que começa submetendo.
+     *   - o stub (o disco) é o que torna a RETOMADA gratuita, com granularidade
+     *     de candidato, e vale mesmo fora da fila.
+     *
+     * Os dois vêm ANTES dos `throw` por resposta incompleta, pelo mesmo motivo
+     * que em `generatePose`: uma submissão aceita já foi cobrada mesmo quando a
+     * resposta volta sem id.
+     */
+    if (jobId !== undefined) jobIdsPagos.push(jobId);
+    await opts.onPaid?.({
+      ...(jobIdsPagos.length > 0 ? { jobIds: [...jobIdsPagos] } : {}),
+      note:
+        `sprite-lab hash=${hash}: o caminho de volta POR CANDIDATO está em ` +
+        `<hash>-cand<i>/south-00.png.pending.json (assets/sprite-lab/)`,
+    });
+    if (characterId !== undefined) {
+      await mkdir(candidateDir(opts.assetsDir, hash, index), { recursive: true });
+      await writePendingStub(stubPath, {
+        characterId,
+        ...(jobId !== undefined ? { jobIds: [jobId] } : {}),
+        note: `create-character-v3 candidato ${index} (seed ${seed})`,
+      });
+    }
+
+    if (!jobId) throw new Error('a API não devolveu background_job_id');
     if (!characterId) throw new Error('a API não devolveu character_id');
 
     const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
@@ -674,31 +808,14 @@ export async function runSpriteLab(
       );
     }
 
-    // O job concluído da v3 traz SÓ metadado — os pixels moram em
-    // GET /characters/{id}.rotation_urls (ver server/character-detail.ts).
-    // Ler o last_response direto aqui era o bug: 14 submissões pagas, zero PNG.
-    const detail = await waitForCharacterRotations(client, characterId, {
-      onLog: opts.onLog,
-    });
-
-    // Extrair frames POR CHAVE, nunca por índice. parseAndWriteFrames grava os
-    // PNGs em disco ANTES de qualquer pós-processamento — a cobrança já aconteceu.
-    const { frames } = await parseAndWriteFrames(
-      detail,
-      'sprite-lab',
-      `${hash}-cand${index}`,
-      opts.assetsDir,
-    );
-    if (!frames['south']?.[0]) {
-      throw new Error(`candidato ${index}: resposta sem frame "south"`);
-    }
+    const southB64 = await colher(characterId);
     opts.onLog?.(`[sprite-lab] candidato ${index} → ${candidateDir(opts.assetsDir, hash, index)} (seed ${seed})`);
 
     return {
       index,
       seed,
       characterId,
-      southB64: (await readFile(pngPath)).toString('base64'),
+      southB64,
       ...(usage
         ? {
             usage: {

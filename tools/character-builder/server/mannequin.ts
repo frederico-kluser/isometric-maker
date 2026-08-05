@@ -14,6 +14,12 @@
  *     cobrança, perder a imagem é dinheiro perdido.
  *   - Guard de orçamento (ADR 0012): estima, loga, escreve ledger — nunca recusa.
  *   - Idempotência: célula `pronto` = não gera de novo.
+ *   - **Caminho de volta ao artefato pago (ADR 0023):** `editSouth` e
+ *     `generateDirections8` gravam o identificador remoto num stub em disco
+ *     assim que a submissão responde, e o PROCURAM antes de submeter — achando,
+ *     re-sondam de graça. Ver `server/pending-stub.ts`. `generateSouthFromText`
+ *     não tem esse caminho e nunca vai ter: `/create-image-bitforge` é síncrono e
+ *     sua resposta não carrega identificador nenhum.
  *   - isometric é OMITIDO do request quando false (F0-09) — preserva specHash.
  *   - view 'low top-down' em tudo (ADR 0005).
  *
@@ -43,7 +49,7 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { PixelLabClient } from '../../pixellab-pipeline/src/api.ts';
+import type { PixelLabClient, Usage } from '../../pixellab-pipeline/src/api.ts';
 import { pollJob } from '../../pixellab-pipeline/src/api.ts';
 import {
   COST_TABLE, estimateByArea, checkBudget,
@@ -52,6 +58,13 @@ import {
 import { trackSpend } from './estimate.ts';
 import { asBase64Image, extractBase64, stripDataUri } from './base64-image.ts';
 import { waitForCharacterRotations } from './character-detail.ts';
+import {
+  discardPendingStub,
+  pendingStubPath,
+  readPendingStub,
+  requestFingerprint,
+  writePendingStub,
+} from './pending-stub.ts';
 import { fitFramesOnDisk } from './frame-fit.ts';
 import { parseAndWriteFrames } from './frames.ts';
 import {
@@ -97,6 +110,24 @@ export interface WizardOpts {
    * Ausente no wizard do próprio manequim.
    */
   readonly reference?: { readonly colorImageB64?: string };
+  /**
+   * "O dinheiro saiu." Chamado LOGO depois de cada submissão aceita, com os
+   * identificadores remotos, e AGUARDADO antes do primeiro poll.
+   *
+   * É `ctx.markPaid` da fila (`server/job-queue.ts`), passado por `dispatch` em
+   * `server/api.ts`. O tipo é estrutural de propósito: este módulo não importa a
+   * fila, e roda igual sem ela (os testes o chamam direto).
+   *
+   * O que ele fecha, e o stub em disco não: um job marcado `paid` NUNCA é
+   * retentado automaticamente pela fila. Sem isso, um 429 vindo do POLL — depois
+   * de uma submissão ACEITA — devolvia o job à fila e a reexecução começava
+   * submetendo de novo.
+   */
+  readonly onPaid?: (remote: {
+    readonly jobIds?: readonly string[];
+    readonly characterId?: string;
+    readonly note?: string;
+  }) => Promise<void>;
 }
 
 // ------------------------------------------------------------------ paths
@@ -125,6 +156,43 @@ function referencePath(assetsDir: string, characterId: string): string {
 /** Path público servido pela UI, no mesmo formato que parseAndWriteFrames devolve. */
 function publicPath(characterId: string, fileName: string): string {
   return `/assets/wizard/${characterId}/${fileName}`;
+}
+
+// ---- caminhos de volta ao artefato pago (ADR 0023; ver server/pending-stub.ts)
+
+/**
+ * Stub da EDIÇÃO da sul. O número da versão sozinho não identifica o pedido —
+ * dois prompts diferentes miram a mesma `south-v3.png` —, então a impressão do
+ * pedido entra no NOME. Um prompt diferente simplesmente não acha stub e
+ * submete o que de fato é trabalho novo, em vez de receber a arte alheia.
+ */
+function editStubPath(
+  assetsDir: string,
+  characterId: string,
+  version: number,
+  fingerprint: string,
+): string {
+  return pendingStubPath(
+    join(wizardDir(assetsDir, characterId), `south-v${version}-${fingerprint}`),
+  );
+}
+
+/**
+ * Stub das 8 DIREÇÕES. Mesma regra: `ch.remoteId` existe e é persistido logo
+ * após a submissão (abaixo), mas ele NÃO serve de sinal de retomada — ele
+ * sobrevive ao sucesso e é o `character_id` que poses e guarda-roupa usam
+ * depois. Achá-lo preenchido não distingue "pago e não entregue" de "entregue
+ * há uma semana", e retomar sobre um sul NOVA devolveria o personagem antigo.
+ * O stub distingue: ele nasce na submissão e morre quando os frames chegam.
+ */
+function directions8StubPath(
+  assetsDir: string,
+  characterId: string,
+  fingerprint: string,
+): string {
+  return pendingStubPath(
+    join(wizardDir(assetsDir, characterId), `directions8-${fingerprint}`),
+  );
 }
 
 // ------------------------------------------------------------------ helpers
@@ -361,6 +429,28 @@ export async function generateSouthFromText(
 
   const res = await client.submit<ImageResponse>('create-image-bitforge', body);
 
+  /**
+   * O DINHEIRO SAIU, E AQUI NÃO EXISTE CAMINHO DE VOLTA — o `note` diz isso em
+   * vez de fingir que existe.
+   *
+   * `CreateImageBitforgeResponse` tem exatamente dois campos no spec vendorizado
+   * (`tools/pixellab-pipeline/openapi/openapi-v2.json`): `usage` e `image`. Sem
+   * `background_job_id`, sem `character_id`, sem `tile_id`, e sem nenhuma rota
+   * `GET` que reentregue a imagem. Não há o que gravar na submissão, logo não há
+   * o que procurar depois: este é o único dos sete ramos que NÃO pode ter
+   * retomada gratuita, e é por isso que `canResumeWithoutSpending` continua
+   * dizendo `false` para ele em `server/api.ts`.
+   *
+   * O que `onPaid` ainda compra: a fila para de RETENTAR sozinha. Uma falha
+   * depois desta linha (gravação em disco, validação de dimensão) deixa de
+   * poder virar uma segunda submissão.
+   */
+  await opts.onPaid?.({
+    note:
+      'create-image-bitforge é síncrono e não devolve identificador — ' +
+      'não há retomada gratuita para esta submissão',
+  });
+
   // Gravar PNG ANTES de qualquer pós-processamento — a cobrança já aconteceu.
   const raw = extractBase64(res.data?.image);
   if (!raw) {
@@ -484,48 +574,85 @@ export async function editSouth(
   }
 
   const size = ch.size;
-  const activeB64 = await readB64(
-    southPath(opts.assetsDir, characterId, active),
-    `sul v${active}`,
-  );
-
-  // Guard: a COST_TABLE não modela /edit-image; usamos bitforge como proxy de
-  // preço estimado (mesma família de imagem única). Marcado como estimativa.
-  const estimate = estimateByArea(COST_TABLE['create-image-bitforge'], size * size);
-  logGuard(
-    'edit-image (edição da sul; estimativa por proxy bitforge)',
-    guardFor(estimate, estimate.point),
-    opts.onLog,
-  );
-
-  // image_size = tamanho da referência enviada; width/height = canvas alvo.
-  // NÃO são intercambiáveis — é o único endpoint da API com as duas coisas.
-  const body: Record<string, unknown> = {
-    image: activeB64,
-    image_size: { width: size, height: size },
-    description: prompt,
-    width: size,
-    height: size,
-    seed: ch.seed,
-    no_background: true,
-  };
-
-  const res = await client.request<EditImageSubmitResponse>('POST', '/edit-image', body);
-
-  // O dinheiro sai na submissão: tracking e ledger antes do poll.
-  if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
-  const usage = res.usage;
-  appendLedger(opts.ledgerPath, {
-    at: new Date().toISOString(),
+  const newIndex = active + 1;
+  // A impressão do PEDIDO, não do resultado: é ela que garante que o stub
+  // achado é deste pedido e não de outro que mirava a mesma versão.
+  const stubPath = editStubPath(
+    opts.assetsDir,
     characterId,
-    endpoint: 'edit-image',
-    usd: usage?.usd ?? null,
-    generations: usage?.generations ?? null,
-    unit: usage?.type ?? 'unknown',
-  });
+    newIndex,
+    requestFingerprint({ prompt, from: active, size, seed: ch.seed }),
+  );
 
-  const jobId = res.data?.background_job_id;
-  if (!jobId) throw new Error('a API não devolveu background_job_id para /edit-image');
+  /**
+   * RETOMADA GRATUITA (ADR 0023): a edição já foi submetida e cobrada, e o poll
+   * caiu depois. `GET /background-jobs/{id}` não custa nada; um segundo
+   * `POST /edit-image` custa a edição inteira de novo.
+   */
+  const retomada = await readPendingStub(stubPath);
+  let jobId = retomada?.jobIds?.[0];
+  /** Ausente na retomada: não houve chamada nova, logo não houve cobrança nova. */
+  let usage: Usage | undefined;
+
+  if (jobId !== undefined) {
+    opts.onLog?.(
+      `[wizard] retomando edição já paga (job ${jobId}) — nenhuma submissão nova.`,
+    );
+  } else {
+    const activeB64 = await readB64(
+      southPath(opts.assetsDir, characterId, active),
+      `sul v${active}`,
+    );
+
+    // Guard: a COST_TABLE não modela /edit-image; usamos bitforge como proxy de
+    // preço estimado (mesma família de imagem única). Marcado como estimativa.
+    const estimate = estimateByArea(COST_TABLE['create-image-bitforge'], size * size);
+    logGuard(
+      'edit-image (edição da sul; estimativa por proxy bitforge)',
+      guardFor(estimate, estimate.point),
+      opts.onLog,
+    );
+
+    // image_size = tamanho da referência enviada; width/height = canvas alvo.
+    // NÃO são intercambiáveis — é o único endpoint da API com as duas coisas.
+    const body: Record<string, unknown> = {
+      image: activeB64,
+      image_size: { width: size, height: size },
+      description: prompt,
+      width: size,
+      height: size,
+      seed: ch.seed,
+      no_background: true,
+    };
+
+    const res = await client.request<EditImageSubmitResponse>('POST', '/edit-image', body);
+
+    // O dinheiro sai na submissão: tracking, ledger e CAMINHO DE VOLTA antes do
+    // poll. A ordem importa — `onPaid` primeiro (a fila para de retentar), stub
+    // depois (o módulo sabe re-sondar mesmo sem fila).
+    if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+    usage = res.usage;
+    jobId = res.data?.background_job_id;
+    appendLedger(opts.ledgerPath, {
+      at: new Date().toISOString(),
+      characterId,
+      endpoint: 'edit-image',
+      jobId: jobId ?? null,
+      usd: usage?.usd ?? null,
+      generations: usage?.generations ?? null,
+      unit: usage?.type ?? 'unknown',
+    });
+    await opts.onPaid?.(
+      jobId !== undefined
+        ? { jobIds: [jobId] }
+        : { note: 'submit de /edit-image aceito sem background_job_id na resposta' },
+    );
+    if (!jobId) throw new Error('a API não devolveu background_job_id para /edit-image');
+    await writePendingStub(stubPath, {
+      jobIds: [jobId],
+      note: `edit-image v${newIndex} de ${characterId}: "${prompt}"`,
+    });
+  }
 
   const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
   if (!polled.ok) {
@@ -540,10 +667,12 @@ export async function editSouth(
   }
 
   // Gravar PNG ANTES de qualquer pós-processamento.
-  const newIndex = active + 1;
   const filePath = southPath(opts.assetsDir, characterId, newIndex);
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, Buffer.from(raw, 'base64'));
+  // O artefato chegou: o caminho de volta deixa de ser necessário. Só AGORA —
+  // apagar antes do arquivo existir jogaria fora a retomada.
+  await discardPendingStub(stubPath);
   opts.onLog?.(`[wizard] sul v${newIndex} → ${filePath} (${raw.length} chars b64)`);
 
   // Só depois de gravado: validar dimensões contra character.size.
@@ -783,68 +912,125 @@ export async function generateDirections8(
     throw new Error('a face sul precisa estar pronta antes das 8 direções');
   }
 
-  const southRaw = await readB64(southPath(opts.assetsDir, characterId, wiz.activeSouth), `sul v${wiz.activeSouth}`);
   const size = ch.size;
-
-  // Guard: v3 reference mode custa ceil(w×h×8 / 65536) gerações.
-  const estimate = estimateByArea(
-    COST_TABLE['create-character-v3'],
-    size * size,
-  );
-  logGuard(
-    'create-character-v3 (8 direções via reference_image)',
-    guardFor(estimate, estimate.point),
-    opts.onLog,
-  );
-
-  const body: Record<string, unknown> = {
-    description: ch.description,
-    reference_image: { base64: southRaw },
-    template_id: s.lock.templateId ?? 'mannequin',
-    view: s.lock.view ?? 'low top-down',
-    seed: ch.seed,
-    no_background: true,
-    image_size: { width: size, height: size },
-  };
-
-  const res = await client.submit<CreateCharacterResponse>(
-    'create-character-v3',
-    body,
-  );
-
-  // O dinheiro sai na submissão: tracking, ledger e remoteId ANTES do poll.
-  if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
-  const usage = res.usage;
-  // Persistir character_id IMEDIATAMENTE — é o único caminho de volta ao artefato.
-  const remoteId = res.data?.character_id;
-  const jobId = res.data?.background_job_id;
-  appendLedger(opts.ledgerPath, {
-    at: new Date().toISOString(),
+  const templateId = s.lock.templateId ?? 'mannequin';
+  const view = s.lock.view ?? 'low top-down';
+  const stubPath = directions8StubPath(
+    opts.assetsDir,
     characterId,
-    endpoint: 'create-character-v3',
-    // Identificadores remotos no ledger: sem eles, uma geração cobrada cujo
-    // download falhou é irrecuperável a partir do histórico.
-    remoteId: remoteId ?? null,
-    jobId: jobId ?? null,
-    usd: usage?.usd ?? null,
-    generations: usage?.generations ?? null,
-    unit: usage?.type ?? 'unknown',
-  });
+    requestFingerprint({
+      description: ch.description,
+      activeSouth: wiz.activeSouth,
+      size,
+      templateId,
+      view,
+      seed: ch.seed,
+    }),
+  );
 
-  if (remoteId) {
-    ch.remoteId = remoteId;
-    await store.save(s);
-  }
-  if (!jobId) throw new Error('a API não devolveu background_job_id');
+  /**
+   * RETOMADA GRATUITA (ADR 0023): o `create-character-v3` já foi submetido e
+   * cobrado, e o caminho até os pixels caiu depois — foi exatamente isso que
+   * produziu 14 submissões pagas e zero PNG em 2026-08-01. Com o
+   * `character_id` em disco, `GET /characters/{id}` reentrega os frames de
+   * graça; uma submissão nova custa a geração inteira outra vez.
+   */
+  const retomada = await readPendingStub(stubPath);
+  let remoteId = retomada?.characterId;
+  let jobId = retomada?.jobIds?.[0];
+  /** Ausente na retomada: não houve chamada nova, logo não houve cobrança nova. */
+  let usage: Usage | undefined;
 
-  const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
-  if (!polled.ok) {
-    throw new Error(
-      polled.reason === 'timeout' ? 'tempo esgotado' : (polled.detail ?? 'falhou'),
+  if (remoteId !== undefined) {
+    opts.onLog?.(
+      `[wizard] retomando personagem já pago ${remoteId} — nenhuma submissão nova.`,
     );
+  } else {
+    const southRaw = await readB64(southPath(opts.assetsDir, characterId, wiz.activeSouth), `sul v${wiz.activeSouth}`);
+
+    // Guard: v3 reference mode custa ceil(w×h×8 / 65536) gerações.
+    const estimate = estimateByArea(
+      COST_TABLE['create-character-v3'],
+      size * size,
+    );
+    logGuard(
+      'create-character-v3 (8 direções via reference_image; preço estimado)',
+      guardFor(estimate, estimate.point),
+      opts.onLog,
+    );
+
+    const body: Record<string, unknown> = {
+      description: ch.description,
+      reference_image: { base64: southRaw },
+      template_id: templateId,
+      view,
+      seed: ch.seed,
+      no_background: true,
+      image_size: { width: size, height: size },
+    };
+
+    const res = await client.submit<CreateCharacterResponse>(
+      'create-character-v3',
+      body,
+    );
+
+    // O dinheiro sai na submissão: tracking, ledger e remoteId ANTES do poll.
+    if (typeof res.usage?.usd === 'number') trackSpend(res.usage.usd);
+    usage = res.usage;
+    // Persistir character_id IMEDIATAMENTE — é o único caminho de volta ao artefato.
+    remoteId = res.data?.character_id;
+    jobId = res.data?.background_job_id;
+    appendLedger(opts.ledgerPath, {
+      at: new Date().toISOString(),
+      characterId,
+      endpoint: 'create-character-v3',
+      // Identificadores remotos no ledger: sem eles, uma geração cobrada cujo
+      // download falhou é irrecuperável a partir do histórico.
+      remoteId: remoteId ?? null,
+      jobId: jobId ?? null,
+      usd: usage?.usd ?? null,
+      generations: usage?.generations ?? null,
+      unit: usage?.type ?? 'unknown',
+    });
+    // A fila aprende primeiro (ela para de retentar), o disco logo depois (ele
+    // sabe re-sondar mesmo sem fila). O ledger já tinha os ids; o que faltava
+    // era alguém que os LESSE antes de submeter.
+    await opts.onPaid?.({
+      ...(jobId !== undefined ? { jobIds: [jobId] } : {}),
+      ...(remoteId !== undefined ? { characterId: remoteId } : {}),
+      ...(jobId === undefined && remoteId === undefined
+        ? { note: 'submit de create-character-v3 aceito sem identificador na resposta' }
+        : {}),
+    });
+    if (remoteId !== undefined) {
+      await writePendingStub(stubPath, {
+        characterId: remoteId,
+        ...(jobId !== undefined ? { jobIds: [jobId] } : {}),
+        note: `create-character-v3 (8 direções) de ${characterId}`,
+      });
+    }
+
+    if (remoteId) {
+      ch.remoteId = remoteId;
+      await store.save(s);
+    }
+    if (!jobId) throw new Error('a API não devolveu background_job_id');
+
+    const polled = await pollJob(client, jobId, { timeoutMs: 900_000 });
+    if (!polled.ok) {
+      throw new Error(
+        polled.reason === 'timeout' ? 'tempo esgotado' : (polled.detail ?? 'falhou'),
+      );
+    }
   }
 
   if (!remoteId) throw new Error('a API não devolveu character_id');
+  // Na retomada o personagem pago pode nunca ter chegado ao studio.json — o
+  // processo morreu antes. Poses e guarda-roupa dependem dele.
+  if (ch.remoteId !== remoteId) {
+    ch.remoteId = remoteId;
+    await store.save(s);
+  }
 
   // v3 não tem mapa directions — sem prova de congelamento.
 
@@ -903,6 +1089,9 @@ export async function generateDirections8(
   };
   ch.wizard = { ...requireWizard(ch), etapa: 'pronto' };
   await store.save(s);
+  // O artefato chegou e a célula está pronta: o caminho de volta cumpriu o
+  // papel. Só AGORA — a idempotência daqui para frente é a célula 'pronto'.
+  await discardPendingStub(stubPath);
 
   if (hasSkeletons) {
     opts.onLog?.(`[skeletons] resposta com skeletons populado para ${dKey}`);

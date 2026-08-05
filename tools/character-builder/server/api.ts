@@ -81,6 +81,13 @@ import {
 } from "./world-block.ts";
 import { BLOCK_GEOMETRY, renderMouldPng } from "./cube-mould.ts";
 import {
+	discardPendingStub,
+	pendingStubPath,
+	readPendingStub,
+	requestFingerprint,
+	writePendingStub,
+} from "./pending-stub.ts";
+import {
 	exportWizardBundle,
 	importSpriteBundle,
 	parseSpriteBundle,
@@ -223,28 +230,55 @@ const JOB_QUEUE_JSON = defaultStatePath();
 let queuePromise: Promise<JobQueue> | undefined;
 
 /**
- * QUAIS RAMOS SABEM RETOMAR SEM SUBMETER DE NOVO — a resposta é: um.
+ * QUAIS RAMOS SABEM RETOMAR SEM SUBMETER DE NOVO — a resposta é: seis dos sete.
  *
  * `canResumeWithoutSpending` é uma afirmação sobre o MÓDULO GERADOR, não sobre o
- * job: ele grava um stub em disco assim que a resposta da submissão chega, e
- * PROCURA esse stub antes de submeter qualquer coisa. É a "outra metade do
- * contrato" que o cabeçalho de `server/job-queue.ts` exige.
+ * job: ele grava o identificador remoto assim que a resposta da submissão chega,
+ * e PROCURA esse identificador antes de submeter qualquer coisa. É a "outra
+ * metade do contrato" que o cabeçalho de `server/job-queue.ts` exige, e ela
+ * agora existe em `server/pending-stub.ts` — um stub `<artefato>.pending.json`
+ * ao lado do arquivo que ele substitui, o mesmo idioma que `world-block.ts` já
+ * usava sozinho.
  *
- *   - `world-block` cumpre. `world-block.ts` grava `<face>.png.pending.json`
- *     (tile), `animation.pending.json` e o stub da v3 logo depois de cada
- *     submissão, e cada caminho testa `existsSync(stubPath)` antes de submeter —
- *     achando o stub, ele busca o artefato por id, que não custa nada.
- *   - Os outros SEIS não cumprem, e nenhum deles está no escopo desta correção:
- *     `wizard-south`, `wizard-south-edit`, `wizard-directions8` (`mannequin.ts`),
- *     `pose` e `wardrobe` (aqui mesmo, mas sem leitura de `ctx.job.remote`) e
- *     `sprite-lab` (`sprite-lab.ts`). Para eles a fila PARA em `'interrompido'` e
- *     devolve a decisão ao usuário, que é o único erro barato disponível.
+ * | ramo | grava | lê antes de submeter |
+ * |---|---|---|
+ * | `world-block` | `*.pending.json` (tile, animação, v3) | `existsSync` do stub |
+ * | `sprite-lab` | um stub POR CANDIDATO | o stub do candidato |
+ * | `wizard-directions8` | stub com `character_id` + `background_job_id` | o stub |
+ * | `wizard-south-edit` | stub com `background_job_id` | o stub |
+ * | `pose` | stub com os N `background_job_id` (um por direção) | o stub, e `ctx.job.remote` |
+ * | `wardrobe` | stub com `background_job_id` + `character_id` | o stub, e `ctx.job.remote` |
  *
- * Enquanto um desses seis não ganhar stub + leitura do stub, acrescentá-lo aqui
- * reabre exatamente a cobrança dupla que esta função existe para fechar.
+ * `pose` e `wardrobe` leem TAMBÉM `ctx.job.remote` porque `ctx.markPaid` já o
+ * escrevia desde a onda anterior: existem registros em disco com o identificador
+ * na fila e sem stub nenhum, e uma leitura a mais só pode EVITAR uma submissão.
+ *
+ * `wizard-south` continua de fora, e isso é decisão, não pendência.
+ * `/create-image-bitforge` é síncrono e sua resposta
+ * (`CreateImageBitforgeResponse` no spec vendorizado) tem exatamente `usage` e
+ * `image` — nenhum identificador, e nenhuma rota GET que reentregue a imagem.
+ * Não há o que gravar na submissão, logo não há o que procurar depois. Para ele
+ * a fila PARA em `'interrompido'` e devolve a decisão ao usuário, que é o único
+ * erro barato disponível.
+ *
+ * A JANELA QUE ISTO NÃO FECHA, e que vale para os seis: entre a submissão ser
+ * aceita e o identificador chegar ao disco o dinheiro já saiu e nada foi
+ * anotado. É irredutível — o id só existe depois da resposta — e é a mesma
+ * janela que `world-block` sempre teve. Dizer `true` aqui é aceitar essa janela,
+ * não negá-la.
  */
 function canResumeWithoutSpending(job: Readonly<QueuedJob>): boolean {
-	return job.descriptor.kind === "world-block";
+	switch (job.descriptor.kind) {
+		case "world-block":
+		case "sprite-lab":
+		case "wizard-directions8":
+		case "wizard-south-edit":
+		case "pose":
+		case "wardrobe":
+			return true;
+		case "wizard-south":
+			return false;
+	}
 }
 
 function jobQueue(): Promise<JobQueue> {
@@ -467,20 +501,20 @@ async function dispatch(ctx: JobContext): Promise<void> {
 				store,
 				ch.id,
 				d.description,
-				wizardOpts(reference),
+				wizardOpts(ctx, reference),
 			);
 			return;
 		}
 		case "wizard-south-edit": {
 			const s = await load();
 			const ch = requireCharacterFor(s, d.characterId);
-			await editSouth(client(), store, ch.id, d.prompt, wizardOpts());
+			await editSouth(client(), store, ch.id, d.prompt, wizardOpts(ctx));
 			return;
 		}
 		case "wizard-directions8": {
 			const s = await load();
 			const ch = requireCharacterFor(s, d.characterId);
-			await generateDirections8(client(), store, ch.id, wizardOpts());
+			await generateDirections8(client(), store, ch.id, wizardOpts(ctx));
 			return;
 		}
 		case "sprite-lab": {
@@ -488,6 +522,7 @@ async function dispatch(ctx: JobContext): Promise<void> {
 				assetsDir: ASSETS,
 				ledgerPath: LEDGER_PATH,
 				onLog: (m) => console.log(m),
+				onPaid: ctx.markPaid,
 			});
 			return;
 		}
@@ -642,12 +677,31 @@ function extractImages(payload: unknown): string[] {
 	return out;
 }
 
+/** Chave de célula → nome de diretório. Uma definição só, usada nos dois lados. */
+function safeKey(key: string): string {
+	return key.replace(/[^a-z0-9-]+/gi, "_");
+}
+
+/**
+ * Caminho de volta ao artefato PAGO de uma pose ou peça (ADR 0023, regra 1).
+ * Ver `server/pending-stub.ts` para o mecanismo.
+ *
+ * A impressão do PEDIDO entra no nome porque a chave de célula é estável
+ * (`manequim::atacando`) e o request não é: trocar o `templateId` da pose ou o
+ * `editDescription` da peça produz outra arte pelo mesmo caminho. Sem a
+ * impressão, a retomada devolveria de graça a arte de um pedido que o usuário
+ * já trocou; com ela, um pedido diferente simplesmente não acha stub.
+ */
+function framesStubPath(scope: string, key: string, fingerprint: string): string {
+	return pendingStubPath(join(ASSETS, scope, `${safeKey(key)}-${fingerprint}`));
+}
+
 async function writeFrames(
 	scope: string,
 	key: string,
 	images: string[],
 ): Promise<Record<string, string[]>> {
-	const safe = key.replace(/[^a-z0-9-]+/gi, "_");
+	const safe = safeKey(key);
 	const dir = join(ASSETS, scope, safe);
 	await mkdir(dir, { recursive: true });
 
@@ -679,11 +733,18 @@ async function writeFrames(
  * personagens derivados (ver mannequinSouthB64); vai como color_image nos
  * endpoints que o aceitam, prendendo a paleta do derivado à do manequim.
  */
-function wizardOpts(referenceB64?: string): WizardOpts {
+function wizardOpts(
+	ctx?: JobContext,
+	referenceB64?: string,
+): WizardOpts {
 	return {
 		assetsDir: ASSETS,
 		ledgerPath: LEDGER_PATH,
 		onLog: (m) => console.log(m),
+		// `onPaid` é `ctx.markPaid`: o módulo declara a submissão e a fila para de
+		// retentar. Ausente fora da fila (a rota do undo, que não chama a API) —
+		// e ali a ausência é correta, não esquecimento.
+		...(ctx !== undefined ? { onPaid: ctx.markPaid } : {}),
 		...(referenceB64 !== undefined
 			? { reference: { colorImageB64: referenceB64 } }
 			: {}),
@@ -773,23 +834,54 @@ async function generatePose(
 		);
 	}
 
-	const res = await c.submit<Record<string, unknown>>(
-		"animate-character",
-		body,
-		{ signal: ctx.signal },
-	);
-	// Animation queues one job PER DIRECTION and returns a list of ids.
-	const ids = collectJobIds(res.data);
-	// markPaid ANTES do cheque dos ids, e AGUARDADO: uma submissão aceita já foi
-	// cobrada mesmo quando a resposta vem sem id nenhum. Anotar só no caminho
-	// feliz deixaria o caso patológico marcado como grátis, e a fila retentaria
-	// — segunda cobrança pela mesma animação.
-	await ctx.markPaid(
-		ids.length > 0
-			? { jobIds: ids }
-			: { note: "submit aceito sem background_job_id na resposta" },
-	);
-	if (ids.length === 0) throw new Error("a API não devolveu nenhum job id");
+	const stubPath = framesStubPath("poses", key, requestFingerprint(body));
+
+	/**
+	 * RETOMADA GRATUITA (ADR 0023): a animação já foi submetida e COBRADA, e o
+	 * poll caiu depois — ou o Vite reiniciou no meio, o que acontece toda vez que
+	 * alguém salva um `server/*.ts`. Re-sondar N `background_job_id` custa zero;
+	 * ressubmeter custa a animação inteira, uma geração POR DIREÇÃO.
+	 *
+	 * DUAS FONTES, e as duas só podem EVITAR uma submissão:
+	 *   1. o stub em disco, escrito por este módulo logo depois do submit;
+	 *   2. `ctx.job.remote`, escrito por `ctx.markPaid` — que já existia antes
+	 *      desta onda, então há registros em disco com ele e sem stub.
+	 */
+	const retomada = await readPendingStub(stubPath);
+	let ids = [...(retomada?.jobIds ?? ctx.job.remote?.jobIds ?? [])];
+
+	if (ids.length > 0) {
+		ctx.log(
+			`[fila] retomando animação já paga de "${key}" (${ids.length} job(s): ` +
+				`${ids.join(", ")}) — nenhuma submissão nova.`,
+		);
+	} else {
+		const res = await c.submit<Record<string, unknown>>(
+			"animate-character",
+			body,
+			{ signal: ctx.signal },
+		);
+		// Animation queues one job PER DIRECTION and returns a list of ids.
+		ids = collectJobIds(res.data);
+		// markPaid ANTES do cheque dos ids, e AGUARDADO: uma submissão aceita já foi
+		// cobrada mesmo quando a resposta vem sem id nenhum. Anotar só no caminho
+		// feliz deixaria o caso patológico marcado como grátis, e a fila retentaria
+		// — segunda cobrança pela mesma animação.
+		await ctx.markPaid(
+			ids.length > 0
+				? { jobIds: ids }
+				: { note: "submit aceito sem background_job_id na resposta" },
+		);
+		// E o mesmo caminho de volta em disco, que sobrevive à fila: um registro
+		// terminal pode ser podado, e o stub fica ao lado do artefato que falta.
+		if (ids.length > 0) {
+			await writePendingStub(stubPath, {
+				jobIds: ids,
+				note: `animate-character de ${key} (${String(body["mode"])})`,
+			});
+		}
+		if (ids.length === 0) throw new Error("a API não devolveu nenhum job id");
+	}
 
 	// Poll das direções EM PARALELO: eram sequenciais, e cada direção leva
 	// minutos — a espera total era a soma dos tempos, agora é o máximo.
@@ -812,6 +904,9 @@ async function generatePose(
 		updatedAt: new Date().toISOString(),
 	};
 	await save(cur);
+	// O artefato chegou e a célula está 'pronto' — daqui para frente a
+	// idempotência é a célula. Descartar antes disso jogaria fora a retomada.
+	await discardPendingStub(stubPath);
 }
 
 /**
@@ -846,34 +941,56 @@ async function generateWardrobe(
 	}
 	const c = client();
 
-	const res = await c.submit<{
-		background_job_id?: string;
-		character_id?: string;
-	}>(
-		"create-character-state",
-		{
-			character_id: character.remoteId,
-			edit_description: item.editDescription,
-			seed: item.seed,
-			no_background: true,
-			// Snapping to the source palette is what stops each piece drifting in colour.
-			use_color_palette_from_reference: item.keepPalette,
-		},
-		{ signal: ctx.signal },
-	);
-	const jobId = res.data?.background_job_id;
-	// Idem generatePose: o dinheiro saiu na submissão aceita, e o `character_id`
-	// devolvido é o caminho de volta ao estado já cobrado mesmo sem job id.
-	await ctx.markPaid({
-		...(jobId !== undefined ? { jobIds: [jobId] } : {}),
-		...(res.data?.character_id !== undefined
-			? { characterId: res.data.character_id }
-			: {}),
-		...(jobId === undefined
-			? { note: "submit aceito sem background_job_id na resposta" }
-			: {}),
-	});
-	if (!jobId) throw new Error("a API não devolveu background_job_id");
+	const body = {
+		character_id: character.remoteId,
+		edit_description: item.editDescription,
+		seed: item.seed,
+		no_background: true,
+		// Snapping to the source palette is what stops each piece drifting in colour.
+		use_color_palette_from_reference: item.keepPalette,
+	};
+	const stubPath = framesStubPath("wardrobe", key, requestFingerprint(body));
+
+	/**
+	 * RETOMADA GRATUITA (ADR 0023), mesmas duas fontes de `generatePose`: o stub
+	 * em disco e o `ctx.job.remote` que `ctx.markPaid` já gravava. O
+	 * `create-character-state` devolve `background_job_id` E `character_id` (os
+	 * dois obrigatórios no spec vendorizado), e é o job que carrega os pixels.
+	 */
+	const retomada = await readPendingStub(stubPath);
+	let jobId = retomada?.jobIds?.[0] ?? ctx.job.remote?.jobIds?.[0];
+	let stateId = retomada?.characterId ?? ctx.job.remote?.characterId;
+
+	if (jobId !== undefined) {
+		ctx.log(
+			`[fila] retomando peça já paga de "${key}" (job ${jobId}) — ` +
+				"nenhuma submissão nova.",
+		);
+	} else {
+		const res = await c.submit<{
+			background_job_id?: string;
+			character_id?: string;
+		}>("create-character-state", body, { signal: ctx.signal });
+		jobId = res.data?.background_job_id;
+		stateId = res.data?.character_id;
+		// Idem generatePose: o dinheiro saiu na submissão aceita, e o `character_id`
+		// devolvido é o caminho de volta ao estado já cobrado mesmo sem job id.
+		await ctx.markPaid({
+			...(jobId !== undefined ? { jobIds: [jobId] } : {}),
+			...(stateId !== undefined ? { characterId: stateId } : {}),
+			...(jobId === undefined
+				? { note: "submit aceito sem background_job_id na resposta" }
+				: {}),
+		});
+		if (jobId !== undefined) {
+			await writePendingStub(stubPath, {
+				jobIds: [jobId],
+				...(stateId !== undefined ? { characterId: stateId } : {}),
+				note: `create-character-state de ${key}`,
+			});
+		}
+		if (!jobId) throw new Error("a API não devolveu background_job_id");
+	}
 
 	const polled = await pollJob(c, jobId, {
 		timeoutMs: 900_000,
@@ -899,12 +1016,33 @@ async function generateWardrobe(
 		status: "pronto",
 		frames,
 		updatedAt: new Date().toISOString(),
-		...(res.data?.character_id ? { remoteId: res.data.character_id } : {}),
+		...(stateId ? { remoteId: stateId } : {}),
 		...(groupId ? { groupId } : {}),
 	};
 	await save(cur);
+	// Só depois de a célula estar 'pronto': ela é a idempotência daqui em diante.
+	await discardPendingStub(stubPath);
 }
 
+/**
+ * Os `background_job_id` de uma resposta, venham no singular ou no PLURAL.
+ *
+ * O plural não é defesa preventiva: é a forma que o spec vendorizado declara
+ * para o endpoint que esta função existe para ler.
+ * `CreateCharacterAnimationResponse` (`/animate-character`) tem
+ * `background_job_ids` — array, **obrigatório**, "List of background job IDs
+ * (one per direction)" — e nenhum campo singular.
+ *
+ * A versão anterior testava `/job_id$/i` e descia para `walk(v)` no resto. Como
+ * `background_job_ids` termina em `ids`, a chave não casava; e `walk`, ao
+ * receber o array, visitava strings, que ele ignora. Resultado: **zero ids** na
+ * resposta real. `generatePose` marcava a submissão como paga (certo — o
+ * dinheiro saiu) e morria em seguida com "a API não devolveu nenhum job id",
+ * sem nada anotado para voltar. Era o cenário da ADR 0023 outra vez: cobrado,
+ * irrecuperável. Nenhum teste pegava porque nenhum fixture do repositório
+ * modelava a resposta de `/animate-character` — o mesmo defeito de suíte que a
+ * própria ADR 0023 registrou.
+ */
 function collectJobIds(payload: unknown): string[] {
 	const ids: string[] = [];
 	const walk = (n: unknown): void => {
@@ -914,8 +1052,14 @@ function collectJobIds(payload: unknown): string[] {
 		}
 		if (n && typeof n === "object") {
 			for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
-				if (/job_id$/i.test(k) && typeof v === "string") ids.push(v);
-				else walk(v);
+				if (!/job_ids?$/i.test(k)) {
+					walk(v);
+					continue;
+				}
+				if (typeof v === "string") ids.push(v);
+				else if (Array.isArray(v)) {
+					for (const item of v) if (typeof item === "string") ids.push(item);
+				} else walk(v);
 			}
 		}
 	};

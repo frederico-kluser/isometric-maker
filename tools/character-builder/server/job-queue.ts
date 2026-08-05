@@ -52,13 +52,18 @@
  *
  * E O QUE A FILA FAZ COM QUEM NÃO CUMPRE O CONTRATO
  *
- * Ela **não reexecuta**. A promessa antiga — "o executor vê `paid: true` e
- * re-sonda" — não tinha quem a cumprisse: `dispatch` (`server/api.ts`) nunca leu
- * `ctx.job.paid` em nenhum dos sete ramos, e a retomada mandava submissão nova
- * por trabalho já comprado. Agora a reconciliação PERGUNTA
- * (`canResumeWithoutSpending`) e, sem um "sim" explícito, marca o job como
- * `'interrompido'` — terminal, nomeado, com a mensagem em pt-BR que passa a
- * decisão ao usuário. Ver `#reconcile`.
+ * Ela **não reexecuta por conta própria**. A promessa antiga — "o executor vê
+ * `paid: true` e re-sonda" — não tinha quem a cumprisse: `dispatch`
+ * (`server/api.ts`) nunca leu `ctx.job.paid` em nenhum dos sete ramos, e a
+ * retomada mandava submissão nova por trabalho já comprado. Por isso a
+ * reconciliação PERGUNTA (`canResumeWithoutSpending`) em vez de supor, e sem um
+ * "sim" explícito marca o job como `'interrompido'` — terminal, nomeado, com a
+ * mensagem em pt-BR que passa a decisão ao usuário. Ver `#reconcile`.
+ *
+ * A pergunta hoje é respondida com "sim" por seis dos sete ramos, que ganharam a
+ * outra metade do contrato (`server/pending-stub.ts`); `wizard-south` continua
+ * respondendo "não", e a razão está em `canResumeWithoutSpending`. O mecanismo
+ * aqui não mudou: ele nunca soube quem sabe retomar, e continua não sabendo.
  *
  * Por isso o log de retomada declara a incerteza em vez de afirmar que nada foi
  * gasto: ver `#reconcile`.
@@ -377,8 +382,10 @@ export interface JobQueueOptions {
 	 * Consultado na reconciliação de reinício, e só lá. Devolver `true` é uma
 	 * afirmação forte: que o módulo gerador grava um stub em disco logo após a
 	 * submissão e o PROCURA antes de submeter — a outra metade do contrato do
-	 * cabeçalho deste módulo. Hoje um único ramo cumpre isso (`world-block`, com
-	 * `*.pending.json`); ver a fiação em `server/api.ts`.
+	 * cabeçalho deste módulo. Seis dos sete ramos cumprem isso via
+	 * `server/pending-stub.ts` (`<artefato>.pending.json`); o sétimo,
+	 * `wizard-south`, não pode, porque `/create-image-bitforge` é síncrono e não
+	 * devolve identificador nenhum. Ver a fiação e a tabela em `server/api.ts`.
 	 *
 	 * Default: **`() => false`**, e o default é a decisão. Ele significa "não
 	 * reexecute nada automaticamente", que é o lado que não gasta. Um chamador
@@ -632,8 +639,10 @@ export function weightForDescriptor(descriptor: JobDescriptor): number {
  *   1. A submissão responde 503 → três POSTs a `create-character-v3`.
  *   2. A submissão é ACEITA (200 com `background_job_id` + `usage.usd`) e só o
  *      POLL cai com 500 → **três gerações pagas por um clique**, porque os cinco
- *      ramos sem `markPaid` deixam `paid: false` em disco e o veto de dinheiro
- *      não dispara.
+ *      ramos que então não chamavam `markPaid` deixavam `paid: false` em disco e
+ *      o veto de dinheiro não disparava. Os sete chamam hoje (`ctx.markPaid`
+ *      direto, ou o `onPaid` que `dispatch` injeta em `mannequin.ts` e
+ *      `sprite-lab.ts`), então o veto cobre também o 429/529 vindo do poll.
  *
  * O cliente HTTP já retentou o que dava para retentar (GET/DELETE/PATCH 5xx, com
  * backoff e `Retry-After`). Um 5xx que chega até aqui já sobreviveu a isso; a
@@ -1119,8 +1128,8 @@ export class JobQueue {
 	 *   - `attempts > 0`  → o executor JÁ RODOU pelo menos uma vez, e esta camada
 	 *     **não tem como saber** se ele chegou a submeter: entre o `submit` e o
 	 *     `await ctx.markPaid` existe uma janela irredutível (ver o cabeçalho do
-	 *     módulo), e cinco dos sete ramos nem chamam `markPaid`. `paid: false`
-	 *     significa "não consta", nunca "é de graça".
+	 *     módulo). Os sete ramos chamam `markPaid` hoje, mas a janela continua
+	 *     existindo: `paid: false` significa "não consta", nunca "é de graça".
 	 *
 	 * `startedAt` e `remote` foram considerados e não servem sozinhos:
 	 * `startedAt` some no caminho de retentativa e `remote` só existe quando o
