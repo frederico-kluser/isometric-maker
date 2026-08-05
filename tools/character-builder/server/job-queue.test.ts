@@ -337,10 +337,19 @@ test("o estado sobrevive a um reinício, com a ordem intacta", async () => {
 		await segunda.idle();
 		await segunda.close();
 
+		// O `a` estava EM VOO quando o processo caiu, e a fila não sabe se o
+		// executor dele chegou a submeter — ele não é redespachado. `b` e `c`
+		// nunca saíram da fila (`attempts === 0`), e esses continuam sendo
+		// drenados na ordem original de chegada.
 		assert.deepEqual(
 			ran,
-			["heroi::a", "heroi::b", "heroi::c"],
-			"os três foram redespachados na ordem original de chegada",
+			["heroi::b", "heroi::c"],
+			"os que nunca rodaram foram redespachados na ordem original de chegada",
+		);
+		assert.equal(
+			segunda.get("heroi::a")?.status,
+			"interrompido",
+			"o que estava em voo NÃO volta a rodar sozinho: ressubmeter cobra de novo",
 		);
 		assert.equal(
 			segunda.get("heroi::a")?.resumed,
@@ -367,12 +376,21 @@ test("o job carrega o payload: o descritor volta inteiro do disco", async () => 
 		const primeira = await openQueue(dir, {
 			execute: () => new Promise<void>(() => {}),
 		});
+		// UM BLOQUEADOR NA FRENTE, e ele é o ponto do teste tanto quanto o
+		// descritor: com o teto em 1 ele toma a vaga e o job de sprite-lab
+		// atravessa o reinício em `'na-fila'`, com `attempts === 0`. Sem isso o
+		// sprite-lab seria admitido, o processo cairia com ele em voo, e a
+		// reconciliação — corretamente — se recusaria a redespachá-lo, porque
+		// `sprite-lab` não sabe retomar de graça. O que se verifica aqui é o
+		// descritor sobrevivendo ao disco, não a política de retomada.
+		await enqueuePose(primeira, "bloqueador");
 		await primeira.enqueue({
 			key: "sprite-lab::0123456789abcdef",
 			label: "sprite-lab · 0123456789abcdef",
 			descriptor,
 			cellKeys: [],
 		});
+		await waitFor(() => primeira.running().length === 1, "o bloqueador entrou");
 		await primeira.close();
 
 		let visto: JobDescriptor | undefined;
@@ -390,7 +408,7 @@ test("o job carrega o payload: o descritor volta inteiro do disco", async () => 
 	});
 });
 
-test("job interrompido em 'gerando' volta para 'na-fila' marcado como retomado", async () => {
+test("job interrompido em 'gerando' vira terminal 'interrompido', marcado como retomado", async () => {
 	await withDir(async (dir) => {
 		// Nunca resolvido de propósito: simula o Vite reiniciando com job em voo.
 		// Uma promise pendente não segura o event loop do runner.
@@ -413,10 +431,10 @@ test("job interrompido em 'gerando' volta para 'na-fila' marcado como retomado",
 		const job = segunda.get("heroi::a");
 		assert.ok(job);
 		assert.equal(job.resumed, true);
-		assert.ok(
-			job.status === "na-fila" || job.status === "gerando",
-			"voltou a ser drenável",
-		);
+		// ANTES ele voltava a ser "drenável", e drenar aqui é ressubmeter.
+		assert.equal(job.status, "interrompido", "terminal: ninguém o executa de novo");
+		assert.equal(segunda.pending().length, 0);
+		assert.equal(segunda.running().length, 0);
 		gate.resolve();
 		await segunda.idle();
 		await segunda.close();
@@ -437,15 +455,20 @@ test("o log da retomada declara a incerteza em vez de afirmar que nada foi gasto
 			onLog: (m) => logs.push(m),
 			execute: () => new Promise<void>(() => {}),
 		});
-		const linha = logs.find((m) => m.includes("retomando"));
-		assert.ok(linha, "a retomada tem de logar");
+		const linha = logs.find((m) => m.includes("INTERROMPIDO"));
+		assert.ok(linha, `a interrupção tem de logar; saiu: ${logs.join(" | ")}`);
 		// Entre o `submit` do executor e o `await ctx.markPaid` o dinheiro já saiu
 		// e o disco ainda diz `paid: false`. Se o processo morre aí, este é
 		// exatamente o job que reabre — e a fila NÃO tem como distinguir "nunca
 		// submeteu" de "submeteu e morreu antes de anotar". Afirmar o mais barato
 		// dos dois é certeza fingida sobre a fatura de alguém.
 		assert.doesNotMatch(linha, /nada foi gasto/);
-		assert.match(linha, /NÃO FOI VERIFICADO/);
+		assert.match(linha, /não foi verificado/i);
+		// E a mensagem que a UI mostra diz a mesma coisa, em pt-BR, sem jargão.
+		const msg = String(segunda.get("heroi::a")?.message);
+		assert.doesNotMatch(msg, /nada foi gasto/);
+		assert.match(msg, /pode ter sido cobrada/);
+		assert.match(msg, /gerar de novo é decisão sua/i);
 		await segunda.close();
 	});
 });
@@ -1517,14 +1540,16 @@ test("falha fatal marca 'falhou' com a mensagem e não retenta", async () => {
 	});
 });
 
-test("erro transitório retenta até o teto e só então falha", async () => {
+test("recusa da conta (429) retenta até o teto e só então falha", async () => {
 	await withDir(async (dir) => {
 		let chamadas = 0;
 		const queue = await openQueue(dir, {
 			maxAttempts: 3,
 			execute: async () => {
 				chamadas += 1;
-				throw Object.assign(new Error("503"), { status: 503 });
+				throw Object.assign(new Error("Too many concurrent jobs"), {
+					status: 429,
+				});
 			},
 		});
 		await enqueuePose(queue, "a");
@@ -1537,13 +1562,15 @@ test("erro transitório retenta até o teto e só então falha", async () => {
 	});
 });
 
-test("erro transitório que passa na segunda tentativa termina 'pronto'", async () => {
+test("recusa que passa na segunda tentativa termina 'pronto'", async () => {
 	await withDir(async (dir) => {
 		let chamadas = 0;
 		const queue = await openQueue(dir, {
 			execute: async () => {
 				chamadas += 1;
-				if (chamadas === 1) throw Object.assign(new Error("502"), { status: 502 });
+				// 529 é a recusa NÃO-padrão do fornecedor. Como o 429, ela significa
+				// "não aceitei o pedido" — nada gerado, nada cobrado.
+				if (chamadas === 1) throw Object.assign(new Error("529"), { status: 529 });
 			},
 		});
 		await enqueuePose(queue, "a");
@@ -1600,10 +1627,22 @@ test("job PAGO nunca é retentado, nem com erro transitório", async () => {
 });
 
 test("classifyByStatus separa o que se retenta do que não", () => {
+	// RECUSA EXPLÍCITA — a chamada não foi processada, nada foi cobrado.
 	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 429 })), "rate-limited");
 	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 529 })), "rate-limited");
-	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 503 })), "retry");
-	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 408 })), "retry");
+	// 5xx NÃO É MAIS RETENTÁVEL. `pixellab-pipeline/src/api.ts` já recusava
+	// retentar POST 5xx — *"the request may have been processed and billed but
+	// the response was lost"* — e a fila desfazia essa decisão uma camada acima,
+	// reexecutando o job inteiro (o que ressubmete). Medido: submissão 503 →
+	// três POSTs; submissão ACEITA com poll 500 → três gerações pagas por um
+	// clique.
+	for (const status of [500, 502, 503, 504, 408, 425]) {
+		assert.equal(
+			classifyByStatus(Object.assign(new Error(""), { status })),
+			"fatal",
+			`${status} não pode voltar a ser retentável: reexecutar o job é ressubmeter`,
+		);
+	}
 	// Validação é bug nosso; retentar só queima cota.
 	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 422 })), "fatal");
 	assert.equal(classifyByStatus(Object.assign(new Error(""), { status: 402 })), "fatal");
@@ -2291,4 +2330,360 @@ test("ENDPOINT_BY_KIND cobre TODO JOB_KINDS — um kind novo sem endpoint não p
 		JOB_KINDS.length,
 		"e nenhum endpoint sobrando para um kind que não existe",
 	);
+});
+
+// ---------------------------------------------------------------- dinheiro: retomada
+
+/**
+ * A CORREÇÃO MAIS CARA DESTA ONDA. Antes destes testes a fila devolvia todo job
+ * `'gerando'` para `'na-fila'` e o executor rodava DO ZERO — segunda submissão,
+ * segunda cobrança, a cada reinício do Vite (que acontece ao salvar qualquer
+ * `server/*.ts`). O sinal que a fila usa agora é `attempts > 0`: quem passou por
+ * `#start` teve o executor invocado, e a fila NÃO CONSEGUE saber se ele chegou a
+ * submeter. Só quem declara recuperação gratuita volta a rodar sozinho.
+ */
+
+const blockDescriptor = (hash: string): JobDescriptor => ({
+	kind: "world-block",
+	hash,
+	config: { description: "bloco de teste", technique: "texture" },
+});
+
+test("retomada: job interrompido NÃO é re-executado automaticamente", async () => {
+	await withDir(async (dir) => {
+		// Reinício com job em voo: executor que nunca resolve, `close` sem abort.
+		const primeira = await openQueue(dir, {
+			execute: () => new Promise<void>(() => {}),
+		});
+		await enqueuePose(primeira, "a");
+		await waitFor(() => primeira.running().length === 1, "o job A entrou");
+		await primeira.close();
+		assert.equal((await readState(dir)).jobs[0]?.status, "gerando");
+
+		// Segunda subida. O executor conta invocações — cada uma seria uma
+		// submissão nova pela mesma pose.
+		const invocacoes: string[] = [];
+		const segunda = await openQueue(dir, {
+			execute: async (ctx) => {
+				invocacoes.push(ctx.job.key);
+			},
+		});
+		await segunda.idle();
+		await segunda.close();
+
+		assert.deepEqual(
+			invocacoes,
+			[],
+			"o executor de um job interrompido NÃO pode ser chamado de novo: " +
+				"a fila não sabe se a submissão anterior saiu, e ressubmeter cobra de novo",
+		);
+		const job = segunda.get("heroi::a");
+		assert.equal(job?.status, "interrompido", "estado terminal NOMEADO, não 'na-fila'");
+		assert.equal(job?.resumed, true);
+		assert.match(
+			String(job?.message),
+			/pode ter sido cobrada|já foi cobrada/,
+			"a mensagem tem de dizer que a geração pode ter custado, em pt-BR",
+		);
+		assert.match(String(job?.message), /gerar de novo/i, "e que a decisão é do usuário");
+	});
+});
+
+test("retomada: job interrompido JÁ PAGO também para, e guarda o remote", async () => {
+	await withDir(async (dir) => {
+		const primeira = await openQueue(dir, {
+			execute: async (ctx) => {
+				await ctx.markPaid({ jobIds: ["bg-que-ja-custou"] });
+				return new Promise<void>(() => {});
+			},
+		});
+		await enqueuePose(primeira, "a");
+		await waitFor(() => primeira.get("heroi::a")?.paid === true, "markPaid");
+		await primeira.close();
+
+		let chamou = 0;
+		const segunda = await openQueue(dir, {
+			execute: async () => {
+				chamou += 1;
+			},
+		});
+		await segunda.idle();
+		await segunda.close();
+
+		assert.equal(chamou, 0, "job pago jamais é ressubmetido");
+		const job = segunda.get("heroi::a");
+		assert.equal(job?.status, "interrompido");
+		assert.equal(job?.paid, true);
+		assert.deepEqual(
+			job?.remote?.jobIds,
+			["bg-que-ja-custou"],
+			"o identificador é o único caminho de volta ao artefato pago",
+		);
+		assert.deepEqual(
+			segunda.paidUnfinished().map((j) => j.key),
+			["heroi::a"],
+			"e ele continua visível para quem for re-sondar à mão",
+		);
+	});
+});
+
+test("retomada: só quem declara recuperação GRATUITA volta a rodar sozinho", async () => {
+	await withDir(async (dir) => {
+		const canResumeWithoutSpending = (j: Readonly<QueuedJob>): boolean =>
+			j.descriptor.kind === "world-block";
+
+		const primeira = await openQueue(dir, {
+			concurrency: 8,
+			canResumeWithoutSpending,
+			execute: () => new Promise<void>(() => {}),
+		});
+		await primeira.enqueue({
+			key: "world-block::abc",
+			label: "bloco",
+			descriptor: blockDescriptor("abc"),
+			cellKeys: [],
+		});
+		await enqueuePose(primeira, "a");
+		await waitFor(() => primeira.running().length === 2, "os dois entraram");
+		await primeira.close();
+
+		const invocacoes: string[] = [];
+		const segunda = await openQueue(dir, {
+			concurrency: 8,
+			canResumeWithoutSpending,
+			execute: async (ctx) => {
+				invocacoes.push(ctx.job.key);
+			},
+		});
+		await segunda.idle();
+		await segunda.close();
+
+		assert.deepEqual(
+			invocacoes,
+			["world-block::abc"],
+			"world-block procura o stub em disco antes de submeter; a pose não",
+		);
+		assert.equal(segunda.get("world-block::abc")?.status, "pronto");
+		assert.equal(segunda.get("world-block::abc")?.resumed, true);
+		assert.equal(segunda.get("heroi::a")?.status, "interrompido");
+	});
+});
+
+test("adulteração: attempts ausente conta como JÁ RODOU, e o job não é reexecutado", async () => {
+	await withDir(async (dir) => {
+		await writeFile(
+			join(dir, "job-queue.json"),
+			JSON.stringify({
+				version: 1,
+				nextSeq: 3,
+				updatedAt: new Date(0).toISOString(),
+				jobs: [
+					{
+						key: "heroi::sem-attempts",
+						label: "x",
+						seq: 1,
+						enqueuedAt: new Date(0).toISOString(),
+						descriptor: {
+							kind: "pose",
+							characterId: "heroi",
+							poseId: "sem-attempts",
+						},
+						cellKeys: [],
+						status: "na-fila",
+						paid: false,
+						// `attempts` AUSENTE de propósito: é o campo que decide se o
+						// executor já foi invocado, e o arquivo é editável à mão.
+					},
+				],
+			}),
+		);
+		const ran: string[] = [];
+		const queue = await openQueue(dir, {
+			execute: async (ctx) => {
+				ran.push(ctx.job.key);
+			},
+		});
+		await queue.idle();
+		await queue.close();
+
+		assert.deepEqual(ran, [], "na dúvida sobre ter rodado, não se roda de novo");
+		const job = queue.get("heroi::sem-attempts");
+		assert.equal(job?.attempts, 1, "ausente resolve para 1, não para 0");
+		assert.equal(job?.status, "interrompido");
+	});
+});
+
+test("retomada: job que NUNCA rodou (attempts 0) continua sendo drenado normalmente", async () => {
+	await withDir(async (dir) => {
+		// Teto 1: `a` toma a vaga e `b` fica em 'na-fila' com attempts 0.
+		const primeira = await openQueue(dir, {
+			execute: () => new Promise<void>(() => {}),
+		});
+		await enqueuePose(primeira, "a");
+		await enqueuePose(primeira, "b");
+		await waitFor(() => primeira.running().length === 1, "só o A entrou");
+		await primeira.close();
+
+		const invocacoes: string[] = [];
+		const segunda = await openQueue(dir, {
+			execute: async (ctx) => {
+				invocacoes.push(ctx.job.key);
+			},
+		});
+		await segunda.idle();
+		await segunda.close();
+
+		assert.deepEqual(
+			invocacoes,
+			["heroi::b"],
+			"quem nunca saiu daqui roda; quem já rodou uma vez, não",
+		);
+		assert.equal(segunda.get("heroi::a")?.status, "interrompido");
+	});
+});
+
+// ---------------------------------------------------------------- dinheiro: retentativa
+
+/**
+ * `pixellab-pipeline/src/api.ts` recusa retentar POST 5xx com o motivo escrito:
+ * *"the request may have been processed and billed but the response was lost"*.
+ * A fila desfazia essa decisão uma camada acima — ela reexecutava o job INTEIRO,
+ * o que ressubmete. Estes testes trancam o alinhamento.
+ */
+
+test("5xx na SUBMISSÃO não é retentado — o cliente HTTP já recusou retentar POST 5xx", async () => {
+	await withDir(async (dir) => {
+		let submissoes = 0;
+		const queue = await openQueue(dir, {
+			maxAttempts: 3,
+			execute: async () => {
+				submissoes += 1;
+				throw Object.assign(new Error("503 em POST /create-character-v3"), {
+					status: 503,
+				});
+			},
+		});
+		await enqueuePose(queue, "a");
+		await queue.idle();
+		await queue.close();
+
+		assert.equal(submissoes, 1, "uma submissão recusada, não três");
+		const job = queue.get("heroi::a");
+		assert.equal(job?.status, "falhou");
+		assert.equal(job?.attempts, 1);
+	});
+});
+
+test("submissão ACEITA + poll 500 NÃO ressubmete — o pior caminho de todos", async () => {
+	await withDir(async (dir) => {
+		// Reproduz o ramo sem `markPaid` (sprite-lab, wizard, world-block): a
+		// submissão é aceita, o dinheiro sai, o poll cai, e o registro em disco
+		// continua dizendo `paid: false`.
+		let submissoesAceitas = 0;
+		const queue = await openQueue(dir, {
+			maxAttempts: 3,
+			execute: async () => {
+				submissoesAceitas += 1; // 200 com background_job_id + usage.usd
+				throw Object.assign(new Error("500 em GET /jobs/bg-1"), { status: 500 });
+			},
+		});
+		await enqueuePose(queue, "a");
+		await queue.idle();
+		await queue.close();
+
+		assert.equal(
+			submissoesAceitas,
+			1,
+			"três submissões aceitas por um clique é o defeito que este teste tranca",
+		);
+		assert.equal(queue.get("heroi::a")?.status, "falhou");
+	});
+});
+
+test("408 e 425 também deixam de ser retentáveis", async () => {
+	await withDir(async (dir) => {
+		for (const status of [408, 425]) {
+			let chamadas = 0;
+			const queue = await openQueue(dir, {
+				maxAttempts: 3,
+				execute: async () => {
+					chamadas += 1;
+					throw Object.assign(new Error(`${status}`), { status });
+				},
+			});
+			await enqueuePose(queue, `s${status}`);
+			await queue.idle();
+			await queue.close();
+			assert.equal(chamadas, 1, `${status} não pode ser retentado pela fila`);
+		}
+	});
+});
+
+test("429 e 529 CONTINUAM retentáveis — recusa explícita, nada processado", async () => {
+	await withDir(async (dir) => {
+		let chamadas = 0;
+		const queue = await openQueue(dir, {
+			maxAttempts: 3,
+			execute: async () => {
+				chamadas += 1;
+				if (chamadas === 1) {
+					throw Object.assign(new Error("Too many concurrent jobs"), {
+						status: 429,
+					});
+				}
+			},
+		});
+		await enqueuePose(queue, "a");
+		await queue.idle();
+		await queue.close();
+		assert.equal(chamadas, 2, "a chamada RECUSADA não gerou nada: retentar é grátis");
+		assert.equal(queue.get("heroi::a")?.status, "pronto");
+	});
+});
+
+test("um remote guardado veta a retentativa mesmo sem paid", async () => {
+	await withDir(async (dir) => {
+		let chamadas = 0;
+		const queue = await openQueue(dir, {
+			maxAttempts: 3,
+			// Classificador injetado que insiste em "retry": nem assim a fila pode
+			// reexecutar um job que já tem identificador remoto guardado.
+			classifyError: () => "retry",
+			execute: async (ctx) => {
+				chamadas += 1;
+				await ctx.markPaid({ jobIds: ["bg-1"] });
+				throw new Error("caiu depois de guardar o id");
+			},
+		});
+		await enqueuePose(queue, "a");
+		await queue.idle();
+		await queue.close();
+		assert.equal(chamadas, 1);
+		assert.equal(queue.get("heroi::a")?.status, "falhou");
+	});
+});
+
+// ---------------------------------------------------------------- posição na fila
+
+test("a posição do 202 nunca é 0 — 1 é o próximo a entrar", async () => {
+	await withDir(async (dir) => {
+		// O laço de admissão ativo pega o job durante o `await #flush()` do
+		// `enqueue`; a posição saía de `pending()` DEPOIS disso e vinha -1+1 = 0.
+		const posicoes: number[] = [];
+		const queue = await openQueue(dir, {
+			concurrency: 4,
+			execute: async () => {},
+		});
+		for (let i = 0; i < 12; i += 1) {
+			const r = await enqueuePose(queue, `p${i}`);
+			assert.ok(r.accepted);
+			posicoes.push(r.position);
+		}
+		await queue.idle();
+		await queue.close();
+		assert.ok(
+			posicoes.every((p) => p >= 1),
+			`"position" é documentado como "1 = próximo a entrar"; veio ${posicoes.join(",")}`,
+		);
+	});
 });

@@ -24,9 +24,15 @@ export default defineConfig(({ mode }) => {
     port: 5174,
     fs: { allow: ['..', '../..'] },
     watch: {
-      // studio.json and assets/ change at runtime (PixelLab generation) —
-      // hot reload would disrupt the user mid-work.
-      ignored: ['**/studio.json', '**/assets/**'],
+      // studio.json, job-queue.json and assets/ change at runtime (PixelLab
+      // generation) — hot reload would disrupt the user mid-work.
+      //
+      // job-queue.json é o mais crítico dos três: a fila persistente grava nele
+      // a CADA transição de job (admissão, markPaid, conclusão). Sem esta linha
+      // o Vite reiniciaria o servidor no meio de uma geração paga — que é
+      // exatamente o defeito que a ADR 0023 registrou depois de custar dinheiro,
+      // e que a fila existe para fechar.
+      ignored: ['**/studio.json', '**/job-queue.json', '**/assets/**'],
     },
   },
   // Generated art is written to assets/ at runtime; serving it as public means

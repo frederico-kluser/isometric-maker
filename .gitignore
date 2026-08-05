@@ -14,6 +14,11 @@ tools/pixellab-pipeline/.pixellab/queue-state.json
 # arte gerada pelo estúdio: reconstruível a partir de studio.json
 tools/character-builder/assets/
 
+# estado da fila de jobs do estúdio: local por definição, e contém o rastro do
+# que já foi COBRADO nesta máquina (paid + identificadores remotos). Versioná-lo
+# publicaria contabilidade de conta e faria dois clones brigarem pelo mesmo FIFO.
+tools/character-builder/job-queue.json
+
 # tokens de validação das skills: efêmeros por design (TTL de 30 min).
 # Versioná-los transformaria "eu validei agora" em "alguém validou um dia".
 .agents/skills/.validation/

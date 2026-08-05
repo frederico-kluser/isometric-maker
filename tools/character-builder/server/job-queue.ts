@@ -50,6 +50,16 @@
  *   2. Ao receber um job com `paid: false`, PROCURAR esse stub antes de
  *      ressubmeter. `paid: false` significa "não consta", nunca "é de graça".
  *
+ * E O QUE A FILA FAZ COM QUEM NÃO CUMPRE O CONTRATO
+ *
+ * Ela **não reexecuta**. A promessa antiga — "o executor vê `paid: true` e
+ * re-sonda" — não tinha quem a cumprisse: `dispatch` (`server/api.ts`) nunca leu
+ * `ctx.job.paid` em nenhum dos sete ramos, e a retomada mandava submissão nova
+ * por trabalho já comprado. Agora a reconciliação PERGUNTA
+ * (`canResumeWithoutSpending`) e, sem um "sim" explícito, marca o job como
+ * `'interrompido'` — terminal, nomeado, com a mensagem em pt-BR que passa a
+ * decisão ao usuário. Ver `#reconcile`.
+ *
  * Por isso o log de retomada declara a incerteza em vez de afirmar que nada foi
  * gasto: ver `#reconcile`.
  *
@@ -158,13 +168,27 @@ export type JobStatus =
 	| "gerando"
 	| "pronto"
 	| "falhou"
-	| "cancelado";
+	| "cancelado"
+	/**
+	 * O SERVIDOR PAROU DE PROPÓSITO, e não reexecutou. Ver `#reconcile`.
+	 *
+	 * Não é `'falhou'` porque nada falhou: o processo morreu com o job em voo, e
+	 * a fila não consegue saber se a submissão chegou a sair. Reexecutar é a
+	 * única coisa que ela NÃO pode fazer sozinha, e chamar isso de "falha"
+	 * convidaria a próxima pessoa a "corrigir" o caminho com uma retentativa.
+	 *
+	 * É terminal e mapeia para a célula `'falhou'` (`cellStatusFor`), que é onde
+	 * a UI oferece "gerar de novo" — o clique deliberado do usuário, que é
+	 * exatamente a decisão que o servidor se recusa a tomar por ele.
+	 */
+	| "interrompido";
 
 /** Estados dos quais um job não sai sozinho. */
 const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>([
 	"pronto",
 	"falhou",
 	"cancelado",
+	"interrompido",
 ]);
 
 /**
@@ -179,6 +203,7 @@ const JOB_STATUSES: ReadonlySet<string> = new Set<JobStatus>([
 	"pronto",
 	"falhou",
 	"cancelado",
+	"interrompido",
 ]);
 
 /**
@@ -346,6 +371,26 @@ export interface JobQueueOptions {
 	 * `() => true` explicitamente, e a decisão fica no código de quem a tomou.
 	 */
 	readonly stillNeeded: (job: Readonly<QueuedJob>) => boolean | Promise<boolean>;
+	/**
+	 * "O executor deste job sabe retomar SEM SUBMETER de novo?"
+	 *
+	 * Consultado na reconciliação de reinício, e só lá. Devolver `true` é uma
+	 * afirmação forte: que o módulo gerador grava um stub em disco logo após a
+	 * submissão e o PROCURA antes de submeter — a outra metade do contrato do
+	 * cabeçalho deste módulo. Hoje um único ramo cumpre isso (`world-block`, com
+	 * `*.pending.json`); ver a fiação em `server/api.ts`.
+	 *
+	 * Default: **`() => false`**, e o default é a decisão. Ele significa "não
+	 * reexecute nada automaticamente", que é o lado que não gasta. Um chamador
+	 * que esqueça de passar a função perde retomada gratuita — o usuário clica de
+	 * novo — em vez de ganhar cobrança dupla silenciosa.
+	 *
+	 * SÍNCRONO de propósito: a resposta é uma propriedade do TIPO do job (o
+	 * módulo gerador tem ou não tem stub), não do estado do disco naquele
+	 * instante. Uma consulta assíncrona convidaria a checar o stub aqui, e a
+	 * checagem certa é dentro do executor, que é quem sabe o caminho dele.
+	 */
+	readonly canResumeWithoutSpending?: (job: Readonly<QueuedJob>) => boolean;
 	/** Default: `classifyByStatus`. */
 	readonly classifyError?: (
 		err: unknown,
@@ -565,17 +610,46 @@ export function weightForDescriptor(descriptor: JobDescriptor): number {
  * `PixelLabError` o expõe, e não importá-lo mantém este módulo puro e testável
  * sem rede.
  *
- * 429 ("Too many concurrent jobs") e 529 ("Rate limit exceeded", NÃO-padrão e
- * ignorado pela maioria dos clientes HTTP) desaceleram a fila. 400/401/403/404/
- * 422 nunca são retentados: validação é bug nosso, e retentar só queima cota.
+ * DUAS CLASSES, E SÓ DUAS. 429 ("Too many concurrent jobs") e 529 ("Rate limit
+ * exceeded", NÃO-padrão e ignorado pela maioria dos clientes HTTP) são RECUSA
+ * EXPLÍCITA: a chamada não foi processada, nada foi gerado, nada foi cobrado.
+ * Elas desaceleram a fila e podem ser retentadas. **Todo o resto é fatal**,
+ * incluindo 408, 425 e a faixa 500–504.
+ *
+ * POR QUE 5xx DEIXOU DE SER `'retry'`, E QUAL DEFEITO ISSO FECHA
+ *
+ * `pixellab-pipeline/src/api.ts` já tinha tomado esta decisão, uma camada
+ * abaixo, e escreveu o motivo no código:
+ *
+ * > *"For POST: server errors (500, 502, 503, 504) are NOT retried — the request
+ * > may have been processed and billed but the response was lost. Only 'not
+ * > accepted yet' codes (429, 529) are safe to retry on POST."*
+ *
+ * A fila DESFAZIA essa decisão. Ela não retenta uma requisição HTTP: ela
+ * reexecuta o JOB INTEIRO, do começo, e a primeira coisa que o executor faz é
+ * submeter. Dois caminhos medidos saíam daí, e os dois cobram:
+ *
+ *   1. A submissão responde 503 → três POSTs a `create-character-v3`.
+ *   2. A submissão é ACEITA (200 com `background_job_id` + `usage.usd`) e só o
+ *      POLL cai com 500 → **três gerações pagas por um clique**, porque os cinco
+ *      ramos sem `markPaid` deixam `paid: false` em disco e o veto de dinheiro
+ *      não dispara.
+ *
+ * O cliente HTTP já retentou o que dava para retentar (GET/DELETE/PATCH 5xx, com
+ * backoff e `Retry-After`). Um 5xx que chega até aqui já sobreviveu a isso; a
+ * fila reexecutando é sempre risco novo de cobrança, nunca resiliência nova.
+ *
+ * 400/401/403/404/422 continuam fatais pelo motivo de sempre: validação é bug
+ * nosso, e retentar só queima cota.
+ *
+ * `'retry'` continua existindo em `FailureKind` para um `classifyError`
+ * injetado, mas ele NÃO basta para retentar — ver o veto de dinheiro em
+ * `#handleFailure`.
  */
 export function classifyByStatus(err: unknown): FailureKind {
 	const status = (err as { status?: unknown } | null | undefined)?.status;
 	if (typeof status !== "number") return "fatal";
 	if (status === 429 || status === 529) return "rate-limited";
-	if (status === 408 || status === 425 || (status >= 500 && status <= 504)) {
-		return "retry";
-	}
 	return "fatal";
 }
 
@@ -583,6 +657,12 @@ export function classifyByStatus(err: unknown): FailureKind {
  * Status de job → status de célula. `'cancelado'` não existe em `CellStatus`, e
  * devolver a célula a `'vazio'` é o que a rota `DELETE /api/jobs/:key` já faz
  * hoje (ela apaga a célula não-pronta).
+ *
+ * `'interrompido'` vira `'falhou'` na célula porque `CellStatus` não tem um
+ * valor para ele e inventar um obrigaria a mexer em `server/model.ts` e nas
+ * quatro telas que o consomem. A perda é pequena e nomeada: a célula diz
+ * "falhou" e o texto de erro — que vem do `message` do job — diz exatamente o
+ * que aconteceu e que refazer pode custar de novo.
  */
 export function cellStatusFor(status: JobStatus): CellStatus {
 	switch (status) {
@@ -593,6 +673,7 @@ export function cellStatusFor(status: JobStatus): CellStatus {
 		case "pronto":
 			return "pronto";
 		case "falhou":
+		case "interrompido":
 			return "falhou";
 		case "cancelado":
 			return "vazio";
@@ -674,6 +755,7 @@ export class JobQueue {
 	readonly #execute: JobExecutor;
 	readonly #weightOf: (descriptor: JobDescriptor) => number;
 	readonly #stillNeeded: (job: Readonly<QueuedJob>) => boolean | Promise<boolean>;
+	readonly #canResumeFree: (job: Readonly<QueuedJob>) => boolean;
 	readonly #classify: (err: unknown, job: Readonly<QueuedJob>) => FailureKind;
 	readonly #now: () => number;
 	readonly #sleep: (ms: number) => Promise<void>;
@@ -725,6 +807,8 @@ export class JobQueue {
 		this.#execute = options.execute;
 		this.#weightOf = options.weightOf ?? weightForDescriptor;
 		this.#stillNeeded = options.stillNeeded;
+		// O default é o lado que não gasta. Ver `canResumeWithoutSpending`.
+		this.#canResumeFree = options.canResumeWithoutSpending ?? (() => false);
 		this.#classify = options.classifyError ?? classifyByStatus;
 		this.#now = options.now ?? (() => Date.now());
 		this.#sleep =
@@ -910,9 +994,17 @@ export class JobQueue {
 		this.#state.nextSeq += 1;
 		this.#state.jobs.push(job);
 		this.#prune();
+		// A POSIÇÃO SAI AQUI, no mesmo bloco síncrono do push, e não depois do
+		// `await #flush()`. Um laço de admissão já ativo enxerga o job novo em
+		// `pending()` durante aquele await e pode admiti-lo; depois disso ele não
+		// está mais na fila, `findIndex` devolve -1 e a resposta 202 saía com
+		// `{"position": 0}` — medido no PRIMEIRO POST após subir o editor.
+		// `queuePosition` é documentado como "1 = próximo a entrar", e 0 não é
+		// posição nenhuma. Lida agora, ela é a ordem de chegada, que é o que a
+		// tela promete ("3º de 5") e o que o FIFO garante.
+		const position = this.pending().findIndex((j) => j.key === job.key) + 1;
 		await this.#flush();
 		this.#notify(job);
-		const position = this.pending().findIndex((j) => j.key === job.key) + 1;
 		this.#kick();
 		return { accepted: true, job, position };
 	}
@@ -1004,26 +1096,89 @@ export class JobQueue {
 	// ------------------------------------------------------------- internos
 
 	/**
-	 * Reconciliação de reinício. Todo job que estava `'gerando'` volta para
-	 * `'na-fila'` com `resumed: true`, mantendo `seq` — o que preserva o FIFO
-	 * através do reinício e coloca os interrompidos na frente do que chegar
-	 * depois.
+	 * Reconciliação de reinício — e a correção mais cara deste módulo.
 	 *
-	 * O `paid` e o `remote` sobrevivem intactos, e é assim que a retomada sai de
-	 * graça: o executor vê `job.paid === true`, encontra o identificador remoto
-	 * no descritor/registro e RE-SONDA em vez de ressubmeter. Esta é a metade
-	 * que este módulo consegue garantir sozinho; a outra metade — usar o stub em
-	 * disco (`world-block.ts` grava `v3StubPath`/`tileStubPath` logo após a
-	 * submissão) — mora nos módulos geradores.
+	 * O QUE ELA FAZIA, E QUANTO CUSTAVA
+	 *
+	 * Todo job `'gerando'` voltava para `'na-fila'` com `paid` e `remote`
+	 * intactos, e a fila voltava a drenar. O executor rodava DO ZERO. O comentário
+	 * antigo prometia que "o executor vê `job.paid === true` e RE-SONDA", mas
+	 * `dispatch` (`server/api.ts`) nunca leu `ctx.job.paid` nem `ctx.job.remote`
+	 * em nenhum dos sete ramos: a promessa não tinha quem a cumprisse. Medido com
+	 * o fixture de `api-queue.test.ts` e um `PIXELLAB_SECRET` presente — que é a
+	 * condição normal de uso — a retomada de um job JÁ PAGO mandava um
+	 * `POST /animate-character`. Como o Vite reinicia sozinho ao salvar qualquer
+	 * `server/*.ts` (ADR 0023), isso é uma cobrança por salvamento.
+	 *
+	 * O SINAL: `attempts > 0`
+	 *
+	 * `attempts` sobe em `#start`, o único ponto que chama o executor. Logo:
+	 *
+	 *   - `attempts === 0` → o executor NUNCA foi invocado para este registro.
+	 *     Nada saiu desta máquina. Ele é drenado normalmente, de graça.
+	 *   - `attempts > 0`  → o executor JÁ RODOU pelo menos uma vez, e esta camada
+	 *     **não tem como saber** se ele chegou a submeter: entre o `submit` e o
+	 *     `await ctx.markPaid` existe uma janela irredutível (ver o cabeçalho do
+	 *     módulo), e cinco dos sete ramos nem chamam `markPaid`. `paid: false`
+	 *     significa "não consta", nunca "é de graça".
+	 *
+	 * `startedAt` e `remote` foram considerados e não servem sozinhos:
+	 * `startedAt` some no caminho de retentativa e `remote` só existe quando o
+	 * executor cooperou. `attempts` é o único que conta invocações do executor,
+	 * que é exatamente a pergunta.
+	 *
+	 * O QUE ACONTECE COM QUEM JÁ RODOU
+	 *
+	 *   - Se `canResumeWithoutSpending` disser `true` — o módulo gerador grava
+	 *     stub de retomada e o procura antes de submeter — o job volta para
+	 *     `'na-fila'` com `resumed: true`, `seq` preservado (o FIFO atravessa o
+	 *     reinício) e `paid`/`remote` intactos. Redespachar ali é GRATUITO.
+	 *   - Caso contrário ele vira `'interrompido'`: terminal, nomeado, com
+	 *     mensagem em pt-BR dizendo que a geração pode ter sido cobrada e que
+	 *     refazer é decisão do usuário. **Melhor o usuário clicar de novo de
+	 *     propósito do que o servidor cobrar sozinho.**
+	 *
+	 * O registro NÃO some: `paid` e `remote` ficam, `holdsUnclaimedMoney` protege
+	 * o job da poda e da limpeza, e `paidUnfinished()` continua enxergando o
+	 * caminho de volta ao artefato que já custou dinheiro.
 	 */
 	async #reconcile(): Promise<void> {
 		let touched = 0;
+		const interrompidos: QueuedJob[] = [];
 		for (const job of this.#state.jobs) {
-			if (job.status !== "gerando") continue;
-			job.status = "na-fila";
+			// `'gerando'` em disco é o caso óbvio, mas não o único: um job devolvido
+			// à fila por `#handleFailure` fica `'na-fila'` com `attempts > 0`, e ele
+			// também já invocou o executor. A pergunta é sempre a mesma.
+			if (job.status !== "gerando" && job.status !== "na-fila") continue;
+			if (job.attempts === 0) continue;
+
 			job.resumed = true;
 			delete job.startedAt;
 			touched += 1;
+
+			let livre = false;
+			try {
+				livre = this.#canResumeFree(job);
+			} catch (err) {
+				// Errar aqui é errar para o lado que NÃO gasta.
+				this.#log(
+					`[fila] canResumeWithoutSpending de "${job.key}" lançou ` +
+						`(${describe(err)}) — tratado como "não sabe retomar de graça"`,
+				);
+				livre = false;
+			}
+
+			if (livre) {
+				job.status = "na-fila";
+				this.#log(
+					`[fila] retomando "${job.key}" após reinício — o módulo dele procura o ` +
+						"stub de retomada em disco antes de submeter, então redespachar é " +
+						"GRATUITO" +
+						(job.paid ? " (e o registro já acusa cobrança)" : ""),
+				);
+				continue;
+			}
+
 			// A mensagem do caso NÃO-PAGO custou uma reescrita: ela dizia "nada foi
 			// gasto ainda", e isso é falso exatamente na janela entre o `submit` do
 			// executor e o `await ctx.markPaid` — o dinheiro sai no submit e o disco
@@ -1031,13 +1186,26 @@ export class JobQueue {
 			// submeteu" de "submeteu e morreu antes de anotar", e afirmar a mais
 			// barata das duas é o tipo de certeza fingida que ninguém vai conferir
 			// depois. Ver o contrato da janela no cabeçalho do módulo.
+			job.status = "interrompido";
+			job.finishedAt = this.#now();
+			job.message = job.paid
+				? "o servidor reiniciou com este job em execução e a geração JÁ FOI " +
+					"COBRADA. O identificador remoto está guardado, mas este tipo de job " +
+					"não sabe re-sondar sozinho, então NADA foi ressubmetido: gerar de " +
+					"novo é decisão sua, e custa de novo."
+				: "o servidor reiniciou com este job em execução. O registro NÃO ACUSA " +
+					"cobrança, e isso NÃO É PROVA de que a geração saiu de graça: se o " +
+					"processo morreu entre a submissão e o registro dela, a geração pode " +
+					"ter sido cobrada e o disco não sabe. NADA foi ressubmetido: gerar de " +
+					"novo é decisão sua, e pode custar de novo.";
+			interrompidos.push(job);
 			this.#log(
-				`[fila] retomando "${job.key}" após reinício` +
+				`[fila] "${job.key}" foi INTERROMPIDO por um reinício e NÃO será ` +
+					"reexecutado automaticamente — " +
 					(job.paid
-						? " — JÁ PAGO: o executor tem de re-sondar, nunca ressubmeter"
-						: " — o registro NÃO ACUSA cobrança, o que NÃO FOI VERIFICADO: se o " +
-							"processo morreu entre a submissão e o markPaid, a cobrança existe e " +
-							"o disco não sabe. Procure o stub de retomada antes de ressubmeter"),
+						? "o registro acusa cobrança"
+						: "o registro não acusa cobrança, o que não foi verificado") +
+					". Gerar de novo é decisão do usuário.",
 			);
 		}
 		this.#state.jobs.sort((a, b) => a.seq - b.seq);
@@ -1048,6 +1216,12 @@ export class JobQueue {
 		if (this.#state.nextSeq <= maxSeq) this.#state.nextSeq = maxSeq + 1;
 		this.#prune();
 		if (touched > 0 || this.#state.jobs.length > 0) await this.#flush();
+		// Avisado DEPOIS do flush: a célula do estúdio é espelho do registro, e
+		// espelhar um estado que ainda não está em disco inverteria a ordem numa
+		// segunda queda. Só os interrompidos são notificados — os que voltaram
+		// para 'na-fila' já eram 'na-fila' aos olhos de quem lê a célula, e
+		// `#start` notifica quando eles de fato entrarem.
+		for (const job of interrompidos) this.#notify(job);
 	}
 
 	/**
@@ -1401,8 +1575,29 @@ export class JobQueue {
 		// A REGRA MAIS CARA DO SISTEMA: um job cujo id já temos nunca é
 		// ressubmetido. Retentar um job pago criaria uma segunda cobrança pela
 		// mesma coisa. Retomada re-sonda; retentativa automática, jamais.
+		//
+		// O VETO DE DINHEIRO tem três sinais, e qualquer um sozinho basta para
+		// vetar. Ele responde "pode ter saído desta máquina?", nunca "saiu?":
+		//
+		//   - `paid`     — o executor declarou a submissão. Definitivo.
+		//   - `remote`   — há identificador remoto guardado, logo houve resposta
+		//     de submissão, mesmo que `markPaid` não tenha completado.
+		//   - `resumed`  — o job atravessou um reinício com o executor já
+		//     invocado. `#reconcile` só devolve à fila quem sabe retomar de
+		//     graça, e "de graça" vale para o REDESPACHO, não para uma
+		//     retentativa em cima de um erro que a fila não entende.
+		//
+		// `kind` continua mandando primeiro, e `classifyByStatus` agora só devolve
+		// `'rate-limited'` como não-fatal: 429/529 são recusa explícita da conta —
+		// a chamada não foi processada, nada foi gerado, nada foi cobrado. Todo
+		// 5xx virou fatal, alinhando esta camada à decisão já tomada e justificada
+		// em `pixellab-pipeline/src/api.ts`. Ver `classifyByStatus`.
 		const retryable =
-			kind !== "fatal" && !job.paid && job.attempts < this.#maxAttempts;
+			kind !== "fatal" &&
+			!job.paid &&
+			job.remote === undefined &&
+			job.resumed !== true &&
+			job.attempts < this.#maxAttempts;
 
 		if (retryable) {
 			job.status = "na-fila";
@@ -1558,6 +1753,14 @@ async function readState(path: string): Promise<PersistedState> {
  * já cobrado à execução automática e paga a mesma geração de novo, enquanto
  * assumir `true` no máximo obriga o usuário a reenfileirar à mão. Na dúvida
  * sobre dinheiro, o lado seguro é o que não gasta.
+ *
+ * `attempts` segue a MESMA regra, e por um motivo novo: desde a correção da
+ * retomada ele é o sinal que decide se o executor já foi invocado (`#reconcile`).
+ * Ausente ou inválido resolve para **1** — "já rodou uma vez" — que é o lado que
+ * não reexecuta. Resolver para 0 diria "nunca saiu daqui" sobre um registro que
+ * ninguém conferiu, e ainda faria `attempts += 1` virar `NaN` em `#start`, o que
+ * desliga o teto de tentativas inteiro (`NaN < 3` é `false`, mas `NaN` também
+ * some de qualquer comparação útil na tela).
  */
 function normalizeJob(value: unknown): QueuedJob | undefined {
 	if (value === null || typeof value !== "object") return undefined;
@@ -1570,7 +1773,13 @@ function normalizeJob(value: unknown): QueuedJob | undefined {
 
 	const statusOk = typeof j.status === "string" && JOB_STATUSES.has(j.status);
 	const paid = typeof j.paid === "boolean" ? j.paid : true;
-	const job = { ...j, paid } as QueuedJob;
+	const attempts =
+		typeof j.attempts === "number" &&
+		Number.isInteger(j.attempts) &&
+		j.attempts >= 0
+			? j.attempts
+			: 1;
+	const job = { ...j, paid, attempts } as QueuedJob;
 	if (!statusOk) {
 		job.status = "falhou";
 		job.message =

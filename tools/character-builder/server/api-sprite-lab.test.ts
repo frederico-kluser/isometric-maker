@@ -34,6 +34,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -50,6 +51,11 @@ const STUDIO_PATH = join(dir, 'studio.json');
 const ASSETS_DIR = join(dir, 'assets');
 process.env['CHARACTER_BUILDER_STUDIO_JSON'] = STUDIO_PATH;
 process.env['CHARACTER_BUILDER_ASSETS_DIR'] = ASSETS_DIR;
+// A fila de jobs é persistente (server/job-queue.ts) e grava um JSON a cada
+// transição. Nenhum teste deste arquivo enfileira nada, mas a costura fica
+// declarada aqui também: sem ela um POST acrescentado depois escreveria no
+// job-queue.json REAL do tool.
+process.env['CHARACTER_BUILDER_JOB_QUEUE_JSON'] = join(dir, 'job-queue.json');
 delete process.env['PIXELLAB_SECRET'];
 
 /**
@@ -62,7 +68,14 @@ console.log = (...args: unknown[]): void => {
   console.error(...args);
 };
 
-after(() => {
+/**
+ * Fecha a fila antes de apagar o tmpdir — ver a nota longa no `after` de
+ * `api.test.ts`. Nenhum teste deste arquivo enfileira nada, mas a rota
+ * `GET /api/sprite-lab/{hash}` ABRE a fila para consultar o job, e uma fila
+ * aberta é uma fila que escreve.
+ */
+after(async () => {
+  await closeQueueForTests();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -70,7 +83,7 @@ after(() => {
 // instalação nova, em que o diretório não existe.
 
 // Import dinâmico DEPOIS do env: api.ts lê as duas variáveis na carga.
-const { handle } = await import('./api.ts');
+const { handle, closeQueueForTests } = await import('./api.ts');
 
 // ------------------------------------------------------------------ mocks de http
 
@@ -298,4 +311,71 @@ test('GET /api/sprite-lab: toda corrida publicada tem `at` de data real e config
       'candidateCount tem que contar os candidatos que viajam junto',
     );
   }
+});
+
+// ------------------------------------------------------------------ abertura da fila
+
+test('uma falha ao ABRIR a fila não fica guardada para sempre — a requisição seguinte tenta de novo', async () => {
+  // O DEFEITO: `jobQueue()` memoizava com `??=`, então a PROMESSA REJEITADA
+  // ficava no cache. Medido com o diretório em modo 555, as três requisições
+  // seguintes devolviam 500 com a mesma mensagem — inclusive depois de o disco
+  // voltar ao normal. Como `GET /api/studio` é o poll de 3 s da tela, um soluço
+  // de disco derrubava a UI até alguém reiniciar o Vite. `loadFromDisk` do
+  // estúdio faz o oposto (cai para o seed), e é esse o comportamento certo para
+  // infraestrutura do editor.
+  const HASH = '00112233445566aa';
+
+  // Esquece a fila que os testes acima abriram: o que está sob teste é a
+  // ABERTURA, e ela só acontece uma vez por promessa guardada.
+  await closeQueueForTests();
+
+  // Estado com UM job: sem ele a reconciliação não escreve nada e a abertura
+  // não teria como falhar.
+  writeFileSync(
+    join(dir, 'job-queue.json'),
+    `${JSON.stringify({
+      version: 1,
+      nextSeq: 1,
+      updatedAt: new Date(0).toISOString(),
+      jobs: [
+        {
+          key: 'sprite-lab::00112233445566aa',
+          label: 'sprite-lab · 00112233445566aa',
+          seq: 0,
+          enqueuedAt: new Date(0).toISOString(),
+          descriptor: { kind: 'sprite-lab', hash: HASH, config: { description: 'x' } },
+          cellKeys: [],
+          status: 'pronto',
+          attempts: 1,
+          paid: false,
+        },
+      ],
+    })}\n`,
+  );
+
+  chmodSync(dir, 0o555);
+  let escritaFalhou = true;
+  try {
+    const r1 = await get(`/api/sprite-lab/${HASH}`);
+    if (r1.status !== 500) {
+      // Rodando como root, ou num FS que ignora o modo: o cenário não existe
+      // nesta máquina e o teste não tem o que afirmar.
+      escritaFalhou = false;
+    } else {
+      const r2 = await get(`/api/sprite-lab/${HASH}`);
+      assert.equal(r2.status, 500, 'com o disco ainda travado, o erro se repete');
+    }
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+
+  if (!escritaFalhou) return;
+
+  // Disco de volta ao normal: a rota TEM de voltar a responder.
+  const r3 = await get(`/api/sprite-lab/${HASH}`);
+  assert.equal(
+    r3.status,
+    200,
+    `depois de o disco voltar, a fila reabre; veio ${r3.status}: ${JSON.stringify(r3.json)}`,
+  );
 });

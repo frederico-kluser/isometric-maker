@@ -41,6 +41,11 @@ const STUDIO_PATH = join(dir, 'studio.json');
 const ASSETS_DIR = join(dir, 'assets');
 process.env['CHARACTER_BUILDER_STUDIO_JSON'] = STUDIO_PATH;
 process.env['CHARACTER_BUILDER_ASSETS_DIR'] = ASSETS_DIR;
+// Terceira costura, da mesma família: a fila de jobs é PERSISTENTE agora
+// (server/job-queue.ts) e grava um JSON a cada transição. Sem isto ela gravaria
+// em tools/character-builder/job-queue.json — o estado real da máquina — e dois
+// arquivos de teste dividiriam o mesmo FIFO.
+process.env['CHARACTER_BUILDER_JOB_QUEUE_JSON'] = join(dir, 'job-queue.json');
 delete process.env['PIXELLAB_SECRET'];
 
 /**
@@ -59,7 +64,24 @@ console.log = (...args: unknown[]): void => {
   console.error(...args);
 };
 
-after(() => {
+/**
+ * FECHE A FILA ANTES DE APAGAR O TMPDIR — este `after` já derrubou um
+ * `gate.sh`.
+ *
+ * A fila de jobs (`server/job-queue.ts`) é um objeto de segundo plano: ela
+ * escreve `job-queue.json` por temp+rename a cada transição, e o último `assert`
+ * de um teste não é o último byte escrito. O `rmSync` corria com esse rename e o
+ * `after` estourava `ENOTEMPTY` — medido em **1 de 40** execuções com os três
+ * arquivos de api em paralelo, e **0 de 40** antes de a fila existir.
+ *
+ * Nenhum teste tinha como fechá-la: `api.ts` só exportava `handle`. Agora
+ * exporta `closeQueueForTests`, que fecha abortando o que estiver em voo,
+ * aguarda os executores desenrolarem e drena as duas correntes de escrita
+ * (a da fila e a do espelho job → célula).
+ */
+after(async () => {
+  const { closeQueueForTests } = await import('./api.ts');
+  await closeQueueForTests();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -947,7 +969,12 @@ test('DELETE /api/world-block: bloco EM GERAÇÃO → 409, e o bloco continua ge
     assert.equal(r.status, 202, `esperava 202, veio ${r.status}`);
     const hash = String(r.json['hash']);
 
-    await sleep(150);
+    // Espera o job ser ADMITIDO e chegar ao submit. Com a fila FIFO isso deixou
+    // de ser imediato: entre o 202 e a primeira chamada existem o limitador de
+    // taxa (2/s, que é o que faz um 429 desacelerar a fila inteira) e o recheque
+    // de idempotência, que lê disco. Um `sleep` fixo aqui vira teste instável —
+    // a condição é que o job chegue lá, não que chegue em 150 ms.
+    for (let i = 0; i < 200 && fetchCalls === 0; i += 1) await sleep(20);
     assert.ok(fetchCalls > 0, 'o job chegou à submissão e ficou pendurado lá');
 
     const d = await del(`/api/world-block/${hash}`, {});

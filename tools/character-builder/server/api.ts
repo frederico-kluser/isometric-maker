@@ -11,18 +11,22 @@
  * cardeais foi removido. Estas rotas só fazem a fiação: validam o pedido,
  * escolhem as chaves canônicas de célula e disparam o módulo certo.
  *
+ * FILA (onda 3): o registro volátil de jobs virou `server/job-queue.ts` — FIFO
+ * persistente, com admissão por peso e retomada depois de um reinício. Este
+ * arquivo é a FIAÇÃO: enfileira descritores serializáveis, despacha cada um
+ * para o módulo certo (`dispatch`), espelha o status do job nas células do
+ * estúdio (`syncJobCells`) e publica a fila em `GET /api/studio`.
+ *
  * Política de células (a UI lê o status por elas):
- *   - As rotas do wizard NÃO pré-marcam célula 'gerando': a idempotência de
- *     mannequin.ts lê o status 'pronto' da célula, e sobrescrevê-lo faria uma
- *     geração já paga sair de novo. O andamento chega à UI pelo registro de
- *     jobs, exposto em /api/studio.
- *   - O MÓDULO escreve as células de sucesso (mannequin.ts grava as três
- *     cardeais uma a uma; generatePose/generateWardrobe gravam a sua).
- *   - O spawn escreve célula só na FALHA, e só nas chaves canônicas que não
- *     estão 'pronto': uma cardeal concluída sobrevive à falha da irmã, e a
- *     re-execução refaz só o que faltou.
- *   - Poses e guarda-roupa pré-marcam 'gerando' SÓ quando a célula não está
- *     'pronto': a rota responde 200 sem spawn numa célula pronta, e
+ *   - O espelho job→célula é ÚNICO e mora em `syncJobCells`. Ele NUNCA
+ *     sobrescreve célula 'pronto' — é progresso pago — e NUNCA escreve
+ *     'pronto': o sucesso vem do MÓDULO, com os frames junto (mannequin.ts
+ *     grava a sul e as 8 direções; generatePose/generateWardrobe gravam a sua).
+ *   - A idempotência de mannequin.ts lê o status 'pronto' da célula, e
+ *     sobrescrevê-lo faria uma geração já paga sair de novo. Por isso a regra
+ *     acima é uma invariante de DINHEIRO, não de estética.
+ *   - Poses e guarda-roupa pré-marcam 'na-fila' SÓ quando a célula não está
+ *     'pronto': a rota responde 200 sem enfileirar numa célula pronta, e
  *     generatePose/generateWardrobe releem a célula no início e retornam sem
  *     chamar a API — 'pronto' é terminal de ponta a ponta, como no wizard.
  */
@@ -32,6 +36,14 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PixelLabClient, pollJob } from "../../pixellab-pipeline/src/api.ts";
+import {
+	JobQueue,
+	cellStatusFor,
+	defaultStatePath,
+	type JobContext,
+	type JobDescriptor,
+	type QueuedJob,
+} from "./job-queue.ts";
 import {
 	generateSouthFromText,
 	editSouth,
@@ -88,6 +100,7 @@ import {
 	seedStudio,
 	southKey,
 	wardrobeKey,
+	type Cell,
 	type Character,
 	type DetailOption,
 	type Keypoint,
@@ -185,15 +198,413 @@ const store: StudioStore = { load, save };
 
 // ---------------------------------------------------------------- job registry
 
-interface Job {
-	readonly key: string;
-	readonly label: string;
-	status: "gerando" | "pronto" | "falhou" | "cancelado";
-	message?: string;
-	startedAt: number;
+/**
+ * Onde a fila persiste. Mesma costura de teste do `studio.json`: a variável
+ * `CHARACTER_BUILDER_JOB_QUEUE_JSON` aponta o estado para um tmpdir e os testes
+ * nunca tocam o arquivo real (`defaultStatePath` em `server/job-queue.ts`).
+ *
+ * Lido no carregamento do módulo, como STUDIO_JSON e ASSETS — quem importa
+ * `api.ts` depois de setar o env pega o caminho de teste.
+ */
+const JOB_QUEUE_JSON = defaultStatePath();
+
+/**
+ * A fila é aberta UMA vez, preguiçosamente, e a PROMESSA é guardada.
+ *
+ * Preguiçosa e não no topo do módulo porque `JobQueue.open` lê disco,
+ * reconcilia o que um reinício deixou pela metade e volta a drenar — trabalho
+ * que não pode acontecer só por alguém ter importado `api.ts` (o
+ * `vite.config.ts` importa este arquivo, e um `npm run typecheck` não pode
+ * disparar retomada de job pago). Guardar a promessa em vez do objeto é o que
+ * garante UMA fila: dois pedidos concorrentes na primeira requisição dividem a
+ * mesma abertura, em vez de abrir duas filas sobre o mesmo arquivo de estado —
+ * o mesmo motivo do `loadPromise` do estúdio, algumas linhas acima.
+ */
+let queuePromise: Promise<JobQueue> | undefined;
+
+/**
+ * QUAIS RAMOS SABEM RETOMAR SEM SUBMETER DE NOVO — a resposta é: um.
+ *
+ * `canResumeWithoutSpending` é uma afirmação sobre o MÓDULO GERADOR, não sobre o
+ * job: ele grava um stub em disco assim que a resposta da submissão chega, e
+ * PROCURA esse stub antes de submeter qualquer coisa. É a "outra metade do
+ * contrato" que o cabeçalho de `server/job-queue.ts` exige.
+ *
+ *   - `world-block` cumpre. `world-block.ts` grava `<face>.png.pending.json`
+ *     (tile), `animation.pending.json` e o stub da v3 logo depois de cada
+ *     submissão, e cada caminho testa `existsSync(stubPath)` antes de submeter —
+ *     achando o stub, ele busca o artefato por id, que não custa nada.
+ *   - Os outros SEIS não cumprem, e nenhum deles está no escopo desta correção:
+ *     `wizard-south`, `wizard-south-edit`, `wizard-directions8` (`mannequin.ts`),
+ *     `pose` e `wardrobe` (aqui mesmo, mas sem leitura de `ctx.job.remote`) e
+ *     `sprite-lab` (`sprite-lab.ts`). Para eles a fila PARA em `'interrompido'` e
+ *     devolve a decisão ao usuário, que é o único erro barato disponível.
+ *
+ * Enquanto um desses seis não ganhar stub + leitura do stub, acrescentá-lo aqui
+ * reabre exatamente a cobrança dupla que esta função existe para fechar.
+ */
+function canResumeWithoutSpending(job: Readonly<QueuedJob>): boolean {
+	return job.descriptor.kind === "world-block";
 }
 
-const jobs = new Map<string, Job>();
+function jobQueue(): Promise<JobQueue> {
+	if (queuePromise !== undefined) return queuePromise;
+	const opening = JobQueue.open({
+		statePath: JOB_QUEUE_JSON,
+		execute: dispatch,
+		stillNeeded,
+		canResumeWithoutSpending,
+		onChange: syncJobCells,
+		// `server/api.test.ts` desvia `console.log` para stderr porque log de job
+		// em segundo plano corrompe o protocolo do `node --test`. Resolver
+		// `console.log` na hora da chamada (e não capturar a referência) é o que
+		// faz o desvio valer também para a fila.
+		onLog: (m) => console.log(m),
+	}).catch((err: unknown) => {
+		// A REJEIÇÃO NÃO PODE SER GUARDADA PARA SEMPRE, e antes era: com `??=` a
+		// promessa rejeitada ficava no cache e TODA requisição seguinte devolvia
+		// 500 com a mesma mensagem, inclusive depois de o disco voltar ao normal
+		// (medido com o diretório em modo 555). Como `GET /api/studio` é o poll de
+		// 3 s da tela, um soluço de disco derrubava a UI até alguém reiniciar o
+		// Vite. `loadFromDisk` do estúdio faz o oposto — cai para o seed — e é
+		// esse o comportamento certo para infraestrutura do editor.
+		//
+		// Limpar o cache aqui deixa a PRÓXIMA requisição tentar abrir de novo. A
+		// requisição que tomou o erro ainda recebe o erro: `throw` mantém a
+		// promessa rejeitada para quem já a estava aguardando.
+		if (queuePromise === opening) queuePromise = undefined;
+		console.log(
+			`[fila] não consegui abrir a fila de jobs: ${
+				err instanceof Error ? err.message : String(err)
+			} — a próxima requisição tenta de novo`,
+		);
+		throw err;
+	});
+	queuePromise = opening;
+	return opening;
+}
+
+/**
+ * Fecha a fila e esquece a promessa. EXISTE PARA OS TESTES, e o nome diz isso.
+ *
+ * O defeito que ela fecha: `server/api.test.ts`, `api-queue.test.ts` e
+ * `api-sprite-lab.test.ts` apagam o tmpdir no `after()`, e a fila é um objeto de
+ * segundo plano que continua escrevendo `job-queue.json` depois do último
+ * `assert`. O `rmSync` corria com o `rename` da fila e o `after` estourava
+ * `ENOTEMPTY` — medido em 1 de 40 execuções com os três arquivos em paralelo, e
+ * 0 de 40 antes da fila existir. Nenhum teste tinha como fechar a fila: `api.ts`
+ * só exportava `handle`, e o objeto vive numa variável de módulo.
+ *
+ * `abortRunning: true` porque `close` sem ele não espera executor nenhum — e é
+ * justamente o executor em voo que ainda vai escrever. Com ele, `close` aguarda
+ * as tarefas desenrolarem e a corrente de escrita drenar antes de resolver.
+ */
+export async function closeQueueForTests(): Promise<void> {
+	const pendente = queuePromise;
+	queuePromise = undefined;
+	if (pendente !== undefined) {
+		const q = await pendente.catch(() => undefined);
+		await q?.close({ abortRunning: true });
+	}
+	// A fila não é a única coisa que escreve depois do último assert: o espelho
+	// job → célula (`syncJobCells`) é uma corrente própria, e ela grava o
+	// `studio.json` no MESMO tmpdir. Fechar a fila sem drenar esta corrente
+	// deixaria a última transição escrevendo durante o `rmSync`.
+	// Duas voltas: a última transição da fila pode ter ENFILEIRADO um elo novo
+	// enquanto o anterior era aguardado.
+	await cellWriteChain;
+	await cellWriteChain;
+	await writeQueue;
+}
+
+/**
+ * Espelho job → célula do estúdio. É o ÚNICO ponto que escreve célula a partir
+ * do status de um job, e é aqui que `'na-fila'` — que existe em `model.ts` e
+ * que a UI já renderiza em quatro lugares — finalmente ganha quem o escreva.
+ *
+ * TRÊS REGRAS, e as três são sobre dinheiro:
+ *
+ *   1. **Célula `'pronto'` nunca é sobrescrita.** Ela é progresso PAGO, e a
+ *      idempotência de `mannequin.ts`, `generatePose` e `generateWardrobe` lê
+ *      exatamente esse status para NÃO chamar a API de novo. Rebaixá-la a
+ *      `'gerando'` rearmaria uma geração já cobrada.
+ *   2. **Job `'pronto'` não escreve célula.** O sucesso é do MÓDULO, que grava
+ *      a célula com os `frames` dentro. Escrever `{status:'pronto'}` daqui
+ *      apagaria os frames que acabaram de chegar.
+ *   3. **`'cancelado'` só apaga a célula quando NADA foi cobrado.** Cancelar
+ *      depois da submissão não devolve dinheiro (ADR 0023): o `remote` fica no
+ *      registro do job e a célula vira `'falhou'` com a mensagem da fila, que é
+ *      onde a UI oferece "gerar de novo" — e `enqueue` HERDA `paid`/`remote`
+ *      nesse caminho, então a retomada re-sonda em vez de ressubmeter. Apagar a
+ *      célula ali esconderia a única trilha do que já saiu da conta.
+ *
+ * Síncrono por fora (o `onChange` da fila é síncrono e isola exceções) e
+ * SERIALIZADO por dentro: duas transições em rajada gravariam o `studio.json`
+ * fora de ordem, e a segunda a terminar venceria — 'gerando' sobrescrevendo
+ * 'na-fila' é inofensivo, o contrário não.
+ */
+let cellWriteChain: Promise<void> = Promise.resolve();
+
+function syncJobCells(job: Readonly<QueuedJob>): void {
+	if (job.cellKeys.length === 0) return;
+	const status = cellStatusFor(job.status);
+	// Retrato dos campos AGORA: a corrente resolve depois, e o registro do job é
+	// mutável — ler `job.status` lá dentro leria o status de outra transição.
+	const keys = [...job.cellKeys];
+	const message = job.message;
+	const paid = job.paid;
+	const run = cellWriteChain.then(async () => {
+		const s = await load();
+		const now = new Date().toISOString();
+		let touched = false;
+		for (const ck of keys) {
+			const cur = s.cells[ck];
+			if (cur?.status === "pronto") continue; // regra 1
+			if (status === "pronto") continue; // regra 2
+			if (status === "vazio" && !paid) {
+				// regra 3, metade grátis: o job saiu da fila sem nunca ter rodado.
+				if (cur !== undefined) {
+					delete s.cells[ck];
+					touched = true;
+				}
+				continue;
+			}
+			// regra 3, metade paga: cancelado DEPOIS da submissão vira 'falhou'
+			// com a mensagem da fila, que já explica que a retomada é gratuita.
+			const alvo = status === "vazio" ? "falhou" : status;
+			const erro =
+				alvo === "falhou"
+					? (message ??
+						"o job foi cancelado depois da submissão — a geração já foi cobrada")
+					: undefined;
+			if (cur?.status === alvo && cur.error === erro) continue;
+			const next: Cell = { ...cur, key: ck, status: alvo, updatedAt: now };
+			if (erro !== undefined) next.error = erro;
+			else delete next.error;
+			s.cells[ck] = next;
+			touched = true;
+		}
+		if (touched) await save(s);
+	});
+	cellWriteChain = run.catch((err: unknown) => {
+		console.log(
+			`[fila] não consegui espelhar as células de "${job.key}": ` +
+				`${err instanceof Error ? err.message : String(err)}`,
+		);
+	});
+}
+
+/**
+ * Recheque de idempotência AVALIADO NA DRENAGEM (`JobQueueOptions.stillNeeded`):
+ * um job parado na fila pode ter virado redundante enquanto esperava. Devolver
+ * `false` conclui o job sem chamar o executor e sem gastar.
+ *
+ * Cada ramo espelha a condição TERMINAL do módulo que ele dispensaria — não uma
+ * regra inventada aqui:
+ *
+ *   - `sprite-lab`/`world-block`: manifesto em disco é o resultado inteiro; é o
+ *     mesmo cache-hit que as rotas POST já respondem com 200.
+ *   - `wizard-directions8`, `pose`, `wardrobe`: célula `'pronto'` faz o módulo
+ *     retornar antes de qualquer chamada.
+ *   - `wizard-south` e `wizard-south-edit` devolvem `true` SEMPRE, e isso é
+ *     decisão, não esquecimento: a idempotência da sul é por PROMPT, não por
+ *     célula (`generateSouthFromText` compara a descrição efetiva da versão
+ *     ativa), e `editSouth` EXIGE célula `'pronto'` para ter o que editar.
+ *     Rechecar por célula aqui descartaria calado exatamente os dois pedidos que
+ *     o usuário mais repete — regerar a sul com outro texto, e editá-la. Quando
+ *     o pedido de fato é redundante, o módulo sai sem chamar a API: o recheque
+ *     economizaria o despacho, nunca dinheiro.
+ */
+async function stillNeeded(job: Readonly<QueuedJob>): Promise<boolean> {
+	const d = job.descriptor;
+	switch (d.kind) {
+		case "sprite-lab":
+			return (await readSpriteLabResult(d.hash, ASSETS)) === null;
+		case "world-block":
+			return (await readWorldBlockResult(d.hash, ASSETS)) === null;
+		case "wizard-south":
+		case "wizard-south-edit":
+			return true;
+		case "wizard-directions8":
+		case "pose":
+		case "wardrobe": {
+			const s = await load();
+			if (job.cellKeys.length === 0) return true;
+			return !job.cellKeys.every((ck) => s.cells[ck]?.status === "pronto");
+		}
+	}
+}
+
+/**
+ * O despachante: descritor serializável → o módulo que faz o trabalho. É ele
+ * que substitui os sete closures do antigo `spawn`, e a diferença é o motivo do
+ * módulo existir: um closure morre com o processo, um descritor sobrevive em
+ * disco e pode ser redespachado depois de um reinício.
+ *
+ * OS RAMOS QUE SÓ GUARDAM IDS RELEEM O ESTÚDIO AQUI. Entre o enfileiramento e a
+ * execução o `studio.json` pode ter mudado — o personagem foi apagado, a pose
+ * removida, o lock desfeito. Isso é FALHA NOMEADA, em pt-BR, e não um `TypeError`
+ * de campo indefinido: a fila registra a mensagem, o job vira 'falhou' e a
+ * célula recebe o texto.
+ */
+async function dispatch(ctx: JobContext): Promise<void> {
+	const d = ctx.job.descriptor;
+	switch (d.kind) {
+		case "wizard-south": {
+			const s = await load();
+			const ch = requireCharacterFor(s, d.characterId);
+			// A referência de cor é reavaliada AGORA, não no enfileiramento: o
+			// descritor só guarda a que o cliente mandou explicitamente, e a sul do
+			// manequim pode ter mudado enquanto o job esperava.
+			const reference =
+				d.colorImageB64 !== undefined && d.colorImageB64.length > 0
+					? d.colorImageB64
+					: ch.id === "manequim"
+						? undefined
+						: await mannequinSouthB64(s);
+			await generateSouthFromText(
+				client(),
+				store,
+				ch.id,
+				d.description,
+				wizardOpts(reference),
+			);
+			return;
+		}
+		case "wizard-south-edit": {
+			const s = await load();
+			const ch = requireCharacterFor(s, d.characterId);
+			await editSouth(client(), store, ch.id, d.prompt, wizardOpts());
+			return;
+		}
+		case "wizard-directions8": {
+			const s = await load();
+			const ch = requireCharacterFor(s, d.characterId);
+			await generateDirections8(client(), store, ch.id, wizardOpts());
+			return;
+		}
+		case "sprite-lab": {
+			await runSpriteLab(client(), d.config, {
+				assetsDir: ASSETS,
+				ledgerPath: LEDGER_PATH,
+				onLog: (m) => console.log(m),
+			});
+			return;
+		}
+		case "world-block": {
+			await runWorldBlock(client(), d.config, {
+				assetsDir: ASSETS,
+				ledgerPath: LEDGER_PATH,
+				onLog: (m) => console.log(m),
+			});
+			return;
+		}
+		case "wardrobe": {
+			const s = await load();
+			const ch = requireCharacterFor(s, d.characterId);
+			const item = s.wardrobe.find((w) => w.id === d.wardrobeId);
+			if (!item) {
+				throw new Error(
+					`a peça "${d.wardrobeId}" foi removida do guarda-roupa enquanto o ` +
+						"pedido esperava na fila — nada foi gerado e nada foi cobrado",
+				);
+			}
+			await generateWardrobe(ch, item, ctx);
+			return;
+		}
+		case "pose": {
+			const s = await load();
+			const ch = requireCharacterFor(s, d.characterId);
+			const pose = s.poses.find((p) => p.id === d.poseId);
+			if (!pose) {
+				throw new Error(
+					`a pose "${d.poseId}" foi removida enquanto o pedido esperava na ` +
+						"fila — nada foi gerado e nada foi cobrado",
+				);
+			}
+			const lock = s.lock;
+			if (!lock) {
+				throw new Error(
+					"a configuração do manequim foi destravada enquanto o pedido " +
+						"esperava na fila — o frameCount da pose vem do lock",
+				);
+			}
+			await generatePose(ch, pose, lock, ctx);
+			return;
+		}
+	}
+}
+
+/** O personagem do descritor, ou uma falha nomeada — ele pode ter sumido. */
+function requireCharacterFor(s: Studio, characterId: string): Character {
+	const ch = s.characters.find((c) => c.id === characterId);
+	if (!ch) {
+		throw new Error(
+			`o personagem "${characterId}" foi apagado enquanto o pedido esperava ` +
+				"na fila — nada foi gerado e nada foi cobrado",
+		);
+	}
+	return ch;
+}
+
+/**
+ * Enfileira e responde. Substitui os sete `spawn(...)`: 202 com a POSIÇÃO na
+ * fila, que é o que a tela precisa para dizer "3º de 5".
+ *
+ * Recusa por duplicata NÃO é erro, exatamente como o `spawn` de hoje, que
+ * avisava no log e devolvia 202 assim mesmo: o pedido já está na fila ou
+ * rodando, e o cliente que clicou duas vezes recebe a mesma chave. Repare que a
+ * dedução de duplicata é da FILA, e ela testa contra o conjunto TERMINAL — um
+ * job `'na-fila'` conta como duplicata, que é justamente o buraco que o `Map`
+ * anterior tinha (ele só reconhecia `'gerando'`, e um segundo POST sobre um job
+ * enfileirado submetia de novo, pago).
+ */
+async function enqueueAndRespond(
+	res: ServerResponse,
+	input: {
+		readonly key: string;
+		readonly label: string;
+		readonly descriptor: JobDescriptor;
+		readonly cellKeys?: readonly string[];
+	},
+	extra: Record<string, unknown> = {},
+): Promise<void> {
+	const q = await jobQueue();
+	const outcome = await q.enqueue(input);
+	if (outcome.accepted) {
+		json(res, 202, { key: input.key, position: outcome.position, ...extra });
+		return;
+	}
+	if (outcome.reason === "closed") {
+		json(res, 503, {
+			error:
+				"a fila de geração está sendo encerrada — nada foi enfileirado e nada foi cobrado",
+			key: input.key,
+			...extra,
+		});
+		return;
+	}
+	const posicao = q.pending().findIndex((j) => j.key === input.key) + 1;
+	json(res, 202, {
+		key: input.key,
+		duplicate: true,
+		...(posicao > 0 ? { position: posicao } : {}),
+		...(outcome.job !== undefined ? { status: outcome.job.status } : {}),
+		...extra,
+	});
+}
+
+/**
+ * Hashes de bloco apagados NESTE processo. Existe por uma lacuna conhecida:
+ * `JobQueue` não expõe como esquecer um registro terminal, e sem isso um
+ * `GET /api/world-block/{hash}` depois do DELETE responderia 'falhou' sobre um
+ * hash que não está em lugar nenhum — o registro é persistente agora, o `Map`
+ * volátil de antes se resolvia sozinho no reinício. Este conjunto reproduz
+ * exatamente o comportamento antigo (`jobs.delete`), inclusive na duração: ele
+ * também morre com o processo. Ver o handoff — o conserto de verdade é um
+ * `JobQueue.forget(key)`, e a fila está fora do escopo desta onda.
+ */
+const forgottenWorldBlocks = new Set<string>();
 
 function client(): PixelLabClient {
 	const secret = process.env["PIXELLAB_SECRET"];
@@ -314,11 +725,19 @@ async function mannequinSouthB64(s: Studio): Promise<string | undefined> {
  * Célula 'pronto' é terminal: retorna sem chamar a API. A UI trata 'pronto'
  * como final, mas o servidor é a trava de verdade — um clique duplo não pode
  * cobrar de novo (mesma leitura idempotente que mannequin.ts faz).
+ *
+ * `ctx` é o contexto da fila, e ele fecha as duas pontas que o `spawn` deixava
+ * abertas: o `signal` chega ao `submit` e a cada `pollJob`, então cancelar
+ * interrompe a chamada HTTP em voo em vez de só relabelar o registro; e
+ * `markPaid` grava `paid: true` mais os `background_job_id` ANTES do primeiro
+ * poll, que é a janela em que o dinheiro já saiu e o disco ainda não sabe
+ * (ADR 0023).
  */
 async function generatePose(
 	character: Character,
 	pose: Pose,
 	lock: MannequinLock,
+	ctx: JobContext,
 ): Promise<void> {
 	const key = cellKey(character.id, pose.id);
 	const s = await load();
@@ -357,15 +776,25 @@ async function generatePose(
 	const res = await c.submit<Record<string, unknown>>(
 		"animate-character",
 		body,
+		{ signal: ctx.signal },
 	);
 	// Animation queues one job PER DIRECTION and returns a list of ids.
 	const ids = collectJobIds(res.data);
+	// markPaid ANTES do cheque dos ids, e AGUARDADO: uma submissão aceita já foi
+	// cobrada mesmo quando a resposta vem sem id nenhum. Anotar só no caminho
+	// feliz deixaria o caso patológico marcado como grátis, e a fila retentaria
+	// — segunda cobrança pela mesma animação.
+	await ctx.markPaid(
+		ids.length > 0
+			? { jobIds: ids }
+			: { note: "submit aceito sem background_job_id na resposta" },
+	);
 	if (ids.length === 0) throw new Error("a API não devolveu nenhum job id");
 
 	// Poll das direções EM PARALELO: eram sequenciais, e cada direção leva
 	// minutos — a espera total era a soma dos tempos, agora é o máximo.
 	const polledAll = await Promise.all(
-		ids.map((id) => pollJob(c, id, { timeoutMs: 900_000 })),
+		ids.map((id) => pollJob(c, id, { timeoutMs: 900_000, signal: ctx.signal })),
 	);
 	const images: string[] = [];
 	for (const polled of polledAll) {
@@ -385,10 +814,16 @@ async function generatePose(
 	await save(cur);
 }
 
-/** Equipment, as a character state derived from a finished body. */
+/**
+ * Equipment, as a character state derived from a finished body.
+ *
+ * Mesmo contrato de `ctx` que `generatePose`: signal repassado ao `submit` e ao
+ * `pollJob`, `markPaid` aguardado logo depois da submissão.
+ */
 async function generateWardrobe(
 	character: Character,
 	item: WardrobeItem,
+	ctx: JobContext,
 ): Promise<void> {
 	const key = wardrobeKey(character.id, item.id);
 	// Idempotency lock, same as generatePose: 'pronto' is terminal, return
@@ -414,18 +849,36 @@ async function generateWardrobe(
 	const res = await c.submit<{
 		background_job_id?: string;
 		character_id?: string;
-	}>("create-character-state", {
-		character_id: character.remoteId,
-		edit_description: item.editDescription,
-		seed: item.seed,
-		no_background: true,
-		// Snapping to the source palette is what stops each piece drifting in colour.
-		use_color_palette_from_reference: item.keepPalette,
-	});
+	}>(
+		"create-character-state",
+		{
+			character_id: character.remoteId,
+			edit_description: item.editDescription,
+			seed: item.seed,
+			no_background: true,
+			// Snapping to the source palette is what stops each piece drifting in colour.
+			use_color_palette_from_reference: item.keepPalette,
+		},
+		{ signal: ctx.signal },
+	);
 	const jobId = res.data?.background_job_id;
+	// Idem generatePose: o dinheiro saiu na submissão aceita, e o `character_id`
+	// devolvido é o caminho de volta ao estado já cobrado mesmo sem job id.
+	await ctx.markPaid({
+		...(jobId !== undefined ? { jobIds: [jobId] } : {}),
+		...(res.data?.character_id !== undefined
+			? { characterId: res.data.character_id }
+			: {}),
+		...(jobId === undefined
+			? { note: "submit aceito sem background_job_id na resposta" }
+			: {}),
+	});
 	if (!jobId) throw new Error("a API não devolveu background_job_id");
 
-	const polled = await pollJob(c, jobId, { timeoutMs: 900_000 });
+	const polled = await pollJob(c, jobId, {
+		timeoutMs: 900_000,
+		signal: ctx.signal,
+	});
 	if (!polled.ok)
 		throw new Error(
 			polled.reason === "timeout"
@@ -468,61 +921,6 @@ function collectJobIds(payload: unknown): string[] {
 	};
 	walk(payload);
 	return [...new Set(ids)];
-}
-
-/**
- * Runs a generation in the background and records its outcome.
- *
- * `cellKeys` são as células canônicas que a UI lê (southKey, cardinalKey×3,
- * directions8Key, cellKey de pose, wardrobeKey). O MÓDULO escreve as células
- * de sucesso; o spawn escreve só na falha, e só nas que não estão 'pronto' —
- * o progresso parcial (uma cardeal concluída, por exemplo) sobrevive à falha
- * da irmã, e a re-execução refaz só o que faltou.
- */
-function spawn(
-	key: string,
-	label: string,
-	work: () => Promise<void>,
-	cellKeys: readonly string[] = [key],
-): void {
-	if (jobs.get(key)?.status === "gerando") {
-		console.warn(`spawn: job "${key}" já está gerando — submissão duplicada ignorada`);
-		return;
-	}
-	jobs.set(key, { key, label, status: "gerando", startedAt: Date.now() });
-	void (async () => {
-		try {
-			await work();
-			// Só atualiza se o job ainda está gerando — um cancelamento entre o
-			// fim do work e aqui troca o status para "cancelado".
-			if (jobs.get(key)?.status === "gerando") {
-				jobs.set(key, { key, label, status: "pronto", startedAt: Date.now() });
-			}
-		} catch (err) {
-			// Idem: falha de job cancelado é esperada (a chamada remota pode ter
-			// sido abortada) — não sobrescreve o status de cancelado.
-			if (jobs.get(key)?.status !== "gerando") return;
-			const message = err instanceof Error ? err.message : String(err);
-			jobs.set(key, {
-				key,
-				label,
-				status: "falhou",
-				message,
-				startedAt: Date.now(),
-			});
-			const s = await load();
-			for (const ck of cellKeys) {
-				if (s.cells[ck]?.status === "pronto") continue;
-				s.cells[ck] = {
-					key: ck,
-					status: "falhou",
-					error: message,
-					updatedAt: new Date().toISOString(),
-				};
-			}
-			await save(s);
-		}
-	})();
 }
 
 // ---------------------------------------------------------------- pacote de projeto (ADR 0033)
@@ -809,9 +1207,18 @@ export async function handle(
 		// ---- state -------------------------------------------------------------
 		if (url.pathname === "/api/studio" && req.method === "GET") {
 			const s = await load();
+			const q = await jobQueue();
 			json(res, 200, {
 				...s,
-				jobs: Object.fromEntries([...jobs].map(([k, v]) => [k, v])),
+				// `StudioJobView` é SUPERCONJUNTO do `Job` que esta rota publicava
+				// (key, label, status, message?, startedAt), então a UI existente
+				// continua lendo sem mudança — e ganha `queuePosition`, `kind`,
+				// `paid` e `seq` de graça. A CHAVE é a mesma: `src/app/job-scope.ts`
+				// deriva o dono do job dela, e mudá-la quebraria o bloqueio do wizard.
+				jobs: q.toStudioJobs(),
+				// O estado do teto de admissão, para a tela da onda seguinte poder
+				// dizer "4 simultâneas" E de onde esse 4 saiu.
+				queue: q.stats(),
 				hasToken: Boolean(process.env["PIXELLAB_SECRET"]),
 				// existsSync de propósito: validar os 12 PNGs do bundle a cada poll
 				// de 3s seria I/O jogado fora — a validação de verdade roda no import.
@@ -829,27 +1236,49 @@ export async function handle(
 				badRequest(res, "chave do job é obrigatória");
 				return true;
 			}
-			const job = jobs.get(jobKey);
-			if (!job) {
+			// Cancelamento de VERDADE nos dois estados: enfileirado sai sem nunca
+			// ter rodado (nada gasto), em execução tem o AbortSignal abortado —
+			// e o signal chega às chamadas HTTP das poses e das peças, então lá a
+			// interrupção é real e não só um relabel do registro.
+			//
+			// LIMITAÇÃO CONHECIDA, E NÃO CORRIGIDA AQUI: o `ctx.signal` só é
+			// repassado em DOIS dos sete ramos — `pose` e `wardrobe`, logo abaixo
+			// neste arquivo. Nos outros cinco (`wizard-south`, `wizard-south-edit`,
+			// `wizard-directions8`, `sprite-lab`, `world-block`) o executor não
+			// recebe signal nenhum, então `#run` fica aguardando um trabalho que
+			// ninguém interrompeu: o job aparece 'cancelado' na hora para o usuário,
+			// mas continua OCUPANDO a vaga do semáforo até o módulo terminar
+			// sozinho — até 15 min num `sprite-lab`. Não custa dinheiro (a
+			// submissão daquele job já saiu ou não vai sair), custa VAGA: com o teto
+			// default de 8 chamadas, cinco cancelamentos cosméticos deixam a fila
+			// com três.
+			//
+			// Fechar isso é levar `ctx.signal` para `mannequin.ts`, `sprite-lab.ts`
+			// e `world-block.ts` — três módulos FORA do escopo desta correção, e um
+			// deles sob edição por outro agente. Fica registrado em vez de
+			// contornado com uma gambiarra que abandonasse o executor em voo.
+			const q = await jobQueue();
+			const outcome = await q.cancel(jobKey);
+			if (outcome.result === "not-found") {
 				json(res, 404, { error: `job "${jobKey}" não encontrado` });
 				return true;
 			}
-			if (job.status !== "gerando") {
-				json(res, 200, { ok: true, status: job.status });
+			if (outcome.result === "already-finished") {
+				json(res, 200, { ok: true, status: outcome.job.status });
 				return true;
 			}
-			jobs.set(jobKey, { ...job, status: "cancelado" });
-			// Reseta as células associadas que não estão prontas: uma célula
-			// "vazio" ou "na-fila" volta ao estado inicial, e o wizard vai
-			// oferecer o botão de gerar de novo. Células "pronto" não são
-			// tocadas — são o progresso pago que sobrevive ao cancelamento.
-			const s = await load();
-			const cell = s.cells[jobKey];
-			if (cell && cell.status !== "pronto") {
-				delete s.cells[jobKey];
-			}
-			await save(s);
-			json(res, 200, { ok: true, status: "cancelado" });
+			// A célula é escrita pelo espelho (`syncJobCells`), que já conhece a
+			// regra de dinheiro: apaga quando NADA foi cobrado, e deixa 'falhou'
+			// com a mensagem da fila quando o cancelamento veio DEPOIS da
+			// submissão — ali o `remote` guardado é o caminho de volta ao que já
+			// foi pago, e a UI precisa do botão de retomar, não de uma célula vazia.
+			json(res, 200, {
+				ok: true,
+				status: "cancelado",
+				...(outcome.result === "aborted"
+					? { aborted: true, paid: outcome.paid }
+					: { aborted: false, paid: false }),
+			});
 			return true;
 		}
 
@@ -1067,24 +1496,26 @@ export async function handle(
 				await writeFile(refPath, buf);
 			}
 			// colorImageB64 explícito do cliente (ex.: referência de cor customizada)
-			// tem precedência sobre a sul do manequim do estúdio.
-			const reference =
-				b.colorImageB64 && b.colorImageB64.length > 0
-					? b.colorImageB64
-					: ch.id === "manequim"
-						? undefined
-						: await mannequinSouthB64(s);
+			// tem precedência sobre a sul do manequim do estúdio — e a decisão
+			// mudou de lugar: ela agora acontece no DESPACHO (ver `dispatch`),
+			// porque a sul do manequim pode ser gerada enquanto este pedido espera
+			// na fila, e ler o disco aqui congelaria a ausência dela.
 			const key = southKey(ch.id);
-			spawn(key, `${ch.label} · sul`, () =>
-				generateSouthFromText(
-					client(),
-					store,
-					ch.id,
+			await enqueueAndRespond(res, {
+				key,
+				label: `${ch.label} · sul`,
+				descriptor: {
+					kind: "wizard-south",
+					characterId: ch.id,
 					description,
-					wizardOpts(reference),
-				),
-			);
-			json(res, 202, { key });
+					// Só a referência EXPLÍCITA do cliente entra no descritor; a sul do
+					// manequim é relida no despacho, que é quando ela vale.
+					...(b.colorImageB64 !== undefined && b.colorImageB64.length > 0
+						? { colorImageB64: b.colorImageB64 }
+						: {}),
+				},
+				cellKeys: [key],
+			});
 			return true;
 		}
 
@@ -1105,10 +1536,12 @@ export async function handle(
 			const ch = resolveWizardCharacter(s, res, characterId);
 			if (!ch) return true;
 			const key = southKey(ch.id);
-			spawn(key, `${ch.label} · edição da sul`, () =>
-				editSouth(client(), store, ch.id, prompt, wizardOpts()),
-			);
-			json(res, 202, { key });
+			await enqueueAndRespond(res, {
+				key,
+				label: `${ch.label} · edição da sul`,
+				descriptor: { kind: "wizard-south-edit", characterId: ch.id, prompt },
+				cellKeys: [key],
+			});
 			return true;
 		}
 
@@ -1175,10 +1608,12 @@ export async function handle(
 			const ch = resolveWizardCharacter(s, res, b.characterId);
 			if (!ch) return true;
 			const key = directions8Key(ch.id);
-			spawn(key, `${ch.label} · 8 direções`, () =>
-				generateDirections8(client(), store, ch.id, wizardOpts()),
-			);
-			json(res, 202, { key });
+			await enqueueAndRespond(res, {
+				key,
+				label: `${ch.label} · 8 direções`,
+				descriptor: { kind: "wizard-directions8", characterId: ch.id },
+				cellKeys: [key],
+			});
 			return true;
 		}
 
@@ -1336,22 +1771,27 @@ export async function handle(
 				json(res, 200, { status: "pronto", result: cached });
 				return true;
 			}
+			// A CHAVE continua sendo exatamente `sprite-lab::<hash>`: é o único
+			// caminho de volta a uma corrida em voo depois de um remount da tela
+			// (`src/app/screens/laboratorio/studio-recovery.ts` extrai o hash
+			// fatiando a chave), e `src/app/job-scope.ts` deriva o dono do job dela.
 			const key = `sprite-lab::${hash}`;
 			// cellKeys []: a bancada não tem célula no studio — o andamento chega
 			// à UI pelo registro de jobs e o resultado pelo GET abaixo.
-			spawn(
-				key,
-				`sprite-lab · ${hash}`,
-				async () => {
-					await runSpriteLab(client(), b, {
-						assetsDir: ASSETS,
-						ledgerPath: LEDGER_PATH,
-						onLog: (m) => console.log(m),
-					});
+			await enqueueAndRespond(
+				res,
+				{
+					key,
+					label: `sprite-lab · ${hash}`,
+					// A config INTEIRA vai no descritor, e isso é requisito: a bancada
+					// não tem entidade no estúdio para reler, e `runSpriteLab` grava
+					// `config` no manifesto (`runConfigOf`) — reexecutar por outro
+					// caminho gravaria outro manifesto.
+					descriptor: { kind: "sprite-lab", hash, config: b },
+					cellKeys: [],
 				},
-				[],
+				{ hash },
 			);
-			json(res, 202, { key, hash });
 			return true;
 		}
 
@@ -1390,26 +1830,47 @@ export async function handle(
 				json(res, 200, { status: "pronto", result });
 				return true;
 			}
-			const job = jobs.get(`sprite-lab::${hash}`);
-			if (job?.status === "falhou") {
+			const q = await jobQueue();
+			const job = q.get(`sprite-lab::${hash}`);
+			// `'interrompido'` viaja como `'falhou'`: o vocabulário desta rota tem
+			// quatro valores e a tela os consome LITERALMENTE — um quinto cairia no
+			// `throw` do cliente e mataria o `setInterval` da sondagem. O que
+			// distingue os dois casos é o texto, que vem do `message` do job e já
+			// diz que a geração pode ter sido cobrada. Terminal dos dois jeitos: a
+			// tela para de sondar, que é o certo.
+			if (job?.status === "falhou" || job?.status === "interrompido") {
 				json(res, 200, {
 					status: "falhou",
 					error: job.message ?? "a geração falhou",
 				});
 				return true;
 			}
-			if (job?.status === "gerando") {
-				json(res, 200, { status: "gerando" });
+			// ENFILEIRADO TAMBÉM É ANDAMENTO. Um job que ainda não entrou não pode
+			// cair no ramo 'desconhecido' logo abaixo: a UI trata aquele estado
+			// como perda definitiva e para de sondar, e o job rodaria sozinho com
+			// a tela dizendo que falhou. O status NOMEADO continua sendo
+			// 'gerando' — o vocabulário desta rota tem quatro valores e a tela os
+			// consome literalmente — e a distinção viaja em `queued`/`position`,
+			// que são aditivos: quem não os lê continua vendo o que via.
+			if (job?.status === "gerando" || job?.status === "na-fila") {
+				const posicao = q.pending().findIndex((j) => j.key === job.key) + 1;
+				json(res, 200, {
+					status: "gerando",
+					queued: job.status === "na-fila",
+					...(posicao > 0 ? { position: posicao } : {}),
+				});
 				return true;
 			}
-			// Sem manifesto e sem job: ou o servidor reiniciou no meio (o mapa
-			// de jobs é volátil), ou o hash nunca rodou aqui. A UI trata como
-			// perdido na hora, em vez de esperar um tempo arbitrário.
+			// Sem manifesto e sem job. Com a fila persistente isto deixou de ser o
+			// caso comum — um reinício não perde mais o registro, ele é
+			// reconciliado e volta a drenar. O ramo FICA porque um hash que nunca
+			// rodou nesta máquina continua chegando aqui.
 			json(res, 200, {
 				status: "desconhecido",
 				error:
 					`não há resultado nem job para o sprite-lab "${hash}" — ` +
-					"o servidor pode ter reiniciado durante a geração. " +
+					"esta configuração nunca rodou neste servidor, ou o registro dela já " +
+					"foi podado do histórico. " +
 					"Gerar de novo com a mesma configuração reaproveita o que já está em disco.",
 			});
 			return true;
@@ -1437,19 +1898,19 @@ export async function handle(
 				return true;
 			}
 			const key = `world-block::${hash}`;
-			spawn(
-				key,
-				`world-block · ${hash}`,
-				async () => {
-					await runWorldBlock(client(), b, {
-						assetsDir: ASSETS,
-						ledgerPath: LEDGER_PATH,
-						onLog: (m) => console.log(m),
-					});
+			// Um pedido novo para um hash apagado neste processo volta a ser
+			// visível: o "esquecimento" do DELETE valia para o registro antigo.
+			forgottenWorldBlocks.delete(hash);
+			await enqueueAndRespond(
+				res,
+				{
+					key,
+					label: `world-block · ${hash}`,
+					descriptor: { kind: "world-block", hash, config: b },
+					cellKeys: [],
 				},
-				[],
+				{ hash },
 			);
-			json(res, 202, { key, hash });
 			return true;
 		}
 
@@ -1466,23 +1927,34 @@ export async function handle(
 				json(res, 200, { status: "pronto", result });
 				return true;
 			}
-			const job = jobs.get(`world-block::${hash}`);
-			if (job?.status === "falhou") {
+			const q = await jobQueue();
+			const job = forgottenWorldBlocks.has(hash)
+				? undefined
+				: q.get(`world-block::${hash}`);
+			// Mesma colapsagem do sprite-lab, e pelo mesmo motivo: ver lá.
+			if (job?.status === "falhou" || job?.status === "interrompido") {
 				json(res, 200, {
 					status: "falhou",
 					error: job.message ?? "a geração falhou",
 				});
 				return true;
 			}
-			if (job?.status === "gerando") {
-				json(res, 200, { status: "gerando" });
+			// Mesma regra do sprite-lab: enfileirado é andamento, não perda.
+			if (job?.status === "gerando" || job?.status === "na-fila") {
+				const posicao = q.pending().findIndex((j) => j.key === job.key) + 1;
+				json(res, 200, {
+					status: "gerando",
+					queued: job.status === "na-fila",
+					...(posicao > 0 ? { position: posicao } : {}),
+				});
 				return true;
 			}
 			json(res, 200, {
 				status: "desconhecido",
 				error:
-					`não há bloco nem job para "${hash}" — o servidor pode ter reiniciado ` +
-					"durante a geração. Gerar de novo com a mesma configuração reaproveita o disco.",
+					`não há bloco nem job para "${hash}" — esta configuração nunca rodou ` +
+					"neste servidor, ou o bloco foi apagado. Gerar de novo com a mesma " +
+					"configuração reaproveita o disco.",
 			});
 			return true;
 		}
@@ -1511,25 +1983,40 @@ export async function handle(
 			// dinheiro: o diretório guarda os stubs (`*.pending.json`,
 			// `v3/character.json`) que são o caminho de volta GRATUITO ao que a
 			// PixelLab já cobrou, e remover arquivos embaixo de runWorldBlock
-			// deixaria o bloco meio gravado. Não há como cancelar o job (o
-			// registro de spawn não tem cancelamento e a chamada remota já
-			// saiu), então recusar é a única resposta honesta.
-			if (jobs.get(`world-block::${hash}`)?.status === "gerando") {
+			// deixaria o bloco meio gravado.
+			//
+			// UM JOB 'na-fila' TEM DE ENTRAR NESTA GUARDA, e antes não entrava:
+			// a checagem testava só "gerando", então um bloco enfileirado era
+			// apagado e sobrava um job órfão apontando para um diretório que já
+			// não existia — ele chegaria na frente da fila e regeraria o bloco
+			// que o usuário acabou de mandar apagar, pagando por isso. Enfileirado
+			// ainda não gastou nada, então aqui o certo não é recusar: é CANCELAR
+			// (a fila devolve 'removed', sem cobrança) e seguir apagando.
+			const q = await jobQueue();
+			const jobKey = `world-block::${hash}`;
+			const emVoo = q.get(jobKey);
+			if (emVoo?.status === "gerando") {
 				json(res, 409, {
 					error:
-						`o bloco "${hash}" está sendo gerado agora — espere terminar para apagar. ` +
+						`o bloco "${hash}" está sendo gerado agora — espere terminar ou cancele o job ` +
+						`(DELETE /api/jobs/${jobKey}) para apagar. ` +
 						"A geração já foi cobrada e apagar no meio jogaria fora o caminho de volta ao que foi pago.",
 					code: "block-generating",
 				});
 				return true;
 			}
+			let cancelledQueued = false;
+			if (emVoo?.status === "na-fila") {
+				const cancel = await q.cancel(jobKey);
+				cancelledQueued = cancel.result === "removed";
+			}
 
 			const removal = await deleteWorldBlock(ASSETS, hash);
 			// O bloco não existe mais: o registro do job dele também não deve
-			// existir, senão um GET posterior responderia 'falhou' sobre um
-			// hash que não está em lugar nenhum.
-			jobs.delete(`world-block::${hash}`);
-			json(res, 200, { ok: true, ...removal });
+			// aparecer, senão um GET posterior responderia 'falhou' sobre um
+			// hash que não está em lugar nenhum. Ver `forgottenWorldBlocks`.
+			forgottenWorldBlocks.add(hash);
+			json(res, 200, { ok: true, ...removal, ...(cancelledQueued ? { cancelledQueued } : {}) });
 			return true;
 		}
 
@@ -1685,16 +2172,30 @@ export async function handle(
 				badRequest(res, "personagens embutidos não podem ser deletados");
 				return true;
 			}
-			// Bloqueia se houver QUALQUER job gerando para este personagem.
+			// Bloqueia se houver QUALQUER job VIVO para este personagem — e vivo
+			// inclui 'na-fila'. Testar só 'gerando' deixava apagar um personagem
+			// com pedido enfileirado: o job continuava na fila, chegava na frente e
+			// despachava contra um personagem que não existe mais. Hoje isso é
+			// falha nomeada (`requireCharacterFor`) e não gasta, mas a resposta
+			// certa é não deixar o usuário criar o órfão.
 			const prefix = b.characterId + "::";
-			for (const [jobKey, job] of jobs) {
-				if (jobKey.startsWith(prefix) && job.status === "gerando") {
-					json(res, 409, {
-						error: `o personagem "${ch.label}" está sendo gerado agora — espere terminar para apagar`,
-						code: "character-generating",
-					});
-					return true;
-				}
+			const q = await jobQueue();
+			const vivo = q
+				.list()
+				.find(
+					(j) =>
+						j.key.startsWith(prefix) &&
+						(j.status === "gerando" || j.status === "na-fila"),
+				);
+			if (vivo) {
+				json(res, 409, {
+					error:
+						vivo.status === "gerando"
+							? `o personagem "${ch.label}" está sendo gerado agora — espere terminar para apagar`
+							: `o personagem "${ch.label}" tem pedido na fila ("${vivo.label}") — cancele o job ou espere para apagar`,
+					code: "character-generating",
+				});
+				return true;
 			}
 			// Remove o personagem do array.
 			s.characters.splice(idx, 1);
@@ -1932,16 +2433,26 @@ export async function handle(
 					json(res, 200, { key, status: "pronto" });
 					return true;
 				}
+				// Pré-marca 'na-fila', não 'gerando': é a verdade, e a célula tem de
+				// mudar ANTES do 202 — o espelho `syncJobCells` escreve depois, e
+				// uma sondagem caindo nessa janela veria a célula vazia e ofereceria
+				// o botão de gerar de novo sobre um pedido que já está na fila.
 				s.cells[key] = {
 					key,
-					status: "gerando",
+					status: "na-fila",
 					updatedAt: new Date().toISOString(),
 				};
 				await save(s);
-				spawn(key, `${ch.label} · ${item.label}`, () =>
-					generateWardrobe(ch, item),
-				);
-				json(res, 202, { key });
+				await enqueueAndRespond(res, {
+					key,
+					label: `${ch.label} · ${item.label}`,
+					descriptor: {
+						kind: "wardrobe",
+						characterId: ch.id,
+						wardrobeId: item.id,
+					},
+					cellKeys: [key],
+				});
 				return true;
 			}
 
@@ -1974,16 +2485,19 @@ export async function handle(
 				json(res, 200, { key, status: "pronto" });
 				return true;
 			}
+			// Mesma pré-marcação 'na-fila' do ramo do guarda-roupa, pelo mesmo motivo.
 			s.cells[key] = {
 				key,
-				status: "gerando",
+				status: "na-fila",
 				updatedAt: new Date().toISOString(),
 			};
 			await save(s);
-			spawn(key, `${ch.label} · ${pose.label}`, () =>
-				generatePose(ch, pose, lock),
-			);
-			json(res, 202, { key });
+			await enqueueAndRespond(res, {
+				key,
+				label: `${ch.label} · ${pose.label}`,
+				descriptor: { kind: "pose", characterId: ch.id, poseId: pose.id },
+				cellKeys: [key],
+			});
 			return true;
 		}
 
