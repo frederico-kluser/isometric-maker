@@ -36,7 +36,7 @@
  *     Custa 0.05 gerações extra e devolve enhanced_prompt + enhance_usage.
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { PixelLabClient, Usage } from '../../pixellab-pipeline/src/api.ts';
@@ -105,6 +105,63 @@ export interface SpriteLabResult {
   readonly candidates: readonly SpriteLabCandidate[];
   /** true quando NENHUMA submissão saiu — todos os candidatos vieram do disco. */
   readonly fromCache: boolean;
+}
+
+// ---- catálogo das corridas em disco (GET /api/sprite-lab)
+
+/**
+ * Config NORMALIZADA de uma corrida, gravada no manifesto a partir de 2026-08-04.
+ *
+ * Existe por um motivo só: o `hash` é sha256 da config feito NO SERVIDOR e é
+ * irreversível — sem esta cópia, uma corrida em disco não tem como dizer o que
+ * a gerou, e a tela que a recupera não consegue nem resumir a execução nem
+ * remontar o bundle de export. Manifestos gravados antes disso não têm o campo,
+ * e `SpriteLabRunSummary.config` fica ausente para eles: é dado que não existe,
+ * não dado a adivinhar.
+ *
+ * Os bytes da `reference_image` ficam DE FORA de propósito — a config
+ * normalizada é metadado leve, e o bundle de export
+ * (`sprite-lab-south`) nunca carregou a referência.
+ */
+export interface SpriteLabRunConfig {
+  readonly description: string;
+  readonly view: ViewOption;
+  readonly size: number;
+  readonly outputs: number;
+  readonly noBackground: boolean;
+  readonly enhancePrompt: boolean;
+  readonly seed?: number;
+  readonly outline?: OutlineOption;
+  readonly detail?: DetailOption;
+  readonly templateId?: TemplateOption;
+  /** true quando a corrida usou reference_image (os bytes não são guardados). */
+  readonly hadReference: boolean;
+}
+
+export interface SpriteLabRunCandidate {
+  readonly index: number;
+  readonly seed: number;
+  /**
+   * Caminho servido por `serveGeneratedAsset` (api.ts) — o mesmo PNG que
+   * `readSpriteLabResult` devolve em base64. É URL e não base64 porque o
+   * catálogo pode listar dezenas de corridas e a miniatura de cada uma não
+   * precisa trafegar embutida num JSON.
+   */
+  readonly southUrl: string;
+}
+
+/** Uma corrida COMPLETA em disco — só entra quando todo PNG do manifesto existe. */
+export interface SpriteLabRunSummary {
+  readonly hash: string;
+  /**
+   * ISO da última escrita do manifesto. O manifesto v1 não grava data própria,
+   * então isto é o mtime do arquivo — derivado, não declarado.
+   */
+  readonly at: string;
+  readonly candidateCount: number;
+  readonly candidates: readonly SpriteLabRunCandidate[];
+  /** Ausente nos manifestos gravados antes de a config passar a ser guardada. */
+  readonly config?: SpriteLabRunConfig;
 }
 
 interface CreateCharacterV3Response {
@@ -349,6 +406,115 @@ interface SpriteLabManifest {
     readonly characterId?: string;
     readonly usage?: SpriteLabCandidate['usage'];
   }>;
+  /** Ausente nos manifestos anteriores a 2026-08-04. Ver SpriteLabRunConfig. */
+  readonly config?: SpriteLabRunConfig;
+}
+
+/** Manifesto do hash, ou null quando não existe, não é JSON ou não bate. */
+async function readManifestFile(
+  assetsDir: string,
+  hash: string,
+): Promise<SpriteLabManifest | null> {
+  const path = manifestPath(assetsDir, hash);
+  if (!existsSync(path)) return null;
+  let manifest: SpriteLabManifest;
+  try {
+    manifest = JSON.parse(await readFile(path, 'utf8')) as SpriteLabManifest;
+  } catch {
+    return null;
+  }
+  if (manifest.hash !== hash || !Array.isArray(manifest.candidates)) return null;
+  return manifest;
+}
+
+/** Config normalizada que vai ao manifesto — defaults já aplicados. */
+function runConfigOf(config: SpriteLabConfig): SpriteLabRunConfig {
+  return {
+    description: config.description,
+    view: config.view ?? 'low top-down',
+    size: config.size,
+    outputs: config.outputs,
+    noBackground: config.noBackground ?? true,
+    enhancePrompt: config.enhancePrompt ?? false,
+    hadReference: config.referenceImageBase64 !== undefined,
+    ...(config.seed !== undefined ? { seed: config.seed } : {}),
+    ...(config.outline !== undefined ? { outline: config.outline } : {}),
+    ...(config.detail !== undefined ? { detail: config.detail } : {}),
+    ...(config.templateId !== undefined ? { templateId: config.templateId } : {}),
+  };
+}
+
+/**
+ * Catálogo das corridas COMPLETAS em disco — espelho de `listWorldBlocks`.
+ *
+ * Existe porque o `hash` de uma corrida só voltava uma vez, no corpo do 202 do
+ * POST, e vivia daí em diante apenas em estado React: trocar de aba desmontava
+ * o painel e a sprite paga sumia da tela sem ter sumido do disco. Com esta
+ * rota a recuperação é servidor-autoritativa, como já era a paleta de blocos.
+ *
+ * Uma corrida sem TODOS os PNGs do manifesto fica de fora, pela mesma regra de
+ * `readSpriteLabResult`: resultado incompleto não é resultado.
+ *
+ * Ordem: mais recente primeiro, pelo mtime do manifesto.
+ */
+export async function listSpriteLabRuns(
+  assetsDir: string,
+): Promise<SpriteLabRunSummary[]> {
+  const root = join(assetsDir, 'sprite-lab');
+  if (!existsSync(root)) return [];
+
+  let entries: string[];
+  try {
+    entries = await readdir(root);
+  } catch {
+    return [];
+  }
+
+  const out: SpriteLabRunSummary[] = [];
+  for (const name of entries) {
+    // Só manifestos: os diretórios `<hash>-cand<i>` ficam de fora, e um hash
+    // fora do formato hex-16 nunca foi produzido por aqui.
+    const m = /^([a-f0-9]{16})\.json$/i.exec(name);
+    if (m === null) continue;
+    const hash = m[1];
+    if (hash === undefined) continue;
+
+    const manifest = await readManifestFile(assetsDir, hash);
+    if (manifest === null) continue;
+
+    const candidates: SpriteLabRunCandidate[] = [];
+    let complete = true;
+    for (const c of manifest.candidates) {
+      if (!existsSync(southPngPath(assetsDir, hash, c.index))) {
+        complete = false;
+        break;
+      }
+      candidates.push({
+        index: c.index,
+        seed: c.seed,
+        southUrl: `/sprite-lab/${hash}-cand${c.index}/south-00.png`,
+      });
+    }
+    if (!complete || candidates.length === 0) continue;
+
+    let at: string;
+    try {
+      at = (await stat(manifestPath(assetsDir, hash))).mtime.toISOString();
+    } catch {
+      continue;
+    }
+
+    out.push({
+      hash,
+      at,
+      candidateCount: candidates.length,
+      candidates,
+      ...(manifest.config ? { config: manifest.config } : {}),
+    });
+  }
+
+  out.sort((a, b) => b.at.localeCompare(a.at));
+  return out;
 }
 
 /**
@@ -360,16 +526,8 @@ export async function readSpriteLabResult(
   hash: string,
   assetsDir: string,
 ): Promise<SpriteLabResult | null> {
-  const path = manifestPath(assetsDir, hash);
-  if (!existsSync(path)) return null;
-
-  let manifest: SpriteLabManifest;
-  try {
-    manifest = JSON.parse(await readFile(path, 'utf8')) as SpriteLabManifest;
-  } catch {
-    return null;
-  }
-  if (manifest.hash !== hash || !Array.isArray(manifest.candidates)) return null;
+  const manifest = await readManifestFile(assetsDir, hash);
+  if (manifest === null) return null;
 
   const candidates: SpriteLabCandidate[] = [];
   for (const c of manifest.candidates) {
@@ -573,6 +731,9 @@ export async function runSpriteLab(
         ...(c.characterId ? { characterId: c.characterId } : {}),
         ...(c.usage ? { usage: c.usage } : {}),
       })),
+      // O hash é irreversível: sem esta cópia, uma corrida em disco não sabe
+      // dizer o que a gerou. Campo aditivo — manifestos antigos seguem válidos.
+      config: runConfigOf(config),
     };
     await mkdir(dirname(manifestPath(opts.assetsDir, hash)), { recursive: true });
     await writeFile(manifestPath(opts.assetsDir, hash), `${JSON.stringify(manifest, null, 2)}\n`);

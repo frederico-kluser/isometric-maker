@@ -549,6 +549,124 @@ test('sprite-lab GET: job em andamento → 200 {status:"gerando"}; job falho →
   assert.match(String(failed.json['error']), /PIXELLAB_SECRET/);
 });
 
+// ---------------------------------------------- sprite studio: catálogo e recuperação
+
+/**
+ * Semeia uma corrida sprite-lab COMPLETA no assets dir de teste — o formato
+ * que `listSpriteLabRuns` publica. Nenhuma geração, nenhuma chamada: só disco.
+ */
+function seedSpriteLabRun(hash: string, outputs: number, withConfig: boolean): void {
+  const root = join(ASSETS_DIR, 'sprite-lab');
+  mkdirSync(root, { recursive: true });
+  for (let i = 0; i < outputs; i += 1) {
+    mkdirSync(join(root, `${hash}-cand${i}`), { recursive: true });
+    writeFileSync(join(root, `${hash}-cand${i}`, 'south-00.png'), makePNG(64, i));
+  }
+  writeFileSync(
+    join(root, `${hash}.json`),
+    JSON.stringify({
+      version: 1,
+      hash,
+      candidates: Array.from({ length: outputs }, (_, i) => ({
+        index: i,
+        seed: 100 + i,
+      })),
+      ...(withConfig
+        ? {
+            config: {
+              description: 'guerreiro semeado em disco',
+              view: 'low top-down',
+              size: 64,
+              outputs,
+              noBackground: true,
+              enhancePrompt: false,
+              hadReference: false,
+            },
+          }
+        : {}),
+    }),
+  );
+}
+
+async function spriteLabRuns(): Promise<Array<Record<string, unknown>>> {
+  const r = await get('/api/sprite-lab');
+  assert.equal(r.status, 200, `o catálogo responde 200, veio ${r.status}`);
+  const runs = r.json['runs'];
+  assert.ok(Array.isArray(runs), `o catálogo responde {runs}, veio ${JSON.stringify(r.json)}`);
+  return runs as Array<Record<string, unknown>>;
+}
+
+test('GET /api/sprite-lab: catálogo das corridas em disco — o caminho EXATO não cai no ramo do hash', async () => {
+  // Sem esta rota, o hash de uma corrida voltava uma vez só (no corpo do 202) e
+  // vivia apenas em estado React: trocar de aba desmontava o painel e a sprite
+  // paga sumia da tela sem ter sumido do disco.
+  const hash = 'aaaaaaaaaaaaaaa1';
+  seedSpriteLabRun(hash, 2, true);
+
+  const runs = await spriteLabRuns();
+  const found = runs.find((r) => r['hash'] === hash);
+  assert.ok(found, `a corrida semeada deveria estar no catálogo: ${JSON.stringify(runs)}`);
+  assert.equal(found['candidateCount'], 2);
+  const candidates = found['candidates'] as Array<Record<string, unknown>>;
+  assert.equal(
+    candidates[0]?.['southUrl'],
+    `/sprite-lab/${hash}-cand0/south-00.png`,
+    'a miniatura aponta para o PNG servido por serveGeneratedAsset',
+  );
+  assert.ok(found['config'], 'a config do manifesto viaja no catálogo');
+  assert.ok(typeof found['at'] === 'string' && !Number.isNaN(Date.parse(found['at'])));
+});
+
+test('GET /api/sprite-lab: corrida INCOMPLETA fica fora do catálogo', async () => {
+  const hash = 'bbbbbbbbbbbbbbb2';
+  seedSpriteLabRun(hash, 2, false);
+  rmSync(join(ASSETS_DIR, 'sprite-lab', `${hash}-cand1`), {
+    recursive: true,
+    force: true,
+  });
+
+  const runs = await spriteLabRuns();
+  assert.ok(
+    !runs.some((r) => r['hash'] === hash),
+    'resultado incompleto não é resultado — a tela não pode mostrar meia corrida',
+  );
+});
+
+test('recuperação: a chave do job carrega o hash, e o GET por hash responde estado nomeado', async () => {
+  // Este é o contrato de que o painel depende para se recolar a uma corrida em
+  // voo depois de um remount: o hash não sobrevive em lugar nenhum além da
+  // chave `sprite-lab::<hash>` do registro de jobs e do próprio disco.
+  const r = await post('/api/sprite-lab', {
+    description: 'recolagem a job em voo',
+    size: 64,
+    outputs: 1,
+  });
+  assert.equal(r.status, 202);
+  const key = String(r.json['key']);
+  const hash = String(r.json['hash']);
+  assert.equal(key.slice('sprite-lab::'.length), hash, 'o hash sai da chave por fatiamento');
+
+  const res = mockRes();
+  await handle(mockReq('GET', '/api/studio'), res as unknown as ServerResponse);
+  const jobs = (JSON.parse(res.body) as { jobs: Record<string, { status: string }> }).jobs;
+  const spriteLabKeys = Object.keys(jobs).filter((k) => k.startsWith('sprite-lab::'));
+  assert.ok(spriteLabKeys.includes(key), 'o job aparece em /api/studio, que é o que a tela lê');
+  for (const k of spriteLabKeys) {
+    assert.match(
+      k.slice('sprite-lab::'.length),
+      /^[a-f0-9]{16}$/,
+      'toda chave de sprite-lab carrega um hash no formato que o GET aceita',
+    );
+  }
+
+  const estado = await get(`/api/sprite-lab/${hash}`);
+  assert.equal(estado.status, 200, 'andamento é 200 com status nomeado, nunca 404');
+  assert.ok(
+    ['gerando', 'pronto', 'falhou'].includes(String(estado.json['status'])),
+    `estado inesperado: ${JSON.stringify(estado.json)}`,
+  );
+});
+
 // ------------------------------------------------------------------ wizard: import/export de bundle
 
 // ORDEM IMPORTA: estes testes rodam por último sobre o mesmo studio.json —

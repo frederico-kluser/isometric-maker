@@ -295,6 +295,23 @@ export const laboratorio = {
 			doCache: 'veio do cache — nenhuma chamada foi feita',
 		},
 
+		// recuperação a partir do disco (GET /api/sprite-lab no mount)
+		recuperacao: {
+			/** Selo do resultado remontado a partir dos PNGs já em disco */
+			doDisco: 'recuperado do disco — nada foi gerado agora',
+			/** Linha exibida ao reencontrar um job que continuou rodando no servidor */
+			jobEmVoo:
+				'Reencontrei uma geração ainda em andamento no servidor e voltei a ' +
+				'acompanhá-la — ela seguiu rodando enquanto esta aba esteve fechada.',
+			/** Sem a config da corrida não há bundle: manifesto antigo ou job reencontrado */
+			semConfig:
+				'Não tenho a configuração desta corrida — ou o manifesto dela é anterior ' +
+				'a este servidor guardar a config, ou ela foi reencontrada já em ' +
+				'andamento. Os PNGs estão em disco, mas o JSON do bundle não pode ser ' +
+				'remontado sem a config. Gerar de novo com a mesma configuração ' +
+				'reaproveita os arquivos, sem gasto.',
+		},
+
 		// erros de validação local (antes de chamar o servidor)
 		erros: {
 			/** description vazia */
@@ -383,6 +400,13 @@ export const imagemAjustadaReferencia = (
 /** "128 px · low top-down · 2 saídas" — resumo de uma execução da bancada */
 export const resumoStudio = (size: number, view: string, outputs: number): string =>
 	`${size} px · ${view} · ${outputs} ${outputs === 1 ? 'saída' : 'saídas'}`;
+
+/**
+ * "corrida bea8a8bf59fbaa15" — resumo de uma corrida cuja config não está
+ * disponível: manifesto antigo demais, ou job ainda em voo reencontrado pela
+ * chave `sprite-lab::<hash>`. O hash é o único identificador que existe.
+ */
+export const resumoRecuperado = (hash: string): string => `corrida ${hash}`;
 
 /** "#1 · seed 701" — legenda de um candidato na grade */
 export const rotuloCandidato = (index: number, seed: number): string =>

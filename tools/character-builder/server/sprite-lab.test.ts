@@ -26,7 +26,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -39,6 +46,7 @@ import {
 } from './character-detail.ts';
 import {
   runSpriteLab,
+  listSpriteLabRuns,
   readSpriteLabResult,
   SpriteLabValidationError,
   type SpriteLabConfig,
@@ -770,6 +778,166 @@ test('readSpriteLabResult — null quando um PNG do manifesto sumiu', async () =
       await readSpriteLabResult(first.hash, join(dir, 'assets')),
       null,
       'resultado incompleto não é resultado',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------------ listSpriteLabRuns
+
+/**
+ * O catálogo é o que faz uma sprite PAGA sobreviver a um remount do painel.
+ *
+ * Antes dele o `hash` voltava uma vez só, no corpo do 202 do POST, e vivia daí
+ * em diante apenas em estado React: trocar de aba no estúdio desmontava a tela
+ * e a sprite gerada — presente em disco — sumia da interface. Os testes abaixo
+ * fixam as PROPRIEDADES que a recuperação precisa: só corrida completa entra, a
+ * miniatura aponta para um arquivo que existe, a ordem é da mais nova para a
+ * mais velha, e um manifesto legado (sem config) continua legível.
+ */
+
+test('listSpriteLabRuns — diretório inexistente devolve lista vazia, não erro', async () => {
+  const dir = tmpDir();
+  try {
+    assert.deepEqual(await listSpriteLabRuns(join(dir, 'assets')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSpriteLabRuns — corrida completa entra com miniatura, contagem e config', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const run = await runSpriteLab(
+      client,
+      { ...baseConfig(), seed: 42, outputs: 2 },
+      opts(dir),
+    );
+
+    const runs = await listSpriteLabRuns(join(dir, 'assets'));
+    assert.equal(runs.length, 1);
+    const only = runs[0]!;
+    assert.equal(only.hash, run.hash);
+    assert.equal(only.candidateCount, 2);
+    assert.deepEqual(
+      only.candidates.map((c) => c.seed),
+      [42, 43],
+    );
+    // A miniatura tem que apontar para o PNG que o servidor de assets serve.
+    assert.equal(
+      only.candidates[0]?.southUrl,
+      `/sprite-lab/${run.hash}-cand0/south-00.png`,
+    );
+    assert.ok(
+      existsSync(join(dir, 'assets', 'sprite-lab', `${run.hash}-cand0`, 'south-00.png')),
+      'a URL da miniatura corresponde a um arquivo real',
+    );
+    assert.ok(!Number.isNaN(Date.parse(only.at)), '`at` é ISO parseável');
+
+    // A config é o que permite resumir a corrida e remontar o bundle: o hash é
+    // irreversível e o manifesto é o único lugar onde ela sobrevive.
+    assert.ok(only.config, 'corrida nova traz a config no manifesto');
+    assert.equal(only.config.description, baseConfig().description);
+    assert.equal(only.config.size, 64);
+    assert.equal(only.config.outputs, 2);
+    assert.equal(only.config.seed, 42);
+    assert.equal(only.config.view, 'low top-down', 'default do spec já aplicado');
+    assert.equal(only.config.noBackground, true);
+    assert.equal(only.config.enhancePrompt, false);
+    assert.equal(only.config.hadReference, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSpriteLabRuns — corrida com PNG faltando fica FORA; lixo no diretório é ignorado', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const run = await runSpriteLab(
+      client,
+      { ...baseConfig(), seed: 42, outputs: 2 },
+      opts(dir),
+    );
+    const root = join(dir, 'assets', 'sprite-lab');
+
+    // Arquivo que não é manifesto e diretório que não é candidato: nem entram
+    // no catálogo nem derrubam a varredura.
+    writeFileSync(join(root, 'anotacoes.txt'), 'nada a ver');
+    writeFileSync(join(root, 'naoehash.json'), '{"version":1}');
+
+    rmSync(join(root, `${run.hash}-cand1`), { recursive: true, force: true });
+
+    assert.deepEqual(
+      await listSpriteLabRuns(join(dir, 'assets')),
+      [],
+      'resultado incompleto não é resultado — mesma regra do readSpriteLabResult',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSpriteLabRuns — ordena da corrida mais recente para a mais antiga', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const velha = await runSpriteLab(
+      client,
+      { ...baseConfig(), description: 'corrida antiga', seed: 1 },
+      opts(dir),
+    );
+    const nova = await runSpriteLab(
+      client,
+      { ...baseConfig(), description: 'corrida nova', seed: 2 },
+      opts(dir),
+    );
+
+    // mtimes explícitos: duas execuções seguidas podem cair no mesmo
+    // milissegundo e a ordem viraria sorte.
+    const root = join(dir, 'assets', 'sprite-lab');
+    utimesSync(join(root, `${velha.hash}.json`), new Date(1_000_000), new Date(1_000_000));
+    utimesSync(join(root, `${nova.hash}.json`), new Date(2_000_000), new Date(2_000_000));
+
+    const runs = await listSpriteLabRuns(join(dir, 'assets'));
+    assert.deepEqual(
+      runs.map((r) => r.hash),
+      [nova.hash, velha.hash],
+      'a mais recente vem primeiro — é ela que o painel traz de volta à tela',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSpriteLabRuns — manifesto legado (sem config) entra no catálogo, sem inventar config', async () => {
+  const dir = tmpDir();
+  try {
+    // Formato exato dos manifestos já pagos em disco: version/hash/candidates,
+    // sem config. Ler o que já foi pago é sempre mais barato que regerar.
+    const hash = 'abcdef0123456789';
+    const root = join(dir, 'assets', 'sprite-lab');
+    mkdirSync(join(root, `${hash}-cand0`), { recursive: true });
+    writeFileSync(join(root, `${hash}-cand0`, 'south-00.png'), makePNG(8, 8, 10));
+    writeFileSync(
+      join(root, `${hash}.json`),
+      JSON.stringify({
+        version: 1,
+        hash,
+        candidates: [{ index: 0, seed: 3198724287, characterId: 'char-legado' }],
+      }),
+    );
+
+    const runs = await listSpriteLabRuns(join(dir, 'assets'));
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]?.hash, hash);
+    assert.equal(runs[0]?.candidateCount, 1);
+    assert.equal(
+      runs[0]?.config,
+      undefined,
+      'config ausente é dado que não existe, não dado a adivinhar',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

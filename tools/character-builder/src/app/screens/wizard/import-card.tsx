@@ -18,7 +18,7 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { wizard } from '../../../strings/wizard.ts';
-import { api, useSelectedCharacter } from '../../studio-store.tsx';
+import { api } from '../../studio-store.tsx';
 import { useAction } from './use-action.ts';
 
 /** Os únicos `kind` que o /api/wizard/import aceita — recusa local antes do POST. */
@@ -28,11 +28,21 @@ const ACCEPTED_KINDS: readonly string[] = [
 ];
 
 export function ImportCard({
+	characterId,
 	refresh,
 }: {
+	/**
+	 * Personagem-alvo do import, JÁ resolvido pela tela.
+	 *
+	 * Vem por prop e não do contexto de propósito: o contexto começa em "" e
+	 * nada o preenchia no load, então o POST saía com `characterId: ""` e o
+	 * /api/wizard/import respondia 400 — a ponte Laboratório→Wizard quebrava
+	 * mesmo havendo personagem na tela. O wizard já resolve o personagem
+	 * (`resolveCharacter`) para renderizar a trilha; é esse id que vale aqui.
+	 */
+	readonly characterId: string;
 	readonly refresh: () => Promise<void>;
 }) {
-	const { characterId } = useSelectedCharacter();
 	const importAction = useAction(refresh);
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [fileError, setFileError] = useState<string | null>(null);

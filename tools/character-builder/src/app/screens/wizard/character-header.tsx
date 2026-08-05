@@ -7,7 +7,7 @@
  * formulário — accordion é para listas, sheet é drawer de página).
  */
 import { Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
 	Card,
@@ -64,7 +64,31 @@ export function CharacterHeader({
 
 	const chars = studio.characters;
 	const isEmpty = chars.length === 0;
-	const selectedChar = chars.find((c) => c.id === characterId);
+	/**
+	 * O personagem que a tela realmente edita. Mesma regra do
+	 * `resolveCharacter` do wizard: seleção vazia (ou apontando para um id que
+	 * sumiu) cai no primeiro da lista.
+	 */
+	const selectedChar = chars.find((c) => c.id === characterId) ?? chars[0];
+	// String, não o objeto: `studio.characters` vem de um fetch a cada 3 s e o
+	// objeto muda de identidade a cada poll — o efeito abaixo rodaria sempre.
+	const resolvedId = selectedChar?.id;
+
+	/**
+	 * Auto-seleção: o contexto nasce em "" e NADA o preenchia quando o studio
+	 * carregava. O wizard mascarava isso caindo no primeiro personagem, mas o
+	 * seletor abaixo mostrava um campo em branco por cima de uma lista cheia, e
+	 * quem lia o valor cru do contexto postava "" para o servidor.
+	 *
+	 * O efeito escreve a resolução de volta no contexto, então display e
+	 * seleção passam a ser a mesma coisa. Roda de novo a cada snapshot novo do
+	 * studio (o import do manequim cria o personagem sem selecioná-lo).
+	 */
+	useEffect(() => {
+		if (resolvedId !== undefined && resolvedId !== characterId) {
+			setCharacterId(resolvedId);
+		}
+	}, [resolvedId, characterId, setCharacterId]);
 	// Bloqueia deletar se houver job rodando para o personagem selecionado.
 	const hasRunningJob = selectedChar
 		? Object.entries(studio.jobs).some(
@@ -113,7 +137,10 @@ export function CharacterHeader({
 						{wizard.header.personagem}
 					</span>
 					<Select
-						value={isEmpty ? '' : characterId}
+						/* O valor RESOLVIDO, não o cru: com o contexto em "" e a lista
+						   cheia, o gatilho aparecia em branco sobre o personagem que a
+						   tela estava de fato editando. */
+						value={resolvedId ?? ''}
 						onValueChange={(v) => {
 							if (typeof v === 'string' && v !== '') setCharacterId(v);
 						}}

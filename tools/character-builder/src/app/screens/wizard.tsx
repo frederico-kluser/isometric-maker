@@ -47,9 +47,16 @@ export function WizardScreen() {
 
 	const character = resolveCharacter(studio, characterId);
 	if (!character) {
+		// Studio vazio NÃO é beco sem saída. O FirstRun é a única entrada de UI
+		// para POST /api/mannequin/import — tanto o `{source:"default"}`, que
+		// semeia o manequim do pacote de assets, quanto o import de bundle. Ele
+		// vivia depois deste early return, logo nunca aparecia justamente quando
+		// era a ÚNICA ação possível: `POST /api/characters` exige um lock e um
+		// personagem com o wizard concluído, e nenhum dos dois existe aqui.
 		return (
 			<div className="flex flex-col gap-6">
 				<CharacterHeader studio={studio} refresh={refresh} />
+				<FirstRun studio={studio} refresh={refresh} />
 			</div>
 		);
 	}
@@ -60,8 +67,16 @@ export function WizardScreen() {
 	return (
 		<div className="flex flex-col gap-6">
 			<CharacterHeader studio={studio} refresh={refresh} />
-			{/* key reinicia o estado local do import ao trocar de personagem */}
-			<ImportCard key={`${character.id}-import`} refresh={refresh} />
+			{/* key reinicia o estado local do import ao trocar de personagem.
+			    characterId vai por prop, e não pelo contexto: `resolveCharacter`
+			    cai no primeiro personagem quando a seleção está vazia, e o
+			    ImportCard postava o valor CRU do contexto — um "" que o
+			    /api/wizard/import recusa com 400. */}
+			<ImportCard
+				key={`${character.id}-import`}
+				characterId={character.id}
+				refresh={refresh}
+			/>
 			{progress.firstRun ? <FirstRun studio={studio} refresh={refresh} /> : null}
 			<StepTrail steps={progress.steps} />
 			{/* key reinicia os formulários locais ao trocar de personagem */}

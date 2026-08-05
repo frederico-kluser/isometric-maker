@@ -3,15 +3,39 @@
  *
  * Gera N candidatos (1–4) da pose SUL em paralelo: POST /api/sprite-lab
  * devolve 202 {key, hash} na hora e o resultado chega depois por
- * GET /api/sprite-lab/{hash} (404 = ainda pendente) — a v3 é assíncrona e
+ * GET /api/sprite-lab/{hash} (status nomeado, com 200) — a v3 é assíncrona e
  * leva minutos. O andamento e a falha do job vêm de studio.jobs[key], como
  * no wizard; os erros 400 do servidor já chegam em pt-BR e são exibidos
  * verbatim.
  *
+ * ## Por que este painel se recupera no mount
+ *
+ * O SmoothTabs do estúdio renderiza SÓ a aba ativa: sair do "Laboratório"
+ * desmonta este componente, e com ele o `hash` da corrida — que volta uma vez
+ * só, no corpo do 202, e vivia apenas em estado React. O efeito era a sprite
+ * paga existir em disco e a tela mostrar "nenhum candidato ainda".
+ *
+ * A recuperação é SERVIDOR-AUTORITATIVA, o padrão que a paleta de blocos já
+ * usava (`GET /api/world-blocks`): no mount o painel lê `GET /api/sprite-lab`,
+ * repovoa o histórico e traz de volta a corrida mais recente; e se
+ * `studio.jobs` ainda tem um `sprite-lab::<hash>` em `gerando`, volta a sondar
+ * aquele hash sozinho. Nada é guardado no navegador — o disco é a memória.
+ *
+ * ## Identidade da corrida
+ *
+ * As três origens (disco, job em voo, POST daqui) sabem de corridas
+ * DIFERENTES e chegam em qualquer ordem. Por isso o body da corrida NÃO é
+ * estado solto: ele viaja dentro de um `RunDescriptor` amarrado ao hash, e só
+ * é lido através de `bodyForRun(descritor, hashAtivo)`, que devolve `null`
+ * quando os hashes divergem. O porquê disso ser tão rígido está no cabeçalho
+ * de ./studio-recovery.ts — em resumo, `config.size` do bundle vira o `lock`
+ * imutável do personagem e passa a governar geração paga.
+ *
  * Montagem/validação do body e do bundle de export vivem no módulo puro
- * ./studio-body.ts (testado com node --test); o cálculo do auto-resize da
+ * ./studio-body.ts (testado com node --test); as decisões de recuperação e
+ * recolagem no módulo puro ./studio-recovery.ts; o cálculo do auto-resize da
  * referência (limite de 256×256 da v3) no módulo puro ./image-fit.ts — aqui
- * ficam só o DOM (canvas, download) e a coleta dos inputs.
+ * ficam só o DOM (canvas, download), a coleta dos inputs e a fiação.
  */
 import { useEffect, useRef, useState } from 'react';
 import { CheckIcon, DownloadIcon, LoaderCircleIcon, XIcon } from 'lucide-react';
@@ -65,10 +89,23 @@ import {
 	MAX_OUTPUTS,
 	SIZE_PRESETS,
 	type SpriteLabAccepted,
-	type SpriteLabBody,
 	type SpriteLabResult,
 	type StudioErrorCode,
 } from './studio-body.ts';
+import {
+	activeRunHash,
+	bodyForRun,
+	describeRun,
+	mergeDescriptor,
+	planDescriptorRefresh,
+	planDiskRecovery,
+	planReattach,
+	summaryForRun,
+	type OwnedRun,
+	type PendingRun,
+	type RunDescriptor,
+	type RunSummaryDTO,
+} from './studio-recovery.ts';
 import { fitWithinLimit } from './image-fit.ts';
 
 /** Erros locais → mensagem pt-BR (validação do servidor vem pronta em err.message). */
@@ -98,11 +135,6 @@ const rotuloSelect = (v: unknown, sufixo = ''): string =>
 		: `${String(v)}${sufixo}`;
 
 type ButtonState = 'idle' | 'running' | 'done' | 'error';
-
-interface PendingRun {
-	readonly key: string;
-	readonly hash: string;
-}
 
 /** Redimensiona no cliente com smoothing DESLIGADO — pixel art não pode borrar. */
 async function resizeReference(
@@ -152,8 +184,11 @@ export function StudioPanel() {
 	const [buttonState, setButtonState] = useState<ButtonState>('idle');
 	const [error, setError] = useState<string | null>(null);
 	const [pending, setPending] = useState<PendingRun | null>(null);
-	const [runBody, setRunBody] = useState<SpriteLabBody | null>(null);
-	const [runSummary, setRunSummary] = useState('');
+	/**
+	 * Body + resumo AMARRADOS ao hash da corrida que os produziu. Nunca leia
+	 * `runDesc.body` direto: use `bodyForRun`, que confere a identidade.
+	 */
+	const [runDesc, setRunDesc] = useState<RunDescriptor | null>(null);
 	const [result, setResult] = useState<SpriteLabResult | null>(null);
 	/**
 	 * true SÓ quando o POST resolveu na hora — nada foi submetido nesta
@@ -161,14 +196,33 @@ export function StudioPanel() {
 	 * reporta `fromCache: true` mesmo logo depois de uma geração paga.
 	 */
 	const [semGasto, setSemGasto] = useState(false);
+	/** true quando o resultado na tela foi remontado do disco, não gerado agora. */
+	const [doDisco, setDoDisco] = useState(false);
+	/** true quando o painel voltou a acompanhar um job que já estava em voo. */
+	const [retomouJob, setRetomouJob] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 	const [history, setHistory] = useState<HistoryEntry[]>([]);
 	const nextId = useRef(1);
 	const resetTimer = useRef<number | undefined>(undefined);
+	/** A recolagem a um job em voo é uma vez só, no primeiro snapshot do studio. */
+	const reattachChecked = useRef(false);
+	/**
+	 * A corrida que ESTA montagem possui — recolada de um job em voo, ou
+	 * disparada pelo botão "Gerar". Enquanto é `null`, a tela é órfã e a
+	 * recuperação em disco pode preenchê-la; a partir do momento em que tem
+	 * dono, o disco só repovoa o histórico. É ref, e não estado, porque quem
+	 * consulta é um closure assíncrono nascido no mount.
+	 */
+	const ownRun = useRef<OwnedRun | null>(null);
 
 	// Andamento/falha do job, como no wizard: studio.jobs é a fonte fresca.
 	const { studio } = useStudio();
 	const job = pending !== null ? studio?.jobs?.[pending.key] : undefined;
+
+	// ── identidade: body e resumo só valem para a corrida que está na tela ──
+	const hashAtivo = activeRunHash(pending?.hash ?? null, result?.hash ?? null);
+	const runBody = bodyForRun(runDesc, hashAtivo);
+	const runSummary = summaryForRun(runDesc, hashAtivo);
 
 	const scheduleReset = (): void => {
 		window.clearTimeout(resetTimer.current);
@@ -177,6 +231,95 @@ export function StudioPanel() {
 	useEffect(() => () => window.clearTimeout(resetTimer.current), []);
 
 	const running = buttonState === 'running';
+
+	// ── recuperação no mount: o disco é a memória do painel ──
+	//
+	// Sem isto, sair da aba apaga o `hash` e a sprite paga fica invisível. O
+	// catálogo devolve URL de miniatura (barato para N corridas); os bytes da
+	// corrida mais recente vêm do GET por hash, que é quem serve base64.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const { runs } = await api<{ runs: readonly RunSummaryDTO[] }>(
+					'sprite-lab',
+				);
+				if (cancelled || runs.length === 0) return;
+				const entries: HistoryEntry[] = runs.map((run) => ({
+					id: nextId.current++,
+					at: new Date(run.at),
+					// O histórico aceita qualquer string de `src`: aqui é a URL do
+					// PNG em disco, não um data URI.
+					thumbDataUri: run.candidates[0]?.southUrl ?? '',
+					summary: describeRun(run).summary,
+					fromCache: true,
+				}));
+				setHistory((h) => (h.length === 0 ? entries : h));
+
+				const newest = runs[0];
+				if (newest === undefined) return;
+				const body = await api<{
+					status?: string;
+					result?: SpriteLabResult;
+				}>(`sprite-lab/${newest.hash}`);
+				if (cancelled) return;
+				// Quem decide é o módulo puro: entre estes dois requests a tela
+				// pode ter ganhado dono (job recolado, ou "Gerar" clicado), e aí
+				// a corrida em disco é outra — e mais velha.
+				const plano = planDiskRecovery({
+					runs,
+					newestStatus: body.status,
+					newestResult: body.result,
+					owned: ownRun.current,
+				});
+				if (plano.kind !== 'apply') return;
+				setResult(plano.result);
+				setSelectedIndex(plano.selectedIndex);
+				setDoDisco(true);
+				// O descritor carrega o hash da corrida que ele descreve; sem
+				// config no manifesto o body vem null, o botão de download fica
+				// desabilitado e a tela explica por quê.
+				setRunDesc(plano.descriptor);
+			} catch {
+				// Recuperação é silenciosa de propósito: um catálogo indisponível
+				// não pode esconder o formulário nem virar erro de geração.
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	// ── recolagem a uma corrida ainda em voo ──
+	//
+	// O job continua no servidor enquanto a aba está fechada; o que se perde é
+	// a sondagem. A chave `sprite-lab::<hash>` de studio.jobs devolve o hash —
+	// nenhum estado novo é preciso dos dois lados.
+	useEffect(() => {
+		if (reattachChecked.current) return;
+		const plano = planReattach(studio?.jobs, result?.hash ?? null);
+		// 'wait': ainda não houve snapshot do estúdio — decidir agora seria
+		// concluir "nada em voo" sem ter olhado.
+		if (plano.kind === 'wait') return;
+		reattachChecked.current = true;
+		if (plano.kind === 'none') return;
+		// O job em voo assume a corrida: o hash é tudo que se sabe dela, e o
+		// body que a gerou não está em lugar nenhum enquanto o manifesto não
+		// existir. O descritor nasce com body null e o hash certo.
+		ownRun.current = { hash: plano.pending.hash };
+		setError(null);
+		setRetomouJob(true);
+		setButtonState('running');
+		setRunDesc(plano.descriptor);
+		// A recuperação em disco chegou antes e pôs na tela os candidatos de
+		// OUTRA corrida: a viva toma a tela inteira, não só o descritor.
+		if (plano.clearResult) {
+			setResult(null);
+			setSelectedIndex(null);
+			setDoDisco(false);
+		}
+		setPending(plano.pending);
+	}, [studio, result]);
 
 	// Sondagem do resultado. O servidor responde 200 com um status NOMEADO
 	// ('gerando' | 'pronto' | 'falhou' | 'desconhecido'); andamento não é mais
@@ -214,6 +357,9 @@ export function StudioPanel() {
 				setResult(r);
 				setSelectedIndex(first?.index ?? null);
 				setPending(null);
+				// O que está na tela agora saiu deste job, não da recuperação.
+				setDoDisco(false);
+				setRetomouJob(false);
 				setButtonState('done');
 				if (first !== undefined) {
 					setHistory((h) => [
@@ -242,6 +388,36 @@ export function StudioPanel() {
 		// scheduleReset é estável (só toca ref + setState).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pending, runSummary]);
+
+	// Corrida recolada que terminou: o body que a gerou nunca esteve em
+	// memória, mas o manifesto passou a existir e o catálogo o devolve. Sem
+	// este remendo o usuário vê a sprite paga e não consegue exportá-la — que
+	// é a única coisa que a bancada serve para fazer depois de gerar.
+	//
+	// A busca é pelo hash da corrida ATIVA (`result.hash`), e o descritor
+	// devolvido é rejeitado se a tela já tiver passado a descrever outra:
+	// era exatamente aqui que a config da corrida errada entrava.
+	useEffect(() => {
+		if (result === null || runBody !== null) return;
+		if (ownRun.current?.hash !== result.hash) return;
+		let cancelled = false;
+		void (async () => {
+			try {
+				const { runs } = await api<{ runs: readonly RunSummaryDTO[] }>(
+					'sprite-lab',
+				);
+				if (cancelled) return;
+				const desc = planDescriptorRefresh({ runs, activeHash: result.hash });
+				if (desc === null) return;
+				setRunDesc((cur) => mergeDescriptor(cur, desc));
+			} catch {
+				// Silencioso: o resultado já está na tela, só o export fica de fora.
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [result, runBody]);
 
 	// Falha do job chega por studio.jobs antes de qualquer 200/404 útil.
 	useEffect(() => {
@@ -306,19 +482,31 @@ export function StudioPanel() {
 		setError(null);
 		setButtonState('running');
 		setSemGasto(false);
+		setDoDisco(false);
+		setRetomouJob(false);
+		// A tela ganha dono já no clique, antes do POST: o hash só volta no 202,
+		// e é justamente nesta janela que a recuperação de mount pode chegar
+		// atrasada e instalar a corrida antiga por cima desta.
+		ownRun.current = { hash: null };
 		try {
 			const accepted = await api<SpriteLabAccepted | { status: string; result: SpriteLabResult }>('sprite-lab', {
 				method: 'POST',
 				body: JSON.stringify(built.body),
 			});
-			// O body que gerou o lote é congelado aqui: o bundle documenta o que
-			// foi gerado, não o que está no formulário agora.
-			setRunBody(built.body);
-			setRunSummary(resumoStudio(built.body.size, built.body.view, built.body.outputs));
+			// O body que gerou o lote é congelado aqui, junto do hash da corrida
+			// a que ele pertence: o bundle documenta o que foi gerado, não o que
+			// está no formulário agora — nem o que outra corrida usou.
+			const summary = resumoStudio(
+				built.body.size,
+				built.body.view,
+				built.body.outputs,
+			);
 			setSelectedIndex(null);
 			// Cache total: o servidor devolve o resultado direto, sem job.
 			if ('result' in accepted) {
 				const r = accepted.result;
+				ownRun.current = { hash: r.hash };
+				setRunDesc({ hash: r.hash, summary, body: built.body });
 				setResult(r);
 				setSemGasto(true);
 				setSelectedIndex(r.candidates[0]?.index ?? null);
@@ -326,6 +514,8 @@ export function StudioPanel() {
 				scheduleReset();
 				return;
 			}
+			ownRun.current = { hash: accepted.hash };
+			setRunDesc({ hash: accepted.hash, summary, body: built.body });
 			setResult(null);
 			setPending({ key: accepted.key, hash: accepted.hash });
 		} catch (err) {
@@ -701,6 +891,11 @@ export function StudioPanel() {
 									<p className="text-sm text-muted-foreground" role="status">
 										{job?.message ?? SL.studio.executar.aguardando}
 									</p>
+									{retomouJob && (
+										<p className="text-sm text-muted-foreground">
+											{SL.studio.recuperacao.jobEmVoo}
+										</p>
+									)}
 								</>
 							) : result === null ? (
 								<p className="text-sm text-muted-foreground">
@@ -739,7 +934,11 @@ export function StudioPanel() {
 											);
 										})}
 									</div>
-									{semGasto ? (
+									{doDisco ? (
+										<Badge variant="outline">
+											{SL.studio.recuperacao.doDisco}
+										</Badge>
+									) : semGasto ? (
 										<Badge variant="outline">{SL.studio.resultado.doCache}</Badge>
 									) : selectedUsage !== undefined ? (
 										<div className="flex flex-wrap items-center gap-2 text-sm">
@@ -759,14 +958,20 @@ export function StudioPanel() {
 										<Button
 											variant="secondary"
 											onClick={handleDownload}
-											disabled={selectedIndex === null}
+											disabled={selectedIndex === null || runBody === null}
 										>
 											<DownloadIcon className="size-4" />
 											{SL.studio.resultado.baixarJson}
 										</Button>
-										<p className="text-xs text-muted-foreground">
-											{SL.studio.resultado.notaWizard}
-										</p>
+										{runBody === null ? (
+											<p className="text-xs text-muted-foreground">
+												{SL.studio.recuperacao.semConfig}
+											</p>
+										) : (
+											<p className="text-xs text-muted-foreground">
+												{SL.studio.resultado.notaWizard}
+											</p>
+										)}
 									</div>
 								</>
 							)}

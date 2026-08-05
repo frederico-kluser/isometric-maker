@@ -49,6 +49,7 @@ import {
 } from "./rotate-lab.ts";
 import {
 	runSpriteLab,
+	listSpriteLabRuns,
 	readSpriteLabResult,
 	spriteLabHash,
 	validateSpriteLabConfig,
@@ -1309,8 +1310,9 @@ export async function handle(
 		}
 
 		// ---- sprite studio (bancada v3) ---------------------------------------------------
-		// ORDEM IMPORTA: o POST exato vem ANTES do GET com prefixo — sem isso um
-		// POST /api/sprite-lab cairia no ramo do GET com hash vazio.
+		// ORDEM IMPORTA: as rotas de caminho EXATO (o POST e o GET do catálogo)
+		// vêm ANTES do GET com prefixo — sem isso um POST /api/sprite-lab cairia
+		// no ramo do GET com hash vazio, e o catálogo idem.
 		if (url.pathname === "/api/sprite-lab" && req.method === "POST") {
 			const b = await readBody<SpriteLabConfig>(req);
 			// Validação TOTAL antes de responder: config inválida é 400 nomeado —
@@ -1350,6 +1352,19 @@ export async function handle(
 				[],
 			);
 			json(res, 202, { key, hash });
+			return true;
+		}
+
+		// Catálogo das corridas já geradas em disco — é daqui que o Sprite Studio
+		// se recupera depois de trocar de aba ou de um F5. Espelha
+		// GET /api/world-blocks, que é o motivo de um bloco gerado sobreviver ao
+		// remount e um personagem gerado não sobreviver: o painel de blocos
+		// tinha um catálogo para ler, este não tinha.
+		//
+		// Sem barra final de propósito: este é o caminho EXATO, e por isso vem
+		// antes do GET com prefixo logo abaixo.
+		if (url.pathname === "/api/sprite-lab" && req.method === "GET") {
+			json(res, 200, { runs: await listSpriteLabRuns(ASSETS) });
 			return true;
 		}
 
