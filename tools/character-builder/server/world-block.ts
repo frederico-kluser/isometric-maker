@@ -24,10 +24,14 @@
  *   de GIF). As 8 ficam em `v3/`; as 4 vistas saem de `FACING_TO_V3_DIRECTION`
  *   e são reamostradas JUNTAS para o quadro canônico 48×53 (o v3 infla o
  *   canvas ~2× "for animation room", ADR 0028). 1 tile + 1 v3.
- * - **`texture` — cubo animado (ADR 0032).** UM cubo pixel-art nasce do molde
- *   (`cube-mould.ts` como `init_image` forte 480) via `/create-isometric-tile`,
- *   com o prompt pedindo para respeitar a forma e o tamanho exatos da
- *   referência; a ação da animação vem de LLM (ou fallback determinístico); o
+ * - **`texture` — cubo animado (ADR 0032).** A descrição do usuário é
+ *   normalizada para o MATERIAL em inglês pixel-art (LLM, com fallback
+ *   determinístico); UM cubo pixel-art nasce do molde (`cube-mould.ts` como
+ *   `init_image` na força 300 do spec) via `/create-isometric-tile` — e a
+ *   frase que manda casar com a referência só entra no prompt quando o molde
+ *   entra no request; a ação da animação vem de LLM (ou fallback
+ *   determinístico) e carrega o material dentro dela, porque `action` é o
+ *   único texto que o `/animate-with-text-v3` recebe; o
  *   cubo vira o `first_frame` do `/animate-with-text-v3`, que anima todos os
  *   frames num job só (não por direção). Frames com fundo transparente
  *   (`no_background`) e ação expandida pela própria API (`enhance_prompt`, com
@@ -218,6 +222,43 @@ export interface WorldBlockConfig {
  * deste projeto, ajustável por configuração, não número lido de documentação.
  */
 export const DEFAULT_INIT_IMAGE_STRENGTH = 480;
+
+/**
+ * Força do `init_image` no cubo base da técnica 'texture' — o default do spec.
+ *
+ * **Decisão de 2026-08-04, com justificativa, porque manter 480 aqui era
+ * escolha por inércia.** O molde é um cubo cinza CHAPADO, e `init_image`
+ * carrega forma *e* cor: 480 numa faixa de 1 a 999, contra o default 300 do
+ * endpoint, empurra a geração para o cinza sólido do molde e disputa
+ * diretamente com o material que o usuário pediu — exatamente o defeito que
+ * esta correção existe para consertar. Na técnica `chained` a força alta se
+ * paga (é o encadeamento que fixa a aresta vertical entre as quatro faces);
+ * aqui não há quatro faces para casar, há UM cubo que precisa parecer o
+ * material.
+ *
+ * Na prática o valor é quase decorativo: o fornecedor recusa o molde com 422
+ * (verificado 2026-08-01) e `generateBaseImage` resubmete sem `init_image`.
+ * Ele volta a valer no dia em que a PixelLab consertar o `init_image` — e é
+ * para esse dia que o número tem de estar certo.
+ *
+ * `DEFAULT_INIT_IMAGE_STRENGTH` (480) fica intocado: ele governa `chained` e
+ * `rotated`, entra no hash dessas duas técnicas, e mexer nele cobraria
+ * regeração de blocos que esta tarefa não tem motivo para tocar.
+ */
+export const TEXTURE_INIT_IMAGE_STRENGTH = 300;
+
+/**
+ * Defaults do `/create-isometric-tile` como o spec vendorizado os declara
+ * (`CreateIsometricTileRequest`, capturado 2026-08-01).
+ *
+ * Existem para uma coisa só: decidir o que entra no hash. Mandar o default
+ * explícito produz a MESMA arte que omitir o campo, então os dois casos têm de
+ * hashear igual — senão o mesmo artefato é pago duas vezes.
+ */
+export const TILE_DEFAULT_TEXT_GUIDANCE = 8;
+export const TILE_DEFAULT_OUTLINE: TileOutline = 'lineless';
+export const TILE_DEFAULT_SHADING: TileShading = 'basic shading';
+export const TILE_DEFAULT_DETAIL: TileDetail = 'medium detail';
 
 /**
  * Que direção do v3 mostra cada face do bloco.
@@ -464,13 +505,402 @@ export function facingPrompt(description: string, facing: BlockFacing): string {
  * Prompt do cubo base da técnica 'texture'.
  *
  * O `/create-isometric-tile` não tem parâmetro de orientação nem de vista (ver
- * o header do módulo) — o que descreve a forma são as palavras. O molde entra
- * como `init_image`, a referência de forma e tamanho, e o prompt pede
- * explicitamente para respeitá-la, na vista do projeto ('low top-down',
- * ADR 0005/0015) — nunca a 'high top-down' do default do endpoint.
+ * o header do módulo) — o que descreve a forma são as palavras. A vista é a do
+ * projeto ('low top-down', ADR 0005/0015), nunca a 'high top-down' do default
+ * do endpoint.
+ *
+ * **`hasReference` não é enfeite.** A frase "matching the exact shape and
+ * proportions of the reference image" só faz sentido quando um `init_image` vai
+ * JUNTO no mesmo request. Hoje o fornecedor recusa o molde com 422 e o código o
+ * remove (ver `generateBaseImage`) — e antes desta correção a frase continuava
+ * no prompt, pendurada, sem referente algum, competindo por atenção com o
+ * material que o usuário pediu. Quem monta o request decide: manda `true` na
+ * tentativa COM molde e `false` na resubmissão sem ele.
+ *
+ * A literal `pixel art cube` é contrato de teste: o `FakeClient` de
+ * `world-block.test.ts` ramifica nela para decidir se devolve RGBA cru (como o
+ * endpoint real do tile) ou PNG. Trocar essas três palavras quebra o fake, não
+ * só as asserções.
  */
-export function cubePrompt(description: string): string {
-  return `${description}, pixel art cube, isometric block, matching the exact shape and proportions of the reference image, low top-down view`;
+export function cubePrompt(
+  description: string,
+  opts: { readonly hasReference?: boolean } = {},
+): string {
+  const parts = [description, 'pixel art cube', 'isometric block'];
+  if (opts.hasReference === true) {
+    parts.push('matching the exact shape and proportions of the reference image');
+  }
+  parts.push('low top-down view');
+  return parts.join(', ');
+}
+
+// ---- normalização da descrição (pt-BR conversacional → inglês pixel-art)
+
+/**
+ * Teto do material normalizado, em caracteres.
+ *
+ * O `description` cru aceita 2000 (ver `validateWorldBlockConfig`), mas o que
+ * sai da normalização é uma FRASE NOMINAL de material. O caminho do LLM já
+ * cortava em 200 e o determinístico não cortava em nada — a MESMA descrição
+ * rendia prompts de tamanhos diferentes conforme houvesse ou não
+ * `ANTHROPIC_API_KEY` no ambiente. As duas pontas cortam no mesmo lugar.
+ */
+export const MATERIAL_MAX_LEN = 200;
+
+/**
+ * Dobra diacríticos preservando o comprimento: 'á' → 'a', 'ç' → 'c', 'ã' → 'a'.
+ *
+ * **É este helper que faz o glossário funcionar.** Em JavaScript `\w` — e
+ * portanto `\b` — é `[A-Za-z0-9_]` mesmo com a flag `u`. Numa string que
+ * COMEÇA com 'á' não existe fronteira de palavra antes do 'á', então um padrão
+ * como `/\b[áa]gua\b/` nunca casa a alternativa acentuada. Medido em
+ * 2026-08-04, contra o código anterior: `/\b[áa]gua\b/i.test('água') === false`
+ * e `fallbackMaterial('água')` devolvia `'água'` em vez de `'water'` — logo a
+ * ação da animação caía na string-coringa, porque nenhuma regex inglesa de
+ * `ACTION_FALLBACK` casa com "água". `água` é a palavra que a própria UI usa
+ * de exemplo (`src/strings/blocos.ts`).
+ *
+ * Havia duas saídas: fronteira explícita por classe Unicode
+ * (`(?<!\p{L})…(?!\p{L})` com flag `u`) em cada padrão, ou dobrar os
+ * diacríticos e casar sem acento. **Esta é a segunda**, por três motivos: o
+ * glossário perde metade dos padrões (some todo `[áa]`, `[ãa]`, `[çc]`), a
+ * regra passa a valer para QUALQUER entrada futura sem que quem a escreve
+ * precise lembrar de nada, e o `\b` volta a ser correto porque o texto que ele
+ * vê é ASCII.
+ *
+ * O casamento é no texto dobrado; o recorte e a substituição são no texto
+ * ORIGINAL (ver `replaceFolded`) — o que não está no glossário sai daqui com
+ * os acentos que o usuário digitou. Por isso a dobra é 1 caractere por 1: se a
+ * decomposição não render exatamente um caractere, o original é mantido, e os
+ * índices das duas strings continuam alinhados.
+ */
+function foldDiacritics(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const folded = ch.normalize('NFD').replace(/\p{M}/gu, '');
+    out += ch.length === 1 && folded.length === 1 ? folded : ch;
+  }
+  return out;
+}
+
+/**
+ * Casa `re` no texto DOBRADO e substitui no texto ORIGINAL, na mesma posição.
+ *
+ * `re` não pode ser global nem sticky: o casamento é o primeiro, como o
+ * `String.prototype.replace` sem `/g` que este código usava antes.
+ */
+function replaceFolded(text: string, re: RegExp, replacement: string): string {
+  const m = re.exec(foldDiacritics(text));
+  if (!m) return text;
+  return text.slice(0, m.index) + replacement + text.slice(m.index + m[0].length);
+}
+
+/**
+ * Conectivos ingleses que denunciam uma descrição JÁ em inglês.
+ *
+ * Existe por causa de "tile of grass": a regra que remove a palavra da forma
+ * ("bloco", "cubo", "tile") sozinha via o "tile " inicial e devolvia
+ * "of grass". `tile` é palavra dos dois idiomas, e em inglês ela é o SUJEITO
+ * da frase, não um rodeio a descartar.
+ */
+const EN_CONNECTORS = 'of|with|on|in|and|from|for|over|under|made|that|which';
+
+/**
+ * Verbos de pedido e rodeios que o usuário escreve e o fornecedor não entende.
+ *
+ * O usuário deste editor escreve em português e conversando: os dois blocos
+ * pagos em disco têm descrição `"bloco de gero"` e `"quero um cubo de ossos"` —
+ * o segundo carrega o PEDIDO ("quero um"), não só o material. Isso ia inteiro
+ * para o `description` do `/create-isometric-tile`, e o modelo tinha de
+ * adivinhar o que "quero" desenha.
+ *
+ * A ordem importa: as frases mais longas vêm primeiro, para que "um bloco de"
+ * seja consumido antes de "bloco de".
+ *
+ * Os padrões são escritos SEM acento porque quem casa é o texto dobrado por
+ * `foldDiacritics` — "me dê" chega aqui como "me de", "faça" como "faca".
+ */
+const MATERIAL_REQUEST_PREFIXES: readonly RegExp[] = [
+  /^\s*(por\s+favor\s*,?\s*)/i,
+  /^\s*(eu\s+)?(quero|queria|gostaria\s+de|preciso\s+de|preciso|me\s+de|me\s+da|manda|mande)\s+/i,
+  /^\s*(gera|gere|gerar|cria|crie|criar|faz|faca|fazer|desenha|desenhe|desenhar|monta|monte|montar)\s+/i,
+  /^\s*(um|uma|o|a|uns|umas|os|as)\s+/i,
+  /^\s*(bloco|cubo|tijolo|textura|tile|pedaco|material)\s+(de|do|da|dos|das|em)\s+/i,
+  new RegExp(
+    `^\\s*(bloco|cubo|tijolo|textura|tile|material)\\s+(?!(?:${EN_CONNECTORS})\\b)`,
+    'i',
+  ),
+  /^\s*(feito\s+de|feita\s+de|com)\s+/i,
+];
+
+/**
+ * Adjetivos pt→en, aplicados ANTES do glossário de substantivos.
+ *
+ * Existem separados por causa da ORDEM: em português o adjetivo vem depois do
+ * substantivo ("pedra musgosa"), em inglês vem antes ("mossy stone"). Antes
+ * desta correção `musgos[oa]s?` estava no glossário de substantivos e virava
+ * "moss", produzindo `"stone moss"` — que em inglês é líquen, não pedra com
+ * musgo. Traduzir o adjetivo COMO adjetivo e depois movê-lo para a frente
+ * (`frontAdjectives`) é o que conserta a frase.
+ *
+ * A lista é curta de propósito: só entra o que é inequivocamente adjetivo. Não
+ * é um tradutor de português — é o piso de quem não tem `ANTHROPIC_API_KEY`.
+ */
+const MATERIAL_ADJECTIVES: ReadonlyArray<[RegExp, string]> = [
+  [/\bmusgos[oa]s?\b/i, 'mossy'],
+  [/\brachad[oa]s?\b|\btrincad[oa]s?\b/i, 'cracked'],
+  [/\bquebrad[oa]s?\b|\bpartid[oa]s?\b/i, 'broken'],
+  [/\bmolhad[oa]s?\b|\bumid[oa]s?\b/i, 'wet'],
+  [/\bsec[oa]s?\b/i, 'dry'],
+  [/\bescur[oa]s?\b/i, 'dark'],
+  [/\bclar[oa]s?\b/i, 'light'],
+  [/\bvelh[oa]s?\b|\bantig[oa]s?\b/i, 'old'],
+  [/\bgast[oa]s?\b|\bdesgastad[oa]s?\b/i, 'worn'],
+  [/\bpolid[oa]s?\b/i, 'polished'],
+  [/\bbrilhantes?\b/i, 'shiny'],
+  [/\blis[oa]s?\b/i, 'smooth'],
+];
+
+/**
+ * Glossário mínimo pt→en dos materiais que este editor gera.
+ *
+ * É heurística declarada, não tradução: cobre o vocabulário de terreno de um
+ * jogo isométrico e nada além disso. Sem `ANTHROPIC_API_KEY` é isto que separa
+ * "ossos" (que o fornecedor lê como ruído) de "bone" (que ele desenha). Com
+ * chave, quem traduz é o LLM e este mapa nunca é consultado.
+ *
+ * **Escreva os padrões SEM acento.** O texto contra o qual eles casam passa por
+ * `foldDiacritics` primeiro: "água" chega como "agua", "mármore" como
+ * "marmore". Escrever `[áa]` aqui não é só redundante — era o defeito, porque
+ * `\b` é ASCII e a alternativa acentuada nunca casava no início da string.
+ */
+const MATERIAL_GLOSSARY: ReadonlyArray<[RegExp, string]> = [
+  [/\boss(o|os)\b|\bcaveiras?\b|\besqueletos?\b/i, 'bone'],
+  [/\bgrama\b|\bcapim\b|\brelva\b/i, 'grass'],
+  [/\bterra\b|\bsolo\b|\bchao\b/i, 'dirt'],
+  [/\blama\b|\bbarro\b/i, 'mud'],
+  [/\bpedras?\b|\brochas?\b/i, 'stone'],
+  [/\bpedregulhos?\b|\bparalelepipedos?\b/i, 'cobblestone'],
+  [/\bgranitos?\b/i, 'granite'],
+  [/\bmarmores?\b/i, 'marble'],
+  [/\btijolos?\b|\balvenarias?\b/i, 'brick'],
+  [/\bmadeiras?\b|\btabuas?\b|\btoras?\b/i, 'wood'],
+  [/\bfolhas?\b|\bfolhagens?\b|\bmatos?\b|\barbustos?\b/i, 'leaves'],
+  [/\barvores?\b|\btroncos?\b/i, 'tree bark'],
+  [/\bagua\b|\bmar\b|\brio\b|\blago\b/i, 'water'],
+  [/\blavas?\b|\bmagmas?\b/i, 'lava'],
+  [/\bfogo\b|\bchamas?\b/i, 'fire'],
+  [/\bgelo\b|\bcongelad[oa]s?\b/i, 'ice'],
+  [/\bneves?\b/i, 'snow'],
+  [/\bareias?\b|\bdesertos?\b|\bdunas?\b/i, 'sand'],
+  [/\bmetais?\b|\bmetalic[oa]s?\b/i, 'metal'],
+  [/\bferros?\b/i, 'iron'],
+  [/\bacos?\b/i, 'steel'],
+  [/\bcobres?\b/i, 'copper'],
+  [/\bouros?\b|\bdourad[oa]s?\b/i, 'gold'],
+  [/\bpratas?\b|\bpratead[oa]s?\b/i, 'silver'],
+  [/\bcristais?\b|\bcristal\b/i, 'crystal'],
+  [/\bvidros?\b/i, 'glass'],
+  [/\bmusgos?\b/i, 'moss'],
+  [/\bnuvens?\b|\bnevoas?\b|\bneblinas?\b/i, 'cloud'],
+  [/\bmagic[oa]s?\b|\barcan[oa]s?\b|\bencantad[oa]s?\b/i, 'magic'],
+  [/\bpalhas?\b|\bfenos?\b/i, 'straw'],
+  [/\bcarvao\b/i, 'coal'],
+  [/\bcaix(a|as)\b|\bengradados?\b/i, 'wooden crate'],
+];
+
+/**
+ * Palavras que sobram quando o pedido não trazia material nenhum.
+ *
+ * A forma ("bloco", "cubo") e os conectivos ("de", "um") são exatamente o que
+ * os prefixos existem para remover. Se, depois de removê-los, TUDO que sobrou
+ * está nesta lista, o usuário não descreveu material — e mandar o resíduo ao
+ * fornecedor é pior que mandar o texto original. Era o que acontecia com
+ * `"um bloco de"`, que saía daqui como a preposição `"de"` e virava o
+ * `description` do request.
+ *
+ * Sem acento: a comparação é contra a palavra dobrada.
+ */
+const RESIDUE_WORDS: ReadonlySet<string> = new Set([
+  'bloco', 'blocos', 'cubo', 'cubos', 'tijolo', 'textura', 'texturas',
+  'tile', 'tiles', 'material', 'materiais', 'pedaco', 'pedacos',
+  'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'nos', 'nas', 'com',
+  'feito', 'feita', 'um', 'uma', 'uns', 'umas', 'o', 'a', 'os', 'as', 'e',
+]);
+
+/**
+ * Move para a frente os adjetivos que ESTE módulo produziu.
+ *
+ * Só mexe em palavras que saíram de `MATERIAL_ADJECTIVES` nesta execução —
+ * texto que o usuário escreveu em inglês nunca é reordenado, porque nenhuma
+ * palavra dele está na lista de aplicados. É reordenação de saída própria, não
+ * análise sintática: "stone mossy" → "mossy stone", e "grass on top of dirt"
+ * passa intacto.
+ */
+function frontAdjectives(text: string, applied: readonly string[]): string {
+  if (applied.length === 0) return text;
+  const set = new Set(applied);
+  const words = text.split(/\s+/).filter((w) => w !== '');
+  const adj = words.filter((w) => set.has(w.toLowerCase()));
+  if (adj.length === 0 || adj.length === words.length) return text;
+  const rest = words.filter((w) => !set.has(w.toLowerCase()));
+  return [...adj, ...rest].join(' ');
+}
+
+/**
+ * Fallback determinístico da normalização da descrição. NUNCA toca a rede.
+ *
+ * Faz quatro coisas, nesta ordem: tira os verbos de pedido do começo, traduz
+ * os adjetivos, traduz os substantivos do glossário e põe os adjetivos antes
+ * do substantivo, como o inglês exige. Se sobrar vazio (o usuário só escreveu
+ * "quero um") ou só resíduo de forma e preposição, devolve a descrição
+ * original aparada — perder o pedido inteiro seria pior que mandá-lo.
+ *
+ * Não é tradutor: uma frase em português que não esteja no glossário passa
+ * quase intacta, com os acentos que o usuário digitou. O caminho bom é o LLM;
+ * isto é o piso.
+ *
+ * O corte em `MATERIAL_MAX_LEN` é o mesmo do caminho do LLM: as duas pontas
+ * produzem um material do mesmo tamanho máximo.
+ */
+export function fallbackMaterial(description: string): string {
+  const original = description.trim().slice(0, MATERIAL_MAX_LEN).trim();
+  let text = description.trim();
+
+  // Verbos de pedido: aplica repetidamente, porque "quero um cubo de ossos"
+  // precisa de três passadas (quero → um → cubo de).
+  for (let round = 0; round < MATERIAL_REQUEST_PREFIXES.length; round += 1) {
+    let changed = false;
+    for (const re of MATERIAL_REQUEST_PREFIXES) {
+      const next = replaceFolded(text, re, '');
+      if (next !== text) {
+        text = next;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  text = text.trim().replace(/[.!?]+$/, '').trim();
+
+  // Sobrou vazio, ou sobrou só palavra de forma, artigo e preposição ("quero
+  // um bloco", "um bloco de"): não há material nenhum no pedido. Devolver a
+  // descrição original é pior prompt e ainda assim melhor que mandar "bloco"
+  // ou "de" — pelo menos o usuário reconhece o que escreveu quando o resultado
+  // sair errado.
+  const words = foldDiacritics(text)
+    .split(/\s+/)
+    .filter((w) => w !== '');
+  if (words.length === 0 || words.every((w) => RESIDUE_WORDS.has(w.toLowerCase()))) {
+    return original;
+  }
+
+  const applied: string[] = [];
+  for (const [re, en] of MATERIAL_ADJECTIVES) {
+    const next = replaceFolded(text, re, en);
+    if (next !== text) {
+      text = next;
+      applied.push(en);
+    }
+  }
+  for (const [re, en] of MATERIAL_GLOSSARY) text = replaceFolded(text, re, en);
+  text = frontAdjectives(text, applied);
+
+  return text.trim().slice(0, MATERIAL_MAX_LEN).trim();
+}
+
+/**
+ * Normaliza a descrição do usuário para o inglês de prompt de pixel art.
+ *
+ * Mesmo desenho de `generateActionViaLlm`: Claude Haiku pela `ANTHROPIC_API_KEY`
+ * do ambiente, e fallback determinístico quando a chave falta, a rede cai ou a
+ * API erra. O fallback NUNCA chama rede — é o que permite rodar a suíte inteira
+ * sem chave e sem sair da máquina.
+ *
+ * A temperatura é 0 de propósito: aqui não se quer criatividade, se quer a
+ * MESMA tradução para a mesma entrada. (A ação da animação usa 0.7 porque ali
+ * variação é o produto.)
+ *
+ * **O resultado NÃO entra no hash do bloco** — quem entra é a descrição crua do
+ * usuário. Se entrasse, o mesmo pedido hashearia diferente conforme houvesse ou
+ * não chave de LLM no ambiente, e o cache de um bloco já pago viraria uma
+ * segunda cobrança por mudança de variável de ambiente.
+ */
+async function normalizeMaterialViaLlm(
+  description: string,
+  onLog?: (m: string) => void,
+): Promise<{ material: string; llmGenerated: boolean }> {
+  const apiKey = process.env['ANTHROPIC_API_KEY'];
+  if (!apiKey) {
+    const material = fallbackMaterial(description);
+    onLog?.(
+      `[world-block] ANTHROPIC_API_KEY não definida — descrição normalizada por regra: "${material}".`,
+    );
+    return { material, llmGenerated: false };
+  }
+
+  try {
+    const prompt = [
+      'A user of a pixel-art game editor typed this block description,',
+      'usually in Brazilian Portuguese and often phrased as a request:',
+      `"${description}"`,
+      '',
+      'Extract ONLY the MATERIAL or terrain being asked for and write it in',
+      'English, as a short noun phrase suitable for a pixel-art image prompt.',
+      'Drop request verbs ("quero um", "gera um"), drop the words block/cube —',
+      'the shape is fixed by the pipeline, you only describe the material.',
+      'Keep any colour, wear or texture adjectives the user gave.',
+      'Keep it under 100 characters.',
+      'Respond with ONLY the phrase, no explanation, no quotes.',
+    ].join('\n');
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 100,
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      onLog?.(
+        `[world-block] LLM respondeu ${res.status} na normalização — usando regra. ${errText.slice(0, 120)}`,
+      );
+      return { material: fallbackMaterial(description), llmGenerated: false };
+    }
+
+    const body = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    const text = body.content?.find((c) => c.type === 'text')?.text?.trim();
+    if (!text || text.length === 0) {
+      onLog?.('[world-block] LLM devolveu normalização vazia — usando regra.');
+      return { material: fallbackMaterial(description), llmGenerated: false };
+    }
+
+    // O mesmo teto do fallback (`MATERIAL_MAX_LEN`): o tamanho do material não
+    // pode depender de haver ou não chave de LLM no ambiente.
+    const clean = text
+      .replace(/^["']|["']$/g, '')
+      .replace(/\n+/g, ' ')
+      .trim()
+      .slice(0, MATERIAL_MAX_LEN)
+      .trim();
+    onLog?.(`[world-block] descrição normalizada por LLM: "${description}" → "${clean}"`);
+    return { material: clean, llmGenerated: true };
+  } catch (err) {
+    onLog?.(
+      `[world-block] falha ao normalizar via LLM: ${err instanceof Error ? err.message : String(err)} — usando regra.`,
+    );
+    return { material: fallbackMaterial(description), llmGenerated: false };
+  }
 }
 
 // ---- idempotência
@@ -500,11 +930,7 @@ function inputHash(config: WorldBlockConfig): string {
   if (technique === 'texture') {
     // A técnica 'texture' inclui frameCount, fps, action, pingPong e
     // enhancePrompt — o que define a animação e o request. O cubo base
-    // também vem do /create-isometric-tile, mas com shape 'block' FIXO e
-    // nenhum campo de estilo: mandar outline/shading/detail/guidance
-    // variaria o artefato sem mudar o hash — proibido. Os marcadores novos
-    // (pingPong/enhancePrompt/views) dão hash novo para o request novo
-    // (no_background sempre vai junto) — os blocos antigos ficam arquivados.
+    // também vem do /create-isometric-tile, com shape 'block' FIXO.
     h.update(`|frameCount=${config.frameCount ?? 8}`);
     h.update(`|fps=${config.fps ?? DEFAULT_BLOCK_ANIMATION_FPS}`);
     h.update(`|action=${config.action ?? ''}`);
@@ -512,6 +938,40 @@ function inputHash(config: WorldBlockConfig): string {
     h.update(`|enhancePrompt=${config.enhancePrompt ?? true}`);
     if ((config.frameCount ?? 8) === 0) h.update('|animated=false');
     h.update('|views=1');
+    // A CADEIA DE PROMPT entra no hash pela versão, não pelo texto: o texto
+    // que chega ao fornecedor depende de haver ou não ANTHROPIC_API_KEY no
+    // ambiente, e hashear isso faria uma variável de ambiente cobrar de novo
+    // por um bloco já pago. O marcador sobe quando a cadeia muda de verdade.
+    //
+    // v2 (2026-08-04): a descrição passa a ser normalizada para inglês
+    // pixel-art; a frase da imagem de referência sai do prompt quando o molde
+    // não vai no request; o material entra no `action`. É outro artefato do
+    // mesmo pedido, e o hash tem de dizer isso.
+    //
+    // CUSTO CONTADO ANTES DE MUDAR: existem exatamente 2 blocos pagos em
+    // disco (assets/world-blocks/a880b32d82456c4e e df00c6479810988c, ambos
+    // technique 'texture'). Eles continuam em disco, continuam no catálogo e
+    // continuam renderizando — o hash novo não apaga nada e não regera nada
+    // sozinho. O teto do prejuízo é 2 regerações, e só se o usuário pedir de
+    // novo, de propósito, as MESMAS duas descrições.
+    h.update('|prompt=2');
+    // Os knobs de estilo do tile passaram a ser enviados no caminho 'texture'.
+    // Só entram no hash quando DIVERGEM do default do endpoint (spec
+    // vendorizado): mandar o default explícito produz a mesma arte que omitir,
+    // e dois hashes para o mesmo artefato é pagar duas vezes. Bloco que não
+    // mexe nos knobs hasheia hoje igual ao que hashearia antes deste bloco de
+    // código — é por isso que a mudança acima é a ÚNICA invalidação.
+    const guidance = config.textGuidanceScale ?? TILE_DEFAULT_TEXT_GUIDANCE;
+    if (guidance !== TILE_DEFAULT_TEXT_GUIDANCE) h.update(`|guidance=${guidance}`);
+    if (config.outline !== undefined && config.outline !== TILE_DEFAULT_OUTLINE) {
+      h.update(`|outline=${config.outline}`);
+    }
+    if (config.shading !== undefined && config.shading !== TILE_DEFAULT_SHADING) {
+      h.update(`|shading=${config.shading}`);
+    }
+    if (config.detail !== undefined && config.detail !== TILE_DEFAULT_DETAIL) {
+      h.update(`|detail=${config.detail}`);
+    }
   } else {
     h.update(`|shape=${config.shape ?? 'block'}`);
     h.update(`|tileUnit=${config.tileUnitSize ?? 16}`);
@@ -713,6 +1173,12 @@ interface WorldBlockManifestV3 {
   readonly geometry: ManifestGeometry;
   /** Ação da animação — o texto que foi enviado ao /animate-with-text-v3. */
   readonly action: string;
+  /**
+   * O material em inglês que a `description` do usuário virou — o texto que
+   * de fato chegou ao fornecedor. `description` guarda o que foi digitado;
+   * este campo, o que foi pedido.
+   */
+  readonly material?: string;
   /** Texto gerado pelo LLM (quando `action` não foi fornecido). */
   readonly llmGenerated?: boolean;
   /** true = textura animada; false = só o cubo base (frameCount 0). */
@@ -956,9 +1422,10 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
           spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
           animationUrl: `/world-blocks/${hash}/animation.json`,
           // O cubo base existe mesmo quando há animação, e é ELE que o editor
-          // 3D usa como sprite do bloco — a spritesheet é uma textura plana de
-          // 48×48 por quadro, que não descreve o volume. Declarar a URL aqui
-          // evita que o cliente a adivinhe a partir do hash.
+          // 3D usa como sprite do bloco — a spritesheet é uma tira plana de
+          // quadros do mesmo tamanho do frame que a API devolveu (o do cubo
+          // base), e nenhum deles descreve o volume. Declarar a URL aqui evita
+          // que o cliente a adivinhe a partir do hash.
           ...(existsSync(baseImagePath(assetsDir, hash))
             ? { baseUrl: `/world-blocks/${hash}/base.png` }
             : {}),
@@ -1386,6 +1853,7 @@ const ACTION_FALLBACK: ReadonlyArray<[RegExp, string]> = [
   [/\b(cloud|sky|mist|fog)\b/i, 'clouds drifting slowly with soft wisps of vapor and gentle light changes'],
   [/\b(magic|arcane|spell|enchanted)\b/i, 'magical energy pulsating gently with subtle sparkles and ethereal glow'],
   [/\b(snow|winter)\b/i, 'snow sparkling gently with subtle light reflection and soft drifting particles'],
+  [/\b(bone|skull|skeleton|ivory)\b/i, 'bone surface with subtle pale shimmer and slow shifting shadows in the crevices'],
 ];
 
 function fallbackAction(description: string): string {
@@ -1396,30 +1864,64 @@ function fallbackAction(description: string): string {
 }
 
 /**
+ * Costura o material dentro da ação da animação.
+ *
+ * **`action` é o ÚNICO texto que o `/animate-with-text-v3` recebe** — o
+ * required do endpoint é `first_frame` + `action`, e mais nada carrega a
+ * descrição do bloco. Antes desta correção o material morria no estágio do
+ * tile: a animação via só um movimento genérico, e o resultado prova. O bloco
+ * pago `df00c6479810988c` foi pedido como "quero um cubo de ossos", recebeu a
+ * ação-coringa `"subtle ambient motion…"` e voltou com um `enhanced_prompt`
+ * que fala de "cubic stone structure" — pedra, não osso. A API expandiu o que
+ * ela recebeu, e o que ela recebeu não dizia osso em lugar nenhum.
+ *
+ * Se a ação já nomeia o material (o caso comum quando o LLM a escreveu), não
+ * repete: prompt com o mesmo substantivo duas vezes não guia melhor.
+ */
+export function actionWithMaterial(action: string, material: string): string {
+  const act = action.trim();
+  const mat = material.trim();
+  if (mat === '') return act;
+  const alreadyNamed = new RegExp(
+    `\\b${mat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+    'i',
+  ).test(act);
+  const composed = alreadyNamed ? act : `${act}, on a pixel art cube made of ${mat}`;
+  return composed.slice(0, 500);
+}
+
+/**
  * Gera o texto de ação da animação via LLM.
  *
  * Chama a Anthropic API com uma chave do ambiente (`ANTHROPIC_API_KEY`).
  * Em caso de falha (sem chave, sem rede, erro da API), cai no fallback
- * determinístico — a ação de fallback entra no hash do bloco, então o
- * cache é separado e o bloco pode ser regerado com LLM quando disponível.
+ * determinístico.
+ *
+ * **Recebe o MATERIAL normalizado, não a descrição crua.** A tabela de
+ * `ACTION_FALLBACK` é toda de regexes em inglês: contra "quero um cubo de
+ * ossos" nenhuma das treze casava e todo bloco caía na mesma string-coringa.
+ * Contra "bone" a tabela funciona — a normalização conserta o fallback de
+ * graça, além de consertar o prompt.
  */
 async function generateActionViaLlm(
-  description: string,
+  material: string,
   onLog?: (m: string) => void,
 ): Promise<{ action: string; llmGenerated: boolean }> {
   const apiKey = process.env['ANTHROPIC_API_KEY'];
   if (!apiKey) {
     onLog?.('[world-block] ANTHROPIC_API_KEY não definida — usando fallback para ação da animação.');
-    return { action: fallbackAction(description), llmGenerated: false };
+    return { action: fallbackAction(material), llmGenerated: false };
   }
 
   try {
     const prompt = [
-      'Given a block described as:',
-      `"${description}"`,
+      'Given an isometric pixel-art block made of:',
+      `"${material}"`,
       '',
       'Write a short animation action for a pixel-art sprite animation API.',
-      'Describe subtle ambient motion appropriate for this material.',
+      'Describe subtle ambient motion appropriate for this material,',
+      'and name the material explicitly — the animation endpoint receives the',
+      'action text and nothing else about the block.',
       'Keep it under 200 characters.',
       'Respond with ONLY the action text, no explanation, no quotes.',
     ].join('\n');
@@ -1442,7 +1944,7 @@ async function generateActionViaLlm(
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       onLog?.(`[world-block] LLM respondeu ${res.status} — usando fallback. ${errText.slice(0, 120)}`);
-      return { action: fallbackAction(description), llmGenerated: false };
+      return { action: fallbackAction(material), llmGenerated: false };
     }
 
     const body = (await res.json()) as {
@@ -1451,7 +1953,7 @@ async function generateActionViaLlm(
     const text = body.content?.find((c) => c.type === 'text')?.text?.trim();
     if (!text || text.length === 0) {
       onLog?.('[world-block] LLM devolveu resposta vazia — usando fallback.');
-      return { action: fallbackAction(description), llmGenerated: false };
+      return { action: fallbackAction(material), llmGenerated: false };
     }
 
     // Limpa formatação residual que o LLM possa ter incluído
@@ -1462,7 +1964,7 @@ async function generateActionViaLlm(
     onLog?.(
       `[world-block] falha ao chamar LLM: ${err instanceof Error ? err.message : String(err)} — usando fallback.`,
     );
-    return { action: fallbackAction(description), llmGenerated: false };
+    return { action: fallbackAction(material), llmGenerated: false };
   }
 }
 
@@ -1471,11 +1973,14 @@ async function generateActionViaLlm(
 /**
  * Gera o cubo pixel-art do material via /create-isometric-tile.
  *
- * O molde do cubo (cube-mould.ts) entra como `init_image` com força alta
- * (DEFAULT_INIT_IMAGE_STRENGTH): o endpoint não tem parâmetro de proporção,
- * então a referência é a única alavanca de forma. O prompt (cubePrompt) pede
- * para respeitar a forma e o tamanho exatos do molde, na vista 'low top-down'
- * do projeto (ADR 0005).
+ * O `description` que chega aqui é o MATERIAL já normalizado para inglês
+ * pixel-art (`normalizeMaterialViaLlm`), nunca o texto cru do usuário: o
+ * fornecedor não sabe o que desenhar com "quero um cubo de ossos".
+ *
+ * O molde do cubo (cube-mould.ts) entra como `init_image` na força do spec
+ * (TEXTURE_INIT_IMAGE_STRENGTH): o endpoint não tem parâmetro de proporção,
+ * então a referência é a alavanca de forma que existe. A vista é a
+ * 'low top-down' do projeto (ADR 0005).
  *
  * O endpoint devolve PIXELS RGBA CRUS no canvas da API (48×56, múltiplo de 4)
  * — apiBytesToCanonicalPng() recorta para o quadro canônico 48×53 antes de
@@ -1484,13 +1989,17 @@ async function generateActionViaLlm(
  * O `init_image` do /create-isometric-tile está QUEBRADO no fornecedor
  * (verificado 2026-08-01, spec "dev"): a validação Pydantic exige PNG e o
  * worker exige RGBA cru — nenhum payload satisfaz os dois estágios. O 422 é
- * SÍNCRONO e custa $0: quando recusada, resubmete SEM o molde, e a forma fica
- * por conta do prompt. Quando o fornecedor consertar, a primeira tentativa
- * volta a valer e o fallback nunca dispara.
+ * SÍNCRONO e custa $0: quando recusada, resubmete SEM o molde — **e o prompt é
+ * reescrito junto**, sem a frase que manda casar com a referência. Antes desta
+ * correção a frase ficava pendurada num request que não levava imagem alguma,
+ * competindo com o material pedido. Quando o fornecedor consertar, a primeira
+ * tentativa volta a valer e o fallback nunca dispara.
  *
- * Só entram no request os campos que participam do hash da técnica: o shape
- * é 'block' FIXO e nenhum campo de estilo (outline/shading/detail) é mandado —
- * mandá-los variaria o artefato sem mudar o hash.
+ * Os knobs de estilo do tile vão quando configurados, e o `text_guidance_scale`
+ * vai SEMPRE: é ele que decide "how closely to follow the text description", e
+ * deixá-lo implícito era metade do problema desta bancada. Cada um entra no
+ * hash só quando diverge do default do endpoint (ver `inputHash`). O shape
+ * continua 'block' FIXO.
  */
 async function generateBaseImage(
   client: PixelLabClient,
@@ -1499,6 +2008,7 @@ async function generateBaseImage(
   basePath: string,
   apiSize: ImageSize,
   frameSize: ImageSize,
+  config: WorldBlockConfig,
   onLog?: (m: string) => void,
 ): Promise<{
   readonly b64: string;
@@ -1540,11 +2050,16 @@ async function generateBaseImage(
   }
 
   const params: Record<string, unknown> = {
-    description: cubePrompt(description),
+    description: cubePrompt(description, { hasReference: true }),
     image_size: apiSize,
     isometric_tile_shape: 'block',
+    // "How closely to follow the text description" (spec). Vai sempre.
+    text_guidance_scale: config.textGuidanceScale ?? TILE_DEFAULT_TEXT_GUIDANCE,
+    ...(config.outline !== undefined ? { outline: config.outline } : {}),
+    ...(config.shading !== undefined ? { shading: config.shading } : {}),
+    ...(config.detail !== undefined ? { detail: config.detail } : {}),
     init_image: asBase64Image(padPngToApiCanvas(mouldBase64(), apiSize)),
-    init_image_strength: DEFAULT_INIT_IMAGE_STRENGTH,
+    init_image_strength: TEXTURE_INIT_IMAGE_STRENGTH,
     seed,
   };
 
@@ -1569,6 +2084,10 @@ async function generateBaseImage(
     );
     delete params['init_image'];
     delete params['init_image_strength'];
+    // Sem molde, a frase que manda casar com a referência sai do prompt junto
+    // com a referência. Deixá-la é pedir ao modelo que copie uma imagem que
+    // ninguém mandou.
+    params['description'] = cubePrompt(description);
     res = await client.submit<IsometricTileResponse>('create-isometric-tile', params);
   }
 
@@ -1607,6 +2126,13 @@ interface AnimSidecar {
   readonly fps: number;
   readonly frameCount: number;
   readonly action: string;
+  /**
+   * O material em inglês que a descrição do usuário virou — o texto que de
+   * fato foi para o fornecedor. Gravado porque, quando o bloco sai errado, a
+   * primeira pergunta é "o que exatamente foi pedido?", e até 2026-08-04 a
+   * resposta não existia em lugar nenhum.
+   */
+  readonly material?: string;
   readonly llmGenerated?: boolean;
   /** Ping-pong (vai-e-volta) na reprodução. Default true. */
   readonly pingPong?: boolean;
@@ -1623,6 +2149,17 @@ interface AnimSidecar {
  * Sem dependência de sharp: os frames já chegam como PNGs prontos da API.
  * A "spritesheet" é uma tira horizontal montada copiando os buffers PNG
  * decodificados como RGBA cru.
+ *
+ * **O quadro sai do frame decodificado, nunca de um número fixo.** Até
+ * 2026-08-04 este código assumia 48×48; o `first_frame` que ele mesmo manda é
+ * o cubo canônico 48×53, e o `/animate-with-text-v3` devolve frames do tamanho
+ * do primeiro. Os dois blocos pagos em disco provam o estrago: os PNGs em
+ * `frames/` são 48×53 e as folhas gravadas ficaram 432×48 e 240×48 — as cinco
+ * linhas da base do cubo, já pagas, foram cortadas de toda a spritesheet. Pior
+ * ainda seria um frame de largura diferente: o laço copiava com passo
+ * `y * 48 * 4` sobre um buffer de outra largura e cisalharia a folha inteira.
+ * Agora o passo é a largura REAL de cada frame, e o recorte é o mínimo entre
+ * frame e quadro.
  */
 async function packSpritesheet(
   assetsDir: string,
@@ -1637,8 +2174,23 @@ async function packSpritesheet(
   const framesDir = join(blockDir(assetsDir, hash), 'frames');
   await mkdir(framesDir, { recursive: true });
 
-  const frameWidth = 48;
-  const frameHeight = 48;
+  // Fallback de decodificação: só entra em cena se o fornecedor mandar RGBA
+  // cru em vez de PNG, como o /create-isometric-tile faz (ver png.ts).
+  //
+  // São DUAS formas aceitas, e não uma. A canônica é o cubo 48×53, o tamanho
+  // do `first_frame` que este código manda. A outra é a quadrada 48×48, que
+  // era a única aceita até 2026-08-04 — e não há evidência nenhuma de que ela
+  // tenha deixado de poder ocorrer: o `/animate-with-text-v3` não documenta o
+  // tamanho do frame que devolve, e blocos gerados antes desta correção
+  // existem em disco. Estreitar o aceite sem prova transformaria em exceção um
+  // frame JÁ PAGO que hoje é gravado sem reclamação. Um buffer cru só casa uma
+  // das duas formas (9216 ≠ 10176 bytes), então aceitar as duas não é ambíguo.
+  const canonW = BLOCK_GEOMETRY.spriteWidth;
+  const canonH = BLOCK_GEOMETRY.spriteHeight;
+  const RAW_SHAPES: ReadonlyArray<readonly [number, number]> = [
+    [canonW, canonH],
+    [canonW, canonW],
+  ];
 
   // Decodifica frames para RGBA cru (são PNGs)
   const decoded: Array<{ width: number; height: number; rgba: Buffer }> = [];
@@ -1649,13 +2201,32 @@ async function packSpritesheet(
       const img = decode(png);
       decoded.push(img);
     } catch {
-      // Fallback: frame não é PNG válido, tenta como RGBA cru
-      if (png.length === frameWidth * frameHeight * 4) {
-        decoded.push({ width: frameWidth, height: frameHeight, rgba: png });
+      // Fallback: frame não é PNG válido, tenta como RGBA cru nas formas conhecidas
+      const shape = RAW_SHAPES.find(([w, h]) => png.length === w * h * 4);
+      if (shape) {
+        decoded.push({ width: shape[0], height: shape[1], rgba: png });
       } else {
-        throw new Error(`frame ${i} não é PNG nem RGBA cru de ${frameWidth}×${frameHeight}`);
+        throw new Error(
+          `frame ${i} não é PNG nem RGBA cru de ` +
+            RAW_SHAPES.map(([w, h]) => `${w}×${h}`).join(' ou ') +
+            ` (${png.length} bytes)`,
+        );
       }
     }
+  }
+
+  // O quadro da folha é o do PRIMEIRO frame decodificado — é o tamanho que a
+  // API devolveu, que é o tamanho do first_frame que mandamos.
+  const first = decoded[0]!;
+  const frameWidth = first.width;
+  const frameHeight = first.height;
+  const ragged = decoded.some((d) => d.width !== frameWidth || d.height !== frameHeight);
+  if (ragged) {
+    onLog?.(
+      `[world-block] AVISO: os frames não têm todos ${frameWidth}×${frameHeight}. ` +
+        'A folha usa o quadro do primeiro e recorta o resto — nada é cisalhado, ' +
+        'mas pode faltar borda em algum frame.',
+    );
   }
 
   // Monta tira horizontal como RGBA cru
@@ -1665,10 +2236,13 @@ async function packSpritesheet(
 
   for (let i = 0; i < decoded.length; i++) {
     const img = decoded[i]!;
-    for (let y = 0; y < frameHeight; y++) {
-      const srcOff = y * frameWidth * 4;
+    const rows = Math.min(img.height, frameHeight);
+    const cols = Math.min(img.width, frameWidth);
+    for (let y = 0; y < rows; y++) {
+      // O passo da ORIGEM é a largura do próprio frame; o do DESTINO é a folha.
+      const srcOff = y * img.width * 4;
       const dstOff = (y * totalWidth + i * frameWidth) * 4;
-      img.rgba.copy(sheetRgba, dstOff, srcOff, srcOff + frameWidth * 4);
+      img.rgba.copy(sheetRgba, dstOff, srcOff, srcOff + cols * 4);
     }
   }
 
@@ -1964,6 +2538,8 @@ export async function runWorldBlock(
   let textureActualFrameCount = 0;
   /** `enhanced_prompt` devolvido pelo fornecedor (POST ou `last_response` do job). */
   let textureEnhancedPrompt: string | undefined;
+  /** O material normalizado desta execução — vai ao manifesto v3. */
+  let textureMaterial: string | undefined;
 
   if (technique === 'chained') {
     // ---- molde encadeado: norte nasce do molde; o resultado é o molde das outras.
@@ -2070,6 +2646,23 @@ export async function runWorldBlock(
     let actionText: string;
     let llmGenerated = false;
 
+    /**
+     * O MATERIAL em inglês pixel-art, derivado da descrição do usuário.
+     *
+     * Calculado UMA vez e só quando alguma etapa vai realmente submeter: com o
+     * bloco inteiro em disco não há prompt a montar, e uma chamada de LLM por
+     * execução em cache seria custo (de latência e de token) sem produto.
+     *
+     * Não entra no hash — quem entra é `config.description`, o texto cru. Ver
+     * o comentário em `inputHash`.
+     */
+    let materialCache: { material: string; llmGenerated: boolean } | null = null;
+    const materialOf = async (): Promise<string> => {
+      materialCache ??= await normalizeMaterialViaLlm(config.description, opts.onLog);
+      textureMaterial = materialCache.material;
+      return materialCache.material;
+    };
+
     // 1. Cubo base (create-isometric-tile, molde como init_image) — ou cache.
     //    Existe nas DUAS variantes: animada e estática (frameCount 0).
     if (!existsSync(basePath)) {
@@ -2081,11 +2674,12 @@ export async function runWorldBlock(
 
       const baseImg = await generateBaseImage(
         client,
-        config.description,
+        await materialOf(),
         baseSeedNum,
         basePath,
         apiSize,
         imageSize,
+        config,
         opts.onLog,
       );
       if (baseImg.resumed) {
@@ -2117,18 +2711,23 @@ export async function runWorldBlock(
     // 2+3 só existem na variante animada — frameCount 0 pula LLM e
     // animate-with-text-v3: o cubo base é o artefato final.
     if (animated) {
-      // 2. Ação da animação — LLM ou config explícita.
-      if (config.action !== undefined && config.action.trim().length > 0) {
-        actionText = config.action.trim();
-        llmGenerated = false;
-      } else {
-        const result = await generateActionViaLlm(config.description, opts.onLog);
-        actionText = result.action;
-        llmGenerated = result.llmGenerated;
-      }
-
-      // 3. Animação (animate-with-text-v3) — ou retomada.
+      // 2+3. Ação da animação e a submissão — só quando falta a spritesheet.
+      //      Com a folha em disco não há prompt a montar, e montá-lo assim
+      //      mesmo era uma ida ao LLM por execução em cache.
       if (!existsSync(sheetPath)) {
+        // A ação nasce do LLM ou da config, e em ambos os casos o MATERIAL é
+        // costurado dentro: `action` é o único texto que o
+        // /animate-with-text-v3 vê (ver actionWithMaterial).
+        const materialForAction = await materialOf();
+        if (config.action !== undefined && config.action.trim().length > 0) {
+          actionText = actionWithMaterial(config.action.trim(), materialForAction);
+          llmGenerated = false;
+        } else {
+          const result = await generateActionViaLlm(materialForAction, opts.onLog);
+          actionText = actionWithMaterial(result.action, materialForAction);
+          llmGenerated = result.llmGenerated;
+        }
+
         let animStub: AnimStub | null = null;
         if (existsSync(stubPath)) {
           try {
@@ -2246,6 +2845,7 @@ export async function runWorldBlock(
           fps,
           frameCount: frames.length,
           action: actionText,
+          material: materialForAction,
           llmGenerated,
           pingPong: config.pingPong ?? true,
           enhancePrompt: config.enhancePrompt ?? true,
@@ -2552,12 +3152,14 @@ export async function runWorldBlock(
       let actionText = config.action ?? '';
       let llmGenerated = false;
       let enhancedPromptFromSidecar: string | undefined;
+      let materialFromSidecar: string | undefined;
       if (existsSync(animSidecarPath(opts.assetsDir, hash))) {
         try {
           const sc = JSON.parse(await readFile(animSidecarPath(opts.assetsDir, hash), 'utf8')) as AnimSidecar;
           actionText = sc.action;
           llmGenerated = sc.llmGenerated ?? false;
           enhancedPromptFromSidecar = sc.enhancedPrompt;
+          materialFromSidecar = sc.material;
         } catch { /* mantém defaults */ }
       }
 
@@ -2573,6 +3175,13 @@ export async function runWorldBlock(
         description: config.description,
         geometry: MANIFEST_GEOMETRY,
         action: actionText,
+        // O material sobrevive à retomada pelo sidecar; o manifesto anterior é
+        // o último recurso, para um bloco estático (frameCount 0) que não tem
+        // sidecar nenhum.
+        ...((): { material?: string } => {
+          const material = textureMaterial ?? materialFromSidecar ?? prevV3?.material;
+          return material ? { material } : {};
+        })(),
         ...(llmGenerated ? { llmGenerated } : {}),
         animated: frameCount > 0,
         ...(frameCount > 0 ? { pingPong: config.pingPong ?? true } : {}),

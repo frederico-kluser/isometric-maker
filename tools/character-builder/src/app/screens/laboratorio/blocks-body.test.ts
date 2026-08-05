@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWorldBlockBody, type BlockFormInput } from './blocks-body.ts';
+import { buildWorldBlockBody, TILE_DEFAULTS, type BlockFormInput } from './blocks-body.ts';
 
 function form(over: Partial<BlockFormInput> = {}): BlockFormInput {
   return {
@@ -84,6 +84,44 @@ test('action entra aparada quando informada; em branco é omitida', () => {
   const semAcao = buildWorldBlockBody(form({ action: '   ' }));
   assert.ok(semAcao.ok);
   assert.ok(!('action' in semAcao.body));
+});
+
+/**
+ * Os knobs de estilo do tile seguem a regra de omissão, e por dinheiro: no
+ * servidor, knob no default do endpoint hasheia igual a knob omitido — mesma
+ * arte, mesmo artefato, um pagamento só. Mandar o default de volta faria as
+ * duas pontas discordarem sobre o que é "o mesmo bloco".
+ */
+test('knob no default do fornecedor é OMITIDO do body', () => {
+  const built = buildWorldBlockBody(
+    form({
+      textGuidanceScale: TILE_DEFAULTS.textGuidanceScale,
+      outline: TILE_DEFAULTS.outline,
+      shading: TILE_DEFAULTS.shading,
+      detail: TILE_DEFAULTS.detail,
+    }),
+  );
+  assert.ok(built.ok);
+  assert.ok(!('textGuidanceScale' in built.body));
+  assert.ok(!('outline' in built.body));
+  assert.ok(!('shading' in built.body));
+  assert.ok(!('detail' in built.body));
+});
+
+test('knob fora do default entra no body', () => {
+  const built = buildWorldBlockBody(
+    form({
+      textGuidanceScale: 14,
+      outline: 'selective outline',
+      shading: 'detailed shading',
+      detail: 'highly detailed',
+    }),
+  );
+  assert.ok(built.ok);
+  assert.equal(built.body.textGuidanceScale, 14);
+  assert.equal(built.body.outline, 'selective outline');
+  assert.equal(built.body.shading, 'detailed shading');
+  assert.equal(built.body.detail, 'highly detailed');
 });
 
 test('os toggles enhancePrompt e pingPong vão SEMPRE no body, ligados ou não', () => {

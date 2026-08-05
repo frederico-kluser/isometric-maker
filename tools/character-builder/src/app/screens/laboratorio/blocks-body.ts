@@ -11,17 +11,64 @@
  * verdade, antes de gastar dinheiro, é `validateWorldBlockConfig`.
  *
  * O laboratório só gera cubos por textura animada (ADR 0032): a técnica é
- * FIXA em `texture` e os campos de tile (shape, outline, shading, detail,
- * guidance, seed) não se aplicam — o servidor os ignora nessa técnica.
+ * FIXA em `texture`. Desde 2026-08-04 os knobs de estilo do
+ * `/create-isometric-tile` (`text_guidance_scale`, `outline`, `shading`,
+ * `detail`) VALEM nessa técnica — o servidor os envia. O `shape` continua
+ * fixo em 'block' e a `seed` continua derivada do hash.
  */
 
 /** Erros que a tela detecta sozinha. O resto vem em pt-BR do servidor. */
 export type BlockErrorCode = 'description-missing';
 
+/** Enums do `/create-isometric-tile`, cópia do spec vendorizado. */
+export const OUTLINE_OPTIONS = [
+  'single color outline',
+  'selective outline',
+  'lineless',
+] as const;
+export type OutlineOption = (typeof OUTLINE_OPTIONS)[number];
+
+export const SHADING_OPTIONS = [
+  'flat shading',
+  'basic shading',
+  'medium shading',
+  'detailed shading',
+  'highly detailed shading',
+] as const;
+export type ShadingOption = (typeof SHADING_OPTIONS)[number];
+
+export const DETAIL_OPTIONS = ['low detail', 'medium detail', 'highly detailed'] as const;
+export type DetailOption = (typeof DETAIL_OPTIONS)[number];
+
+/**
+ * Defaults do endpoint, do spec vendorizado. O painel usa como valor inicial,
+ * e é por eles que `buildWorldBlockBody` decide o que OMITIR: mandar o default
+ * do fornecedor de volta para ele é ruído no request e, no servidor, mais um
+ * campo a comparar no hash.
+ */
+export const TILE_DEFAULTS = {
+  textGuidanceScale: 8,
+  outline: 'lineless',
+  shading: 'basic shading',
+  detail: 'medium detail',
+} as const;
+
 export interface WorldBlockBody {
   readonly description: string;
   /** Técnica fixa: única forma de gerar bloco no laboratório hoje (ADR 0032). */
   readonly technique: 'texture';
+  /**
+   * `text_guidance_scale` do spec, 1–20. É ele que decide o quanto a arte
+   * segue o texto — o campo mais direto contra "o bloco não parece o que eu
+   * pedi". Omitido quando está no default do endpoint (8).
+   */
+  readonly textGuidanceScale?: number;
+  /** `outline` do spec. Omitido no default ('lineless'). */
+  readonly outline?: OutlineOption;
+  /** `shading` do spec. Omitido no default ('basic shading'). */
+  readonly shading?: ShadingOption;
+  /** `detail` do spec. Omitido no default ('medium detail'). */
+  readonly detail?: DetailOption;
   /**
    * Número de frames da animação. 0 (Estático), 4, 8 ou 16
    * (padrão do servidor: 8).
@@ -71,6 +118,11 @@ export interface WorldBlockResult {
 
 export interface BlockFormInput {
   readonly description: string;
+  /** `text_guidance_scale` (1–20). Default do painel = default do endpoint. */
+  readonly textGuidanceScale?: number;
+  readonly outline?: OutlineOption;
+  readonly shading?: ShadingOption;
+  readonly detail?: DetailOption;
   /** Número de frames da animação (técnica 'texture'). 0 = Estático. */
   readonly frameCount?: 0 | 4 | 8 | 16;
   /** FPS da animação (técnica 'texture'). */
@@ -94,6 +146,11 @@ export type BuildResult =
  * endpoint tem defaults próprios, e mandar vazio troca o default do fornecedor
  * por um palpite nosso.
  *
+ * Os knobs de estilo do tile seguem a mesma regra por um motivo de DINHEIRO:
+ * no servidor, um knob no default do endpoint hasheia igual a um knob omitido
+ * (mesma arte ⇒ mesmo artefato ⇒ um pagamento só). Omitir aqui o que está no
+ * default mantém as duas pontas dizendo a mesma coisa.
+ *
  * Os toggles booleanos (enhancePrompt, pingPong) são exceção: o painel é dono
  * deles e envia SEMPRE — o default do endpoint (enhance_prompt=false) não é o
  * default do painel (ligado), e omitir faria a geração divergir do toggle.
@@ -109,6 +166,19 @@ export function buildWorldBlockBody(input: BlockFormInput): BuildResult {
     body: {
       description,
       technique: 'texture',
+      ...(input.textGuidanceScale !== undefined &&
+      input.textGuidanceScale !== TILE_DEFAULTS.textGuidanceScale
+        ? { textGuidanceScale: input.textGuidanceScale }
+        : {}),
+      ...(input.outline !== undefined && input.outline !== TILE_DEFAULTS.outline
+        ? { outline: input.outline }
+        : {}),
+      ...(input.shading !== undefined && input.shading !== TILE_DEFAULTS.shading
+        ? { shading: input.shading }
+        : {}),
+      ...(input.detail !== undefined && input.detail !== TILE_DEFAULTS.detail
+        ? { detail: input.detail }
+        : {}),
       ...(input.frameCount !== undefined ? { frameCount: input.frameCount } : {}),
       ...(input.fps !== undefined ? { fps: input.fps } : {}),
       ...(action !== '' ? { action } : {}),

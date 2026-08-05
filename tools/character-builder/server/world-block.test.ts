@@ -47,6 +47,9 @@ import {
   isWorldBlockHash,
   facingPrompt,
   cubePrompt,
+  fallbackMaterial,
+  MATERIAL_MAX_LEN,
+  actionWithMaterial,
   worldBlockHash,
   padPngToApiCanvas,
   apiBytesToCanonicalPng,
@@ -82,17 +85,17 @@ function pngChunk(type: string, data: Buffer): Buffer {
 }
 
 /** PNG RGBA válido e DECODIFICÁVEL (tipo de cor 6); `fill` distingue arquivos. */
-function makePNG(side: number, fill: number): Buffer {
+function makePNGRect(width: number, height: number, fill: number): Buffer {
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(side, 0);
-  ihdr.writeUInt32BE(side, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;
   ihdr[9] = 6;
-  const raw = Buffer.alloc(side * (1 + side * 4));
-  for (let y = 0; y < side; y += 1) {
-    const row = y * (1 + side * 4);
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (1 + width * 4);
     raw[row] = 0;
-    for (let x = 0; x < side; x += 1) {
+    for (let x = 0; x < width; x += 1) {
       const px = row + 1 + x * 4;
       raw[px] = fill & 0xff;
       raw[px + 1] = (fill * 7) & 0xff;
@@ -106,6 +109,10 @@ function makePNG(side: number, fill: number): Buffer {
     pngChunk('IDAT', deflateSync(raw)),
     pngChunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+function makePNG(side: number, fill: number): Buffer {
+  return makePNGRect(side, side, fill);
 }
 
 /** Um PNG distinto por seed — é como provamos qual chamada produziu o quê. */
@@ -154,6 +161,9 @@ class FakeClient extends PixelLabClient {
   rejectImageInputs = false;
   /** Quando definido, o POST de animação devolve `enhanced_prompt`. */
   animEnhancedPrompt: string | undefined;
+  /** Quadro dos frames devolvidos pela animação. Default: o canônico 48×53. */
+  animFrameWidth = BLOCK_GEOMETRY.spriteWidth;
+  animFrameHeight = BLOCK_GEOMETRY.spriteHeight;
 
   override async request<T>(
     method: string,
@@ -229,14 +239,24 @@ class FakeClient extends PixelLabClient {
       const id = path.slice('/background-jobs/'.length);
       if (id.startsWith('animjob-')) {
         // O job da animação de textura traz os frames prontos em
-        // last_response.images[] — 4 frames 48×48.
+        // last_response.images[] — 4 frames no QUADRO CANÔNICO 48×53.
+        //
+        // Não é detalhe do fake: o `first_frame` que o world-block manda é o
+        // cubo base 48×53, e o /animate-with-text-v3 devolve frames do tamanho
+        // do primeiro. Os dois blocos pagos em disco têm frames 48×53. Um fake
+        // que devolvesse 48×48 quadrado esconderia justamente o bug de recorte
+        // que o packSpritesheet tinha.
         return this.ok<T>({
           id,
           status: 'completed',
           created_at: '2026-08-01T00:00:00Z',
           last_response: {
             images: [1, 2, 3, 4].map((fill) => ({
-              base64: makePNG(48, fill).toString('base64'),
+              base64: makePNGRect(
+                this.animFrameWidth,
+                this.animFrameHeight,
+                fill,
+              ).toString('base64'),
             })),
           },
         });
@@ -469,6 +489,28 @@ test('texture: frameCount, fps e action entram no hash; defaults explícitos nã
   assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, frameCount: 4 }));
   assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, fps: 4 }));
   assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, action: 'flowing' }));
+});
+
+/**
+ * Os knobs de estilo do tile passaram a ser enviados na técnica 'texture'.
+ * Mandar o default do endpoint produz a MESMA arte que omitir o campo — então
+ * os dois têm de hashear igual, senão o mesmo artefato é comprado duas vezes.
+ * Os defaults vêm do spec vendorizado (CreateIsometricTileRequest).
+ */
+test('texture: knob no default do endpoint hasheia igual a knob omitido', () => {
+  const t = textureConfig();
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, textGuidanceScale: 8 }));
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, outline: 'lineless' }));
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, shading: 'basic shading' }));
+  assert.equal(worldBlockHash(t), worldBlockHash({ ...t, detail: 'medium detail' }));
+});
+
+test('texture: knob FORA do default é outro artefato e tem outro hash', () => {
+  const t = textureConfig();
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, textGuidanceScale: 14 }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, outline: 'selective outline' }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, shading: 'detailed shading' }));
+  assert.notEqual(worldBlockHash(t), worldBlockHash({ ...t, detail: 'highly detailed' }));
 });
 
 test('default explícito e omitido têm o MESMO hash (não se paga duas vezes o mesmo request)', () => {
@@ -950,6 +992,144 @@ test('rotated: mapeamento diferente no manifesto invalida a leitura e rederiva d
   }
 });
 
+// ------------------------------------------------------------ normalização do prompt
+
+/**
+ * O usuário deste editor escreve em português e conversando. Os dois blocos
+ * pagos em disco provam: "bloco de gero" e "quero um cubo de ossos" — o
+ * segundo carrega o PEDIDO, não o material. Isso ia inteiro para o fornecedor.
+ *
+ * O que se prova aqui é o PISO: o fallback determinístico, que roda sem
+ * ANTHROPIC_API_KEY e sem tocar a rede. Com chave quem normaliza é o LLM, e
+ * essa aresta não tem teste porque testá-la exigiria rede.
+ */
+test('fallbackMaterial tira os verbos de pedido em português', () => {
+  assert.equal(fallbackMaterial('quero um cubo de ossos'), 'bone');
+  assert.equal(fallbackMaterial('gera um bloco de pedra'), 'stone');
+  assert.equal(fallbackMaterial('faz um cubo de madeira'), 'wood');
+  assert.equal(fallbackMaterial('cria uma textura de grama'), 'grass');
+  assert.equal(fallbackMaterial('por favor, me dê um bloco de gelo'), 'ice');
+  assert.equal(fallbackMaterial('um bloco de areia'), 'sand');
+});
+
+/**
+ * O defeito que este teste tranca: em JavaScript `\w` — e portanto `\b` — é
+ * `[A-Za-z0-9_]` mesmo com a flag `u`. Numa string que COMEÇA com 'á' não há
+ * fronteira de palavra antes do 'á', então `/\b[áa]gua\b/i.test('água')` era
+ * `false` e "água" — a palavra que a própria UI usa de exemplo — nunca virava
+ * "water". Só falhavam as entradas cuja alternativa começa com acento; as que
+ * começam com ASCII ("mármore", "chão") casavam, o que escondia o buraco.
+ *
+ * Prova nos DOIS sentidos (com e sem acento) e nas TRÊS posições (início, meio
+ * e fim da string).
+ */
+test('fallbackMaterial traduz palavra acentuada em qualquer posição', () => {
+  // A palavra acentuada é a string inteira — o caso que `\b` derrubava.
+  assert.equal(fallbackMaterial('água'), 'water');
+  assert.equal(fallbackMaterial('árvore'), 'tree bark');
+  // A mesma palavra sem acento continua funcionando.
+  assert.equal(fallbackMaterial('agua'), 'water');
+  assert.equal(fallbackMaterial('arvore'), 'tree bark');
+  // No fim da string, depois do rodeio em português.
+  assert.equal(fallbackMaterial('bloco de água'), 'water');
+  assert.equal(fallbackMaterial('quero um cubo de árvore'), 'tree bark');
+  // No meio da string.
+  assert.equal(fallbackMaterial('bloco de água parada'), 'water parada');
+  // Entradas acentuadas que já casavam antes (a alternativa começa com ASCII)
+  // seguem casando — a correção do mecanismo não regrediu nenhuma.
+  assert.equal(fallbackMaterial('bloco de mármore'), 'marble');
+  assert.equal(fallbackMaterial('bloco de aço'), 'steel');
+  assert.equal(fallbackMaterial('bloco de carvão'), 'coal');
+  assert.equal(fallbackMaterial('chão'), 'dirt');
+});
+
+test('fallbackMaterial preserva os acentos do que NÃO está no glossário', () => {
+  // O casamento é no texto sem acento; o recorte é no texto original. Palavra
+  // fora do glossário sai daqui como o usuário digitou.
+  assert.equal(fallbackMaterial('bloco de pedra vulcânica'), 'stone vulcânica');
+});
+
+test('fallbackMaterial não estraga descrição que já está em inglês', () => {
+  assert.equal(fallbackMaterial('grass on top of dirt'), 'grass on top of dirt');
+  assert.equal(fallbackMaterial('  mossy cobblestone  '), 'mossy cobblestone');
+  // "tile" é palavra dos dois idiomas. Em inglês ela é o SUJEITO da frase, e a
+  // regra que remove a palavra da forma devolvia "of grass".
+  assert.equal(fallbackMaterial('tile of grass'), 'tile of grass');
+  assert.equal(fallbackMaterial('block with moss on it'), 'block with moss on it');
+});
+
+/**
+ * Em português o adjetivo vem depois do substantivo; em inglês, antes. Até
+ * 2026-08-04 "pedra musgosa" saía como "stone moss" — que em inglês nomeia um
+ * líquen, não pedra com musgo — e o teste congelava isso como correto sob o
+ * nome "preserva adjetivos".
+ */
+test('fallbackMaterial põe o adjetivo antes do substantivo, como em inglês', () => {
+  assert.equal(fallbackMaterial('quero um bloco de pedra musgosa'), 'mossy stone');
+  assert.equal(fallbackMaterial('bloco de terra molhada'), 'wet dirt');
+  assert.equal(fallbackMaterial('cubo de madeira velha'), 'old wood');
+  // O substantivo "musgo" continua sendo "moss": só a forma ADJETIVA vira
+  // "mossy".
+  assert.equal(fallbackMaterial('bloco de musgo'), 'moss');
+});
+
+test('fallbackMaterial devolve o original quando sobraria vazio ou só resíduo', () => {
+  // Só o pedido, sem material nenhum: perder tudo seria pior que mandar o
+  // texto original.
+  assert.equal(fallbackMaterial('quero um bloco'), 'quero um bloco');
+  // O resíduo era a preposição solta "de", que virava o `description` do
+  // request mandado ao fornecedor.
+  assert.equal(fallbackMaterial('um bloco de'), 'um bloco de');
+  assert.equal(fallbackMaterial('bloco'), 'bloco');
+  assert.equal(fallbackMaterial('   '), '');
+});
+
+/**
+ * O caminho do LLM corta o material em 200 caracteres. O determinístico não
+ * cortava em nada, e a MESMA descrição rendia prompts de tamanhos diferentes
+ * conforme houvesse ou não `ANTHROPIC_API_KEY` no ambiente.
+ */
+test('fallbackMaterial corta no mesmo teto do caminho do LLM', () => {
+  const longo = `quero um bloco de pedra ${'muito '.repeat(80)}antiga`;
+  assert.ok(longo.length > MATERIAL_MAX_LEN);
+  assert.ok(fallbackMaterial(longo).length <= MATERIAL_MAX_LEN);
+  // O caminho do resíduo (devolve o original) também respeita o teto.
+  const soPedido = `quero um bloco ${'de '.repeat(200)}`.trim();
+  assert.ok(soPedido.length > MATERIAL_MAX_LEN);
+  assert.ok(fallbackMaterial(soPedido).length <= MATERIAL_MAX_LEN);
+});
+
+test('fallbackMaterial é puro — mesma entrada, mesma saída, sem rede', () => {
+  const entrada = 'quero um cubo de ossos';
+  assert.equal(fallbackMaterial(entrada), fallbackMaterial(entrada));
+});
+
+test('actionWithMaterial costura o material na ação — e não repete o que já está lá', () => {
+  assert.equal(
+    actionWithMaterial('subtle ambient motion', 'bone'),
+    'subtle ambient motion, on a pixel art cube made of bone',
+  );
+  // Já nomeado: repetir o substantivo não guia melhor.
+  assert.equal(
+    actionWithMaterial('bone surface shimmering slowly', 'bone'),
+    'bone surface shimmering slowly',
+  );
+  // Sem material, a ação passa intacta.
+  assert.equal(actionWithMaterial('water rippling', '  '), 'water rippling');
+});
+
+test('cubePrompt só cita a imagem de referência quando existe referência', () => {
+  const com = cubePrompt('bone', { hasReference: true });
+  const sem = cubePrompt('bone');
+  assert.match(com, /matching the exact shape and proportions of the reference image/);
+  assert.doesNotMatch(sem, /reference image/);
+  // A literal `pixel art cube` é contrato do FakeClient — nas duas formas.
+  assert.match(com, /pixel art cube/);
+  assert.match(sem, /pixel art cube/);
+  assert.match(sem, /low top-down view/);
+  assert.equal(sem, 'bone, pixel art cube, isometric block, low top-down view');
+});
+
 // ------------------------------------------------------------------ técnica texture
 
 test('texture: 1 cubo via create-isometric-tile com o molde + 1 animate-with-text-v3', async () => {
@@ -966,18 +1146,21 @@ test('texture: 1 cubo via create-isometric-tile com o molde + 1 animate-with-tex
     assert.equal(result.technique, 'texture');
     assert.equal(result.faces.length, 0, 'texture não tem faces por vista');
 
-    // O cubo nasce do MOLDE, no canvas da API, com força alta e shape 'block'.
+    // O cubo nasce do MOLDE, no canvas da API, na força do spec e shape 'block'.
+    // Com molde no request, a frase da referência FAZ sentido e vai junto.
     const tile = client.tileBodies[0]!;
-    assert.equal(tile['description'], cubePrompt('grass on top of dirt'));
+    assert.equal(tile['description'], cubePrompt('grass on top of dirt', { hasReference: true }));
     assert.match(String(tile['description']), /pixel art cube/);
     assert.match(String(tile['description']), /low top-down view/);
+    assert.match(String(tile['description']), /reference image/);
     assert.deepEqual(tile['image_size'], apiImageSize());
     assert.equal(tile['isometric_tile_shape'], 'block');
     assert.deepEqual(tile['init_image'], {
       type: 'base64',
       base64: padPngToApiCanvas(mouldBase64(), apiImageSize()),
     });
-    assert.equal(tile['init_image_strength'], 480);
+    assert.equal(tile['init_image_strength'], 300, 'o default do spec, não o 480 do chained');
+    assert.equal(tile['text_guidance_scale'], 8, 'vai SEMPRE, ainda que no default');
     assert.equal(tile['seed'], 6, 'base + 1');
     assert.equal(tile['color_image'], undefined, 'sem paleta a travar');
 
@@ -995,16 +1178,25 @@ test('texture: 1 cubo via create-isometric-tile com o molde + 1 animate-with-tex
     assert.equal(anim['frame_count'], 8, 'default 8');
     assert.equal(anim['seed'], 7, 'base + 2');
 
-    // Spritesheet 48×192 (4 frames) + sidecar + manifesto v3.
+    // Spritesheet no quadro REAL do frame (48×53), 4 frames + sidecar + v3.
     const sheet = readPngHeader(readFileSync(blockFile(dir, result.hash, 'spritesheet.png')));
-    assert.equal(sheet.width, 48 * 4, 'tira horizontal de 4 frames');
-    assert.equal(sheet.height, 48);
+    assert.equal(sheet.width, BLOCK_GEOMETRY.spriteWidth * 4, 'tira horizontal de 4 frames');
+    assert.equal(
+      sheet.height,
+      BLOCK_GEOMETRY.spriteHeight,
+      'a folha tem a altura REAL do frame — 48 fixo cortava a base do cubo',
+    );
     const sidecar = JSON.parse(
       readFileSync(blockFile(dir, result.hash, 'animation.json'), 'utf-8'),
     ) as Record<string, unknown>;
     assert.equal(sidecar['frameCount'], 4, 'frameCount real vem dos frames');
     assert.equal(sidecar['fps'], 8);
     assert.match(String(sidecar['action']), /grass swaying/, 'ação do fallback sem LLM');
+    assert.match(
+      String(sidecar['action']),
+      /pixel art cube made of grass on top of dirt/,
+      'o material vai DENTRO da ação — é o único texto que o animate vê',
+    );
 
     const manifest = readManifest(dir, result.hash);
     assert.equal(manifest['version'], 3);
@@ -1032,7 +1224,17 @@ test('texture: fornecedor recusando o molde (estado 2026-08-01) → cubo sem ref
     assert.ok(logs.some((l) => l.includes('recusou o molde')), 'o aviso é gritante no log');
 
     // O prompt ainda pede o cubo, e o RGBA cru ainda recorta para 48×53.
-    assert.match(String(client.tileBodies[0]!['description']), /pixel art cube/);
+    const semMolde = String(client.tileBodies[0]!['description']);
+    assert.match(semMolde, /pixel art cube/);
+    // A frase da referência SAI junto com a referência: sem init_image no
+    // request, mandar o modelo casar com "a imagem de referência" é apontar
+    // para o nada — e competir com o material que o usuário pediu.
+    assert.doesNotMatch(
+      semMolde,
+      /reference image/,
+      'sem molde no request, a frase da referência não pode ficar pendurada',
+    );
+    assert.equal(semMolde, cubePrompt('grass on top of dirt'));
     const base = readPngHeader(readFileSync(blockFile(dir, result.hash, 'base.png')));
     assert.equal(base.width, BLOCK_GEOMETRY.spriteWidth);
     assert.equal(base.height, BLOCK_GEOMETRY.spriteHeight);
@@ -1094,6 +1296,112 @@ test('texture: falha DEPOIS da cobrança do cubo deixa stub, e a retomada não r
       !existsSync(blockFile(dir, hash, 'base.png.pending.json')),
       'stub some após o resgate',
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: a descrição em português vira material em inglês antes de sair', async () => {
+  const dir = tmpDir();
+  const logs: string[] = [];
+  try {
+    const client = new FakeClient();
+    const config: WorldBlockConfig = {
+      ...textureConfig(),
+      description: 'quero um cubo de ossos',
+    };
+    const result = await withFallbackAction(() => runWorldBlock(client, config, opts(dir, logs)));
+
+    // O que chega ao /create-isometric-tile é o MATERIAL, não o pedido.
+    const enviado = String(client.tileBodies[0]!['description']);
+    assert.equal(enviado, cubePrompt('bone', { hasReference: true }));
+    assert.doesNotMatch(enviado, /quero/, 'o verbo de pedido não chega ao fornecedor');
+    assert.doesNotMatch(enviado, /ossos/, 'o português não chega ao fornecedor');
+
+    // E o material chega TAMBÉM ao animate-with-text-v3, que só vê `action`.
+    const acao = String(client.animBodies[0]!['action']);
+    assert.match(acao, /bone/, 'o material tem de estar na ação — é o único texto que ela vê');
+
+    // O manifesto guarda os dois: o que foi digitado e o que foi pedido.
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['description'], 'quero um cubo de ossos', 'o texto do usuário fica');
+    assert.equal(manifest['material'], 'bone', 'e o que foi de fato pedido também');
+    assert.ok(
+      logs.some((l) => l.includes('normalizada por regra')),
+      'sem chave de LLM o log diz que a normalização foi por regra',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: outline, shading, detail e text_guidance_scale chegam ao create-isometric-tile', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: WorldBlockConfig = {
+      ...textureConfig(),
+      textGuidanceScale: 14,
+      outline: 'selective outline',
+      shading: 'detailed shading',
+      detail: 'highly detailed',
+    };
+    await withFallbackAction(() => runWorldBlock(client, config, opts(dir)));
+
+    const tile = client.tileBodies[0]!;
+    assert.equal(tile['text_guidance_scale'], 14);
+    assert.equal(tile['outline'], 'selective outline');
+    assert.equal(tile['shading'], 'detailed shading');
+    assert.equal(tile['detail'], 'highly detailed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('texture: knob não configurado NÃO é enviado — o default é do fornecedor', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    await withFallbackAction(() => runWorldBlock(client, textureConfig(), opts(dir)));
+
+    const tile = client.tileBodies[0]!;
+    assert.ok(!('outline' in tile), 'omitido é omitido — não vira palpite nosso');
+    assert.ok(!('shading' in tile));
+    assert.ok(!('detail' in tile));
+    // text_guidance_scale é a exceção declarada: vai sempre, no default do spec.
+    assert.equal(tile['text_guidance_scale'], 8);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * O laço de cópia antigo usava passo `y * 48 * 4` na ORIGEM. Com um frame de
+ * largura diferente de 48 isso lê a linha errada a cada iteração e cisalha a
+ * folha inteira — arte paga, destruída em silêncio. O passo agora é a largura
+ * real de cada frame.
+ */
+test('texture: frames de tamanho inesperado não cisalham a folha', async () => {
+  const dir = tmpDir();
+  const logs: string[] = [];
+  try {
+    const client = new FakeClient();
+    client.animFrameWidth = 64;
+    client.animFrameHeight = 40;
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir, logs)),
+    );
+
+    const sheet = readPngHeader(readFileSync(blockFile(dir, result.hash, 'spritesheet.png')));
+    assert.equal(sheet.width, 64 * 4, 'o quadro sai do frame decodificado, não de um 48 fixo');
+    assert.equal(sheet.height, 40);
+
+    const atlas = JSON.parse(
+      readFileSync(blockFile(dir, result.hash, 'spritesheet.json'), 'utf-8'),
+    ) as { frames: Record<string, { frame: { w: number; h: number; x: number } }> };
+    assert.equal(atlas.frames['frame_000']!.frame.w, 64);
+    assert.equal(atlas.frames['frame_000']!.frame.h, 40);
+    assert.equal(atlas.frames['frame_001']!.frame.x, 64, 'o próximo frame começa no quadro real');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

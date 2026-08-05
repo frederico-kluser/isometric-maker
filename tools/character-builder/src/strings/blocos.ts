@@ -17,12 +17,58 @@ export const blocos = {
     cartaoBloco: 'Bloco',
     descricaoRotulo: 'Descrição (description)',
     descricaoPlaceholder: 'grama por cima de terra',
+    /**
+     * Antes esta nota dizia "Prompt em inglês costuma render melhor" — ou
+     * seja, jogava no usuário um trabalho que o código passou a fazer.
+     * Escreva em português; o servidor traduz.
+     */
     descricaoNota:
-      'Descreva o MATERIAL, não a forma do cubo — a forma vem do molde de ' +
-      'referência. Prompt em inglês costuma render melhor.',
+      'Escreva em português, do jeito que vier. O servidor extrai o MATERIAL e ' +
+      'traduz para o inglês antes de mandar — a forma do cubo vem do molde, não ' +
+      'do texto.',
 
     custo: '1 tile + 1 animate-with-text-v3 (preço estimado)',
     custoEstatico: '1 tile (preço estimado)',
+
+    estiloCartao: 'Estilo do cubo',
+    estiloNota:
+      'Knobs do /create-isometric-tile. Cada um só é enviado quando sai do ' +
+      'padrão do fornecedor — no padrão, o bloco é o mesmo artefato e custa uma ' +
+      'geração só.',
+    guidanceRotulo: 'Fidelidade ao texto (text_guidance_scale)',
+    guidanceNota:
+      'De 1 a 20. Quanto mais alto, mais a arte segue a descrição — e menos ' +
+      'liberdade o modelo tem. Padrão do fornecedor: 8.',
+    outlineRotulo: 'Contorno (outline)',
+    shadingRotulo: 'Sombreamento (shading)',
+    detailRotulo: 'Nível de detalhe (detail)',
+
+    /**
+     * Rótulos dos enums do `/create-isometric-tile`.
+     *
+     * A CHAVE é o valor que vai no request — o enum do spec vendorizado, em
+     * inglês, que não pode ser traduzido nunca. O VALOR é o que o usuário lê,
+     * em pt-BR (ADR 0008). Antes disto o painel renderizava o enum cru como
+     * rótulo visível: o usuário via "single color outline" numa tela em
+     * português.
+     */
+    outlineOpcoes: {
+      'single color outline': 'contorno de cor única',
+      'selective outline': 'contorno seletivo',
+      lineless: 'sem contorno',
+    },
+    shadingOpcoes: {
+      'flat shading': 'sombreamento chapado',
+      'basic shading': 'sombreamento básico',
+      'medium shading': 'sombreamento médio',
+      'detailed shading': 'sombreamento detalhado',
+      'highly detailed shading': 'sombreamento muito detalhado',
+    },
+    detailOpcoes: {
+      'low detail': 'pouco detalhe',
+      'medium detail': 'detalhe médio',
+      'highly detailed': 'muito detalhado',
+    },
 
     acaoRotulo: 'Ação da animação (action)',
     acaoPlaceholder: 'água ondulando suavemente, com reflexos de luz',

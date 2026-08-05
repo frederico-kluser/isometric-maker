@@ -39,8 +39,22 @@ import {
 } from '@/components/motion-ui/segmented-toggle';
 import { Skeleton } from '@/components/motion-ui/skeleton';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   buildWorldBlockBody,
+  DETAIL_OPTIONS,
+  OUTLINE_OPTIONS,
+  SHADING_OPTIONS,
+  TILE_DEFAULTS,
   type BlockErrorCode,
+  type DetailOption,
+  type OutlineOption,
+  type ShadingOption,
   type WorldBlockAccepted,
   type WorldBlockResult,
   type WorldBlockStatus,
@@ -79,6 +93,14 @@ interface CatalogEntry {
 export function BlocksPanel() {
   const [description, setDescription] = useState('');
   const [action, setAction] = useState('');
+  // Knobs de estilo do tile: começam no default do fornecedor, e o body só os
+  // envia quando saem dele (ver blocks-body.ts).
+  const [textGuidanceScale, setTextGuidanceScale] = useState<number>(
+    TILE_DEFAULTS.textGuidanceScale,
+  );
+  const [outline, setOutline] = useState<OutlineOption>(TILE_DEFAULTS.outline);
+  const [shading, setShading] = useState<ShadingOption>(TILE_DEFAULTS.shading);
+  const [detail, setDetail] = useState<DetailOption>(TILE_DEFAULTS.detail);
   const [frameCount, setFrameCount] = useState<FrameCountOption>(8);
   const [fps, setFps] = useState(8);
   const [enhancePrompt, setEnhancePrompt] = useState(true);
@@ -179,7 +201,18 @@ export function BlocksPanel() {
   }, [pendingHash]);
 
   const handleGenerate = async (): Promise<void> => {
-    const built = buildWorldBlockBody({ description, action, frameCount, fps, enhancePrompt, pingPong });
+    const built = buildWorldBlockBody({
+      description,
+      action,
+      textGuidanceScale,
+      outline,
+      shading,
+      detail,
+      frameCount,
+      fps,
+      enhancePrompt,
+      pingPong,
+    });
     if (!built.ok) {
       setError(CLIENT_ERROR_TEXT[built.code]);
       setButtonState('error');
@@ -281,6 +314,94 @@ export function BlocksPanel() {
                   placeholder={SB.form.descricaoPlaceholder}
                 />
                 <p className="text-xs text-muted-foreground">{SB.form.descricaoNota}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{SB.form.estiloCartao}</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-xs text-muted-foreground">{SB.form.estiloNota}</p>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bloco-guidance">{SB.form.guidanceRotulo}</Label>
+                <input
+                  id="bloco-guidance"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={textGuidanceScale}
+                  onChange={(e) =>
+                    setTextGuidanceScale(
+                      Number(e.target.value) || TILE_DEFAULTS.textGuidanceScale,
+                    )
+                  }
+                  className="w-20 rounded border px-2 py-1 text-sm"
+                />
+                <p className="text-xs text-muted-foreground">{SB.form.guidanceNota}</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bloco-outline">{SB.form.outlineRotulo}</Label>
+                <Select
+                  value={outline}
+                  onValueChange={(v) => {
+                    if (v !== null) setOutline(v as OutlineOption);
+                  }}
+                >
+                  <SelectTrigger id="bloco-outline" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* O VALOR é o enum do spec (inglês, vai no request); o
+                        rótulo é pt-BR e mora em src/strings (ADR 0016). */}
+                    {OUTLINE_OPTIONS.map((o) => (
+                      <SelectItem key={o} value={o}>
+                        {SB.form.outlineOpcoes[o]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bloco-shading">{SB.form.shadingRotulo}</Label>
+                <Select
+                  value={shading}
+                  onValueChange={(v) => {
+                    if (v !== null) setShading(v as ShadingOption);
+                  }}
+                >
+                  <SelectTrigger id="bloco-shading" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SHADING_OPTIONS.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {SB.form.shadingOpcoes[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="bloco-detail">{SB.form.detailRotulo}</Label>
+                <Select
+                  value={detail}
+                  onValueChange={(v) => {
+                    if (v !== null) setDetail(v as DetailOption);
+                  }}
+                >
+                  <SelectTrigger id="bloco-detail" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DETAIL_OPTIONS.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {SB.form.detailOpcoes[d]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>
