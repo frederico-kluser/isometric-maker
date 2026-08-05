@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-03**: **51 arquivos em `docs/` — 35 ADRs e 16 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-05**: **59 arquivos em `docs/` — 43 ADRs e 16 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -113,7 +113,7 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0029`](./adr/0029-quatro-vistas-molde-encadeado-e-rotate.md) | Todo bloco tem quatro vistas: molde encadeado, e rotate via v3 para comparar | substituída por 0032 · corrigida pela 0031 |
 | [`0030`](./adr/0030-giro-rigido-do-quadro-composto.md) | O giro é do quadro composto: dois snapshots sob a mesma afim, nunca peça por peça | vigente |
 | [`0031`](./adr/0031-canvas-multiplo-de-4-e-init-image-quebrado.md) | O canvas da API é múltiplo de 4, e o init_image do tile está quebrado no fornecedor | vigente · corrige 0029 |
-| [`0032`](./adr/0032-textura-animada-unica-abandono-3d.md) | Textura animada única: abandono das 4 vistas 3D em favor de animação por `animate-with-text-v3` | vigente · substitui 0029 |
+| [`0032`](./adr/0032-textura-animada-unica-abandono-3d.md) | Textura animada única: abandono das 4 vistas 3D em favor de animação por `animate-with-text-v3` | vigente · substitui 0029 · consequência corrigida pela 0046 |
 | [`0033`](./adr/0033-pacote-de-projeto-autocontido.md) | Pacote de projeto autocontido: mapa, personagem e blocos num JSON só, PNGs em base64 | vigente |
 | [`0034`](./adr/0034-aplicativo-unificado-com-tela-inicial.md) | Um aplicativo só: map-builder fundido no character-builder, tela inicial e rotas por hash, tela inativa desmontada | vigente |
 | [`0035`](./adr/0035-molde-de-proporcao-como-referencia-de-geracao.md) | Molde de proporção como `init_image` (força 320), referência do usuário como `style_image` (força 50) | vigente |
@@ -122,12 +122,18 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0038`](./adr/0038-colisao-solida-aabb.md) | Colisão sólida: caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV; a flag `solid` do catálogo é honrada (água/lava não bloqueiam) | vigente |
 | [`0039`](./adr/0039-sprite-unica-sobre-tres-faces.md) | Uma sprite só, esticada sobre as três faces do cubo por UV exato canto-a-canto; o mesh gira com a câmera; faces sem iluminação; a vista canônica é medida por silhueta, e os 6 blocos pagos escondidos voltam à paleta | vigente |
 | [`0040`](./adr/0040-zoom-continuo-e-desenho-sob-demanda.md) | Zoom contínuo, amortecido e ancorado no cursor; um laço de quadro só que coalesce e para sozinho; desenho separa mundo de câmera; `shadowMap.autoUpdate = false` | vigente |
+| [`0041`](./adr/0041-fila-fifo-persistente-de-geracao.md) | A fila de geração é FIFO por `seq` persistido, o job carrega um descritor serializável e o estado vai a disco; o `Map` volátil e o `spawn` saem, e `'na-fila'` finalmente ganha quem o escreva | vigente |
+| [`0042`](./adr/0042-teto-de-concorrencia-mede-chamadas.md) | O peso de admissão da fila é o **pico de chamadas simultâneas** do job, não o custo de servidor da `COST_TABLE`; teto default 8, com `CHARACTER_BUILDER_JOB_CONCURRENCY` > `PIXELLAB_TIER` > default — e o 8 é inferência declarada, não medição | vigente |
+| [`0043`](./adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md) | Retomada sem repagar por stub em disco ao lado do artefato; seis dos sete ramos retomam de graça, `wizard-south` para em `'interrompido'`; a janela entre submissão e registro fica declarada | vigente |
+| [`0044`](./adr/0044-bloqueio-do-wizard-por-escopo.md) | O bloqueio do wizard tem escopo: `busy` global sai, o dono do job sai do **prefixo** da chave, e `'na-fila'` conta como ocupado | vigente |
+| [`0045`](./adr/0045-animacao-do-bloco-no-mapa.md) | A sprite animada do bloco passa a ser desenhada no mapa: uma folha, uma textura, `repeat.x`/`offset.x`; o laço continua parando sozinho; o shadow map não é invalidado; folhas legadas re-empacotadas sem chamar a API | vigente |
+| [`0046`](./adr/0046-prompt-do-bloco-respeita-a-descricao.md) | O prompt do bloco passa a respeitar a descrição do usuário (sete defeitos), e a divergência de endpoint com a 0032 fica registrada como dívida de valor conhecido | vigente · corrige 0032 |
 
 ## Skills
 
-**37 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
+**39 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
 
-Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, e o restante é tarefa e meta.
+Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, sete cobrem o editor 3D de mapa em Three.js, e o restante é tarefa e meta.
 
 As quatro do modelo são novas. Três existem porque o modelo isométrico — `packages/iso-core` mais o editor de mapa, hoje dentro do character-builder — tinha 363 testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md) e [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md). A separação entre elas e as do PixiJS é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
 
@@ -154,6 +160,8 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 | 2026-08-03 | **O editor vira 3D** ([ADR 0037](./adr/0037-editor-3d-apenas.md)): o editor 2D do PixiJS sai (24 arquivos, ~6,3 mil linhas), `#/mundo` é a rota única e `mundo3d` vira apelido; e a **colisão ganha corpo** ([ADR 0038](./adr/0038-colisao-solida-aabb.md)): caixa AABB de 0,65 célula varrida por eixo com sliding e push-out MTV, com a flag `solid` do catálogo honrada; doc nova [`colisao-solida.md`](03-mapa/colisao-solida.md) |
 | 2026-08-04 | **A sprite do bloco passa a cobrir o cubo** ([ADR 0039](./adr/0039-sprite-unica-sobre-tres-faces.md)): uma sprite só, esticada sobre as três faces por UV exato canto-a-canto, com o mesh girando junto com a câmera e a vista canônica escolhida por casamento de silhueta — seis blocos pagos que o catálogo escondia voltam à paleta; e o **zoom deixa de travar** ([ADR 0040](./adr/0040-zoom-continuo-e-desenho-sob-demanda.md)): zoom contínuo ancorado no cursor, um laço de quadro só que coalesce e para sozinho, e `shadowMap.autoUpdate = false` |
 
+| 2026-08-05 | **A geração ganha uma fila** ([ADR 0041](./adr/0041-fila-fifo-persistente-de-geracao.md)): o `Map` volátil e o `spawn` saem, o estado vai a disco por `seq` monótono e o job carrega um descritor serializável; o teto passa a medir **chamadas simultâneas** e não custo de servidor ([ADR 0042](./adr/0042-teto-de-concorrencia-mede-chamadas.md)), com o 8 declarado como inferência; a retomada deixa de repagar por stub em disco e nasce o estado `'interrompido'` ([ADR 0043](./adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md)), que também expõe um bug de dinheiro pré-existente na leitura dos ids de `animate-character`; o bloqueio do wizard ganha escopo ([ADR 0044](./adr/0044-bloqueio-do-wizard-por-escopo.md)); a sprite animada do bloco passa a ser desenhada no mapa ([ADR 0045](./adr/0045-animacao-do-bloco-no-mapa.md)); e o prompt do bloco passa a respeitar a descrição, com a divergência de endpoint da 0032 registrada ([ADR 0046](./adr/0046-prompt-do-bloco-respeita-a-descricao.md)) |
+
 ## Referências
 
 - [`/home/ondokai/Projects/isometric-maker/README.md`](../README.md) — visão geral do repositório
@@ -161,4 +169,4 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 - [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
 - [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-08-03
+**Última atualização:** 2026-08-05

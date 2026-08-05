@@ -1,6 +1,6 @@
 # isometric-maker
 
-Um **construtor de jogos isométricos**: monta o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Arte gerada pela PixelLab, desenho na tela em PixiJS 8. Roda na sua máquina, para você.
+Um **construtor de jogos isométricos**: monta o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Arte gerada pela PixelLab; o editor de mapa desenha em Three.js desde a [ADR 0037](docs/adr/0037-editor-3d-apenas.md), e o PixiJS 8 sobrou no runtime e no empacotador de atlas. Roda na sua máquina, para você.
 
 > **Quick Start (TL;DR)**
 >
@@ -51,7 +51,10 @@ Este repositório já foi um MMORPG hardcore. O pivô aconteceu em 2026-07-30, a
 | Requisito | Detalhe |
 | --- | --- |
 | `PIXELLAB_SECRET` | **Obrigatório.** Token de `https://pixellab.ai/account`. Fica só no processo Node, nunca chega ao navegador. Ponte no `.env` do estúdio ou exporte na shell |
-| `PIXELLAB_TIER` | `free` \| `t1` \| `t2` \| `t3`, default `t1`. Define quantos jobs correm em paralelo (1 / 2 / 4 / 20) |
+| `PIXELLAB_TIER` | `free` \| `t1` \| `t2` \| `t3`. **Não é o tier da sua conta — é um teto que você declara.** Resolve para 1 / 2 / 4 / 20 **chamadas simultâneas** à API. O CLI do pipeline assume `t1` quando a variável está ausente; o editor, não — ele cai no default próprio de 8 ([ADR 0042](docs/adr/0042-teto-de-concorrencia-mede-chamadas.md)). Declará-la **diminui** o teto do editor em `free`, `t1` e `t2` |
+| `CHARACTER_BUILDER_JOB_CONCURRENCY` | Opcional, inteiro ≥ 1. Teto de **chamadas simultâneas** da fila de geração do editor; tem precedência sobre `PIXELLAB_TIER`. Ausente, vale 8 — que é **inferência declarada, não medição** ([ADR 0042](docs/adr/0042-teto-de-concorrencia-mede-chamadas.md)) |
+| `CHARACTER_BUILDER_JOB_QUEUE_JSON` | Opcional. Onde a fila de geração persiste o estado. Ausente, é `job-queue.json` dentro de `tools/character-builder/` ([ADR 0041](docs/adr/0041-fila-fifo-persistente-de-geracao.md)) |
+| `ANTHROPIC_API_KEY` | Opcional. Normaliza a descrição do bloco e escreve a ação da animação. Ausente, os dois caem num fallback determinístico, sem rede e sem custo ([ADR 0046](docs/adr/0046-prompt-do-bloco-respeita-a-descricao.md)) |
 | Node.js | **≥ 24.** Executa `.ts` direto, sem passo de build |
 | Crédito na PixelLab | 1 crédito = US$ 1,00. Todo asset gerado gasta dinheiro real, e o preço é sempre **estimado** |
 
@@ -63,8 +66,9 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 | --- | --- |
 | Pipeline de assets | **funcional** — 9 comandos, idempotente, guard de custo, empacotador de atlas |
 | Sprite Studio (o motor do estúdio de personagem) | **funcional** — gera personagem em 8 direções, poses e guarda-roupa |
-| Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 30 skills verificadas |
-| Documentação | **48 arquivos em `docs/`, 33 ADRs.** O índice não lista arquivo inexistente |
+| Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 39 skills verificadas |
+| Documentação | **59 arquivos em `docs/`, 43 ADRs.** O índice não lista arquivo inexistente |
+| Fila de geração | **funcional** — FIFO persistente, sobrevive ao reinício do Vite, retomada sem repagar em seis dos sete ramos ([ADR 0041](docs/adr/0041-fila-fifo-persistente-de-geracao.md), [0043](docs/adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md)) |
 | Aplicativo único (tela inicial + estúdio + editor de mapa) | **funcional** — `tools/character-builder` (459 testes), roteador por hash com 3 rotas (ADR 0034); o `tools/map-builder` foi fundido nele |
 | Mapa e mecânicas (geometria, autoladrilhamento, física) | **funcional** — `packages/iso-core` (473 testes) + editor de mapa em `tools/character-builder/src/map/` |
 | Runtime (renderizador, exportação, preview) | **funcional** — `tools/runtime` (795 linhas em `src/`) |
@@ -85,4 +89,4 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 - [`AGENTS.md`](AGENTS.md) — instruções para agentes de código
 - [`docs/adr/`](docs/adr/) — as decisões e seus motivos
 
-**Última atualização:** 2026-08-02
+**Última atualização:** 2026-08-05
