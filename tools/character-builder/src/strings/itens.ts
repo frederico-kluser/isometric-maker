@@ -199,14 +199,16 @@ export const ariaAbrirDetalhe = (label: string, slotLabel: string): string =>
  * é sempre plural aqui.
  */
 export const progressoGeracoes = (emAndamento: number, total: number): string =>
-  `${emAndamento} de ${total} gerações em andamento — levam de 2 a 5 minutos ` +
-  'e as prévias atualizam sozinhas.';
+  `${emAndamento} de ${total} gerações na fila ou gerando — cada uma leva de ` +
+  '2 a 5 minutos quando entra, e as prévias atualizam sozinhas.';
 
 /** "3 gerações em andamento — …" — contador sem lote rastreado (ex.: página recarregada no meio). */
 export const geracoesEmAndamento = (n: number): string =>
   n === 1
-    ? '1 geração em andamento — leva de 2 a 5 minutos e as prévias atualizam sozinhas.'
-    : `${n} gerações em andamento — levam de 2 a 5 minutos e as prévias atualizam sozinhas.`;
+    ? '1 geração na fila ou gerando — leva de 2 a 5 minutos quando entra, e a ' +
+      'prévia atualiza sozinha.'
+    : `${n} gerações na fila ou gerando — cada uma leva de 2 a 5 minutos quando ` +
+      'entra, e as prévias atualizam sozinhas.';
 
 /**
  * "3 peças na fila · 2 já prontas" — resumo do disparo em lote. Peça de

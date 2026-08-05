@@ -14,6 +14,7 @@ import {
   type Character,
   type WardrobeItem,
 } from '../../../../server/model.ts';
+import { isBusyStatus } from '../../job-scope.ts';
 import { itemStatus } from './item-state.ts';
 
 /** O mínimo que o contador precisa de um job de studio.jobs (que tem mais campos). */
@@ -52,22 +53,29 @@ export function pendingWardrobeItems(
   );
 }
 
-/** Quantos jobs, entre as chaves dadas, ainda estão gerando. */
-export function countGenerating(
+/**
+ * Quantos jobs, entre as chaves dadas, ainda NÃO acabaram.
+ *
+ * Mesma correção de `poses/generation-batch.ts`, e pelo mesmo motivo: com a
+ * fila, "disparei oito peças" e "oito peças rodando" deixaram de ser a mesma
+ * coisa. Contando só `'gerando'`, um lote inteiramente enfileirado lia "0
+ * rodando" e `mergeBatch` o tratava como assentado.
+ */
+export function countBusy(
   keys: readonly string[],
   jobs: Record<string, JobStatusLike>,
 ): number {
   let n = 0;
   for (const key of keys) {
-    if (jobs[key]?.status === 'gerando') n += 1;
+    if (isBusyStatus(jobs[key]?.status)) n += 1;
   }
   return n;
 }
 
 /**
  * Junta um disparo novo ao lote rastreado. Se o lote anterior já assentou
- * (nada mais gerando) ou é de outro personagem, o novo SUBSTITUI — o "de Y"
- * do contador não carrega defuntos. Se ainda há job rodando, acumula sem
+ * (nada na fila nem gerando) ou é de outro personagem, o novo SUBSTITUI — o
+ * "de Y" do contador não carrega defuntos. Se ainda há job ocupado, acumula sem
  * duplicar chave (o retry de uma peça do lote reusa a chave dela).
  */
 export function mergeBatch(
@@ -79,7 +87,7 @@ export function mergeBatch(
   const prevActive =
     prev !== null &&
     prev.characterId === characterId &&
-    countGenerating(prev.keys, jobs) > 0;
+    countBusy(prev.keys, jobs) > 0;
   if (!prevActive || prev === null) return { characterId, keys: newKeys };
   const keys = [...prev.keys];
   for (const key of newKeys) {

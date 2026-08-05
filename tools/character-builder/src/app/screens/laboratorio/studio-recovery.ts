@@ -33,6 +33,7 @@
  * ./studio-body.ts, ./image-fit.ts e ../wizard/wizard-progress.ts.
  */
 import { resumoRecuperado, resumoStudio } from '../../../strings/laboratorio.ts';
+import { isBusyStatus, type BusyStatus } from '../../job-scope.ts';
 import type { SpriteLabBody, SpriteLabResult } from './studio-body.ts';
 
 // ------------------------------------------------------------------
@@ -205,12 +206,18 @@ export function summaryForRun(
 export type ReattachPlan =
 	/** Ainda não houve snapshot do estúdio — decidir agora seria decidir cedo. */
 	| { readonly kind: 'wait' }
-	/** Snapshot lido, nada em voo: a recolagem está resolvida para esta montagem. */
+	/** Snapshot lido, nada a recolar AGORA. Não é decisão definitiva. */
 	| { readonly kind: 'none' }
 	| {
 			readonly kind: 'reattach';
 			readonly pending: PendingRun;
 			readonly descriptor: RunDescriptor;
+			/**
+			 * `'na-fila'` e `'gerando'` recolam igual e se ESCREVEM diferente: um
+			 * está esperando a vez, o outro está gastando agora. O status viaja no
+			 * plano para a tela poder dizer qual dos dois é.
+			 */
+			readonly status: BusyStatus;
 			/**
 			 * true quando a tela mostra os candidatos de OUTRA corrida (a
 			 * recuperação em disco chegou primeiro). A corrida viva assume a
@@ -221,27 +228,66 @@ export type ReattachPlan =
 	  };
 
 /**
- * Decide se o painel deve voltar a acompanhar um job que já estava rodando.
- * O job continua no servidor enquanto a aba está fechada; o que se perde é a
- * sondagem, e a chave `sprite-lab::<hash>` devolve o hash de graça.
+ * Decide se o painel deve voltar a acompanhar um job que já está no servidor.
+ *
+ * ## `'na-fila'` TAMBÉM é para recolar — e ignorá-lo era o bug do F5
+ *
+ * Este teste era `status === 'gerando'`, e com fila isso é o caso RARO: mandar
+ * várias gerações de uma vez é exatamente o pedido do usuário, e o primeiro
+ * snapshot depois de um F5 pega o job da bancada quase sempre em `'na-fila'`,
+ * esperando a vez. A tela via "nada em voo", desistia, e a sprite paga voltava a
+ * ser invisível — o mesmo defeito que este módulo existe para impedir, agora
+ * pela porta da fila. `isBusyStatus` (`src/app/job-scope.ts`) já é o predicado
+ * certo e já trata os dois.
+ *
+ * ## Quem impede a recolagem repetida é o DONO, não um latch
+ *
+ * A tela chamava isto uma vez só por montagem, com um `useRef` fechado no
+ * primeiro snapshot. Um latch fechado sobre "não vi nada" é uma decisão tomada
+ * cedo demais: o job que estava `'na-fila'` vira `'gerando'` três segundos
+ * depois e a tela nunca mais olha. O critério certo é `owned`: enquanto a
+ * montagem não possui corrida nenhuma, todo snapshot novo é uma chance de
+ * recolar; a partir do momento em que possui — recolada ou disparada daqui —,
+ * nada rouba a tela dela. `owned` já é o critério de `planDiskRecovery`, pelo
+ * mesmo motivo.
+ *
+ * A escolha entre vários jobs da bancada é determinística: quem está `'gerando'`
+ * ganha de quem está `'na-fila'` (é o que está gastando agora), e entre iguais
+ * vence a menor chave — ordem de iteração de objeto não é contrato. A ordem
+ * FIFO real dos outros está no painel da fila; aqui basta escolher UM, sempre o
+ * mesmo.
  */
 export function planReattach(
 	jobs: Readonly<Record<string, JobSnapshot>> | undefined,
 	resultHash: string | null,
+	owned: OwnedRun | null = null,
 ): ReattachPlan {
 	if (jobs === undefined) return { kind: 'wait' };
-	const emVoo = Object.entries(jobs).find(
-		([key, j]) => key.startsWith(JOB_KEY_PREFIX) && j.status === 'gerando',
-	);
-	if (emVoo === undefined) return { kind: 'none' };
-	const key = emVoo[0];
-	const hash = key.slice(JOB_KEY_PREFIX.length);
-	if (!HASH_RE.test(hash)) return { kind: 'none' };
+	// A tela já tem corrida própria: nada de trocar o que ela acompanha por
+	// baixo. Vale também para `{hash: null}` — o clique em "Gerar" já aconteceu
+	// e o 202 ainda não voltou.
+	if (owned !== null) return { kind: 'none' };
+
+	let escolhido: { key: string; hash: string; status: BusyStatus } | undefined;
+	for (const key of Object.keys(jobs).sort()) {
+		if (!key.startsWith(JOB_KEY_PREFIX)) continue;
+		const status = jobs[key]?.status;
+		if (!isBusyStatus(status)) continue;
+		const hash = key.slice(JOB_KEY_PREFIX.length);
+		if (!HASH_RE.test(hash)) continue;
+		if (escolhido === undefined) {
+			escolhido = { key, hash, status };
+		} else if (escolhido.status !== 'gerando' && status === 'gerando') {
+			escolhido = { key, hash, status };
+		}
+	}
+	if (escolhido === undefined) return { kind: 'none' };
 	return {
 		kind: 'reattach',
-		pending: { key, hash },
-		descriptor: describeLiveRun(hash),
-		clearResult: resultHash !== null && resultHash !== hash,
+		pending: { key: escolhido.key, hash: escolhido.hash },
+		descriptor: describeLiveRun(escolhido.hash),
+		status: escolhido.status,
+		clearResult: resultHash !== null && resultHash !== escolhido.hash,
 	};
 }
 

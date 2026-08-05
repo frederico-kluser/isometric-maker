@@ -46,6 +46,7 @@ import {
 	TEMPLATE_OPTIONS,
 	VIEW_OPTIONS,
 } from '../../../../server/model.ts';
+import { posicaoNaFila } from '../../../strings/fila.ts';
 import {
 	laboratorio as SL,
 	imagemAjustadaReferencia,
@@ -204,8 +205,6 @@ export function StudioPanel() {
 	const [history, setHistory] = useState<HistoryEntry[]>([]);
 	const nextId = useRef(1);
 	const resetTimer = useRef<number | undefined>(undefined);
-	/** A recolagem a um job em voo é uma vez só, no primeiro snapshot do studio. */
-	const reattachChecked = useRef(false);
 	/**
 	 * A corrida que ESTA montagem possui — recolada de um job em voo, ou
 	 * disparada pelo botão "Gerar". Enquanto é `null`, a tela é órfã e a
@@ -218,6 +217,8 @@ export function StudioPanel() {
 	// Andamento/falha do job, como no wizard: studio.jobs é a fonte fresca.
 	const { studio } = useStudio();
 	const job = pending !== null ? studio?.jobs?.[pending.key] : undefined;
+	/** Aceito e ainda não começou — com fila, o estado mais comum no início. */
+	const naFila = job?.status === 'na-fila';
 
 	// ── identidade: body e resumo só valem para a corrida que está na tela ──
 	const hashAtivo = activeRunHash(pending?.hash ?? null, result?.hash ?? null);
@@ -295,14 +296,23 @@ export function StudioPanel() {
 	// O job continua no servidor enquanto a aba está fechada; o que se perde é
 	// a sondagem. A chave `sprite-lab::<hash>` de studio.jobs devolve o hash —
 	// nenhum estado novo é preciso dos dois lados.
+	//
+	// NÃO HÁ MAIS LATCH AQUI, e a ausência é a correção. O `reattachChecked` que
+	// vivia neste efeito gravava "já decidi" ANTES do `return` do caso 'none' —
+	// ou seja, no PRIMEIRO snapshot. Com fila, o primeiro snapshot depois de um
+	// F5 pega o job da bancada quase sempre em `'na-fila'`, e a decisão travada
+	// ali dizia "nada em voo" para o resto da montagem inteira: o job virava
+	// `'gerando'` três segundos depois e a tela nunca mais olhava. Quem impede a
+	// recolagem repetida é `ownRun` — ver o cabeçalho de ./studio-recovery.ts.
 	useEffect(() => {
-		if (reattachChecked.current) return;
-		const plano = planReattach(studio?.jobs, result?.hash ?? null);
-		// 'wait': ainda não houve snapshot do estúdio — decidir agora seria
-		// concluir "nada em voo" sem ter olhado.
-		if (plano.kind === 'wait') return;
-		reattachChecked.current = true;
-		if (plano.kind === 'none') return;
+		const plano = planReattach(
+			studio?.jobs,
+			result?.hash ?? null,
+			ownRun.current,
+		);
+		// 'wait' (sem snapshot ainda) e 'none' (nada a recolar AGORA) não
+		// decidem nada: o próximo snapshot volta a perguntar.
+		if (plano.kind !== 'reattach') return;
 		// O job em voo assume a corrida: o hash é tudo que se sabe dela, e o
 		// body que a gerou não está em lugar nenhum enquanto o manifesto não
 		// existir. O descritor nasce com body null e o hash certo.
@@ -547,7 +557,9 @@ export function StudioPanel() {
 
 	const buttonLabel =
 		buttonState === 'running'
-			? SL.studio.executar.gerando
+			? naFila
+				? SL.studio.executar.naFila
+				: SL.studio.executar.gerando
 			: buttonState === 'done'
 				? SL.studio.executar.pronto
 				: buttonState === 'error'
@@ -891,6 +903,17 @@ export function StudioPanel() {
 									<p className="text-sm text-muted-foreground" role="status">
 										{job?.message ?? SL.studio.executar.aguardando}
 									</p>
+									{/* Esperar a vez não é o mesmo que estar gerando, e a
+									    posição é a única coisa que responde "falta quanto?".
+									    Ela vem de `queuePosition` (1 = próximo a entrar). */}
+									{naFila && (
+										<p className="text-sm text-muted-foreground">
+											{SL.studio.recuperacao.jobNaFila}
+											{typeof job?.queuePosition === 'number'
+												? ` (${posicaoNaFila(job.queuePosition)})`
+												: ''}
+										</p>
+									)}
 									{retomouJob && (
 										<p className="text-sm text-muted-foreground">
 											{SL.studio.recuperacao.jobEmVoo}

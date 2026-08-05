@@ -125,12 +125,15 @@ function aplicarRecuperacaoEmDisco(
 	t.desc = plano.descriptor;
 }
 
-/** Efeito de recolagem: primeiro snapshot de studio.jobs. */
+/**
+ * Efeito de recolagem, como o painel o roda: a CADA snapshot de studio.jobs, e
+ * passando o dono atual da tela — não há mais latch de "uma vez por montagem".
+ */
 function aplicarRecolagem(
 	t: Tela,
 	jobs: Record<string, JobSnapshot> | undefined,
 ): void {
-	const plano = planReattach(jobs, t.result?.hash ?? null);
+	const plano = planReattach(jobs, t.result?.hash ?? null, t.own);
 	if (plano.kind !== 'reattach') return;
 	t.own = { hash: plano.pending.hash };
 	t.desc = plano.descriptor;
@@ -241,6 +244,96 @@ test('planReattach espera o primeiro snapshot antes de concluir "nada em voo"', 
 		planReattach({ 'south::manequim': { status: 'gerando' } }, null).kind,
 		'none',
 	);
+});
+
+test('BLOQUEADOR: job ENFILEIRADO é recolado — era o latch do F5', () => {
+	// Com fila, o primeiro snapshot depois de um F5 pega o job da bancada quase
+	// sempre em 'na-fila'. O teste antigo era `status === 'gerando'`, e a tela
+	// concluía "nada em voo" para o resto da montagem inteira.
+	const plano = planReattach(
+		{ [`sprite-lab::${HASH_NOVA}`]: { status: 'na-fila' } },
+		null,
+	);
+	assert.equal(plano.kind, 'reattach');
+	assert.equal(plano.kind === 'reattach' && plano.status, 'na-fila');
+	assert.equal(plano.kind === 'reattach' && plano.pending.hash, HASH_NOVA);
+});
+
+test('planReattach devolve o status, porque esperar a vez não é gerar', () => {
+	assert.equal(
+		planReattach({ [`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' } }, null)
+			.kind === 'reattach'
+			? (planReattach(
+					{ [`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' } },
+					null,
+				) as { status: string }).status
+			: null,
+		'gerando',
+	);
+});
+
+test('planReattach não rouba a tela de uma corrida que já tem dono', () => {
+	const jobs = { [`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' } };
+	// Recolagem já feita nesta montagem: não recola de novo a cada snapshot.
+	assert.equal(planReattach(jobs, null, { hash: HASH_NOVA }).kind, 'none');
+	// Corrida disparada daqui, com outro hash: o job em voo não a substitui.
+	assert.equal(planReattach(jobs, null, { hash: HASH_ANTIGA }).kind, 'none');
+	// Janela entre o clique em "Gerar" e o 202 — dono sem hash ainda.
+	assert.equal(planReattach(jobs, null, { hash: null }).kind, 'none');
+	// Sem dono: recola.
+	assert.equal(planReattach(jobs, null, null).kind, 'reattach');
+});
+
+test('planReattach escolhe sempre o mesmo entre vários jobs de bancada', () => {
+	const gerandoENaFila = {
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'na-fila' },
+	};
+	const plano = planReattach(gerandoENaFila, null);
+	assert.equal(
+		plano.kind === 'reattach' && plano.pending.hash,
+		HASH_NOVA,
+		'quem está gastando agora ganha de quem espera',
+	);
+	// Mesmo snapshot, chaves em ordem invertida no objeto: mesma escolha.
+	assert.deepEqual(
+		planReattach(
+			{
+				[`sprite-lab::${HASH_ANTIGA}`]: { status: 'na-fila' },
+				[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+			},
+			null,
+		),
+		plano,
+	);
+	// Entre dois enfileirados, a menor chave — HASH_ANTIGA são só 'a'.
+	const doisNaFila = {
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'na-fila' },
+		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'na-fila' },
+	};
+	assert.equal(
+		planReattach(doisNaFila, null).kind === 'reattach' &&
+			(planReattach(doisNaFila, null) as { pending: { hash: string } }).pending
+				.hash,
+		HASH_ANTIGA,
+	);
+});
+
+test('a montagem que NÃO recolou no primeiro snapshot recola no seguinte', () => {
+	// O ciclo inteiro do defeito, em três snapshots: nada → enfileirado →
+	// gerando. Com o latch, o segundo e o terceiro nunca eram olhados.
+	const t = telaVazia();
+	aplicarRecolagem(t, {});
+	// `=== null` em vez de `assert.equal(t.pending, null)`: o `strictEqual` do
+	// node:assert é uma asserção de TIPO, e narraria `t.pending` para `null` no
+	// resto do teste — a linha seguinte viraria erro de compilação.
+	assert.equal(t.pending === null, true, 'nada em voo ainda');
+	aplicarRecolagem(t, { [`sprite-lab::${HASH_NOVA}`]: { status: 'na-fila' } });
+	assert.equal(t.pending?.hash, HASH_NOVA, 'o job apareceu e a tela recolou');
+	// E não recola de novo quando o mesmo job entra em execução.
+	const antes = t.pending;
+	aplicarRecolagem(t, { [`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' } });
+	assert.equal(t.pending, antes);
 });
 
 test('planReattach nasce com body null e manda limpar resultado de outra corrida', () => {
@@ -494,12 +587,12 @@ test('tela vazia recuperada do disco continua exportável quando há config', ()
 
 const HASH_TERCEIRA = 'cccccccccccccccc';
 
-test('planReattach: com DOIS jobs em voo, quem manda é a ordem de inserção do mapa', () => {
-	// `Object.entries(...).find(...)` pega o PRIMEIRO. Não existe critério de
-	// "mais recente" aqui — `studio.jobs` é um objeto JSON e a ordem dele é a de
-	// inserção do servidor. Isto está escrito para que uma mudança de critério
-	// (pegar o mais novo, por exemplo) apareça como teste vermelho, e não como
-	// tela recolada à corrida errada.
+test('planReattach: com DOIS jobs em voo, a escolha NÃO depende da ordem do mapa', () => {
+	// Isto já foi o contrário: `Object.entries(...).find(...)` pegava o primeiro
+	// da ordem de inserção, e duas telas com o mesmo snapshot podiam recolar a
+	// corridas diferentes. Ordem de iteração de objeto não é contrato — o
+	// critério agora é a chave ordenada, com precedência para quem está
+	// 'gerando'.
 	const dois: Record<string, JobSnapshot> = {
 		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'gerando' },
 		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
@@ -507,38 +600,32 @@ test('planReattach: com DOIS jobs em voo, quem manda é a ordem de inserção do
 	const plano = planReattach(dois, null);
 	assert.equal(plano.kind, 'reattach');
 	if (plano.kind !== 'reattach') return;
-	assert.equal(plano.pending.hash, HASH_ANTIGA, 'o primeiro da ordem de inserção');
+	assert.equal(plano.pending.hash, HASH_ANTIGA, 'a menor chave');
 
-	// Invertida a ordem, muda a escolha — é a prova de que o critério é esse.
+	// Invertida a ordem de inserção, a escolha é a MESMA.
 	const invertido: Record<string, JobSnapshot> = {
 		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
 		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'gerando' },
 	};
-	const outro = planReattach(invertido, null);
-	assert.equal(outro.kind === 'reattach' && outro.pending.hash, HASH_NOVA);
+	assert.deepEqual(planReattach(invertido, null), plano);
 });
 
 /**
- * **Comportamento a corrigir (studio-recovery.ts:233-239).** O `find` para no
- * primeiro job de sprite-lab em voo; se a chave DELE não tiver hash válido, a
- * função devolve `'none'` sem olhar os demais. Um job válido que venha depois
- * some: a tela não se recola, e a corrida paga fica rodando sem ninguém
- * sondando. A chave malformada não é hipótese remota — basta uma chave
- * escrita à mão em `studio.json` ou um formato de hash futuro.
+ * Era **comportamento a corrigir**, e foi corrigido junto com o latch do F5: o
+ * `find` parava no primeiro job de sprite-lab em voo e, se a chave DELE não
+ * tivesse hash válido, a função devolvia `'none'` sem olhar os demais — a
+ * corrida paga ficava rodando sem ninguém sondando. A varredura agora percorre
+ * todas as chaves e ignora só as ilegíveis.
  */
-test('planReattach: chave malformada em voo ESCONDE um job válido que veio depois', () => {
+test('planReattach: chave malformada NÃO esconde mais um job válido', () => {
 	const comLixoNaFrente: Record<string, JobSnapshot> = {
 		'sprite-lab::naoehash': { status: 'gerando' },
 		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
 	};
-	assert.equal(
-		planReattach(comLixoNaFrente, null).kind,
-		'none',
-		'comportamento de HOJE: o job válido não é encontrado',
-	);
+	const plano = planReattach(comLixoNaFrente, null);
+	assert.equal(plano.kind, 'reattach');
+	assert.equal(plano.kind === 'reattach' && plano.pending.hash, HASH_NOVA);
 
-	// Com o válido na frente, a recolagem acontece — o que confirma que o
-	// problema é a parada no primeiro, não o job em si.
 	const comLixoAtras: Record<string, JobSnapshot> = {
 		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
 		'sprite-lab::naoehash': { status: 'gerando' },
@@ -546,12 +633,21 @@ test('planReattach: chave malformada em voo ESCONDE um job válido que veio depo
 	assert.equal(planReattach(comLixoAtras, null).kind, 'reattach');
 });
 
-test('planReattach: só "gerando" é recolagem — na-fila, falhou e cancelado não são', () => {
-	for (const status of ['na-fila', 'falhou', 'cancelado', 'vazio', '']) {
+test('planReattach: os dois estados OCUPADOS recolam; nenhum terminal recola', () => {
+	// 'na-fila' passou a recolar — era o latch do F5 (ver o teste homônimo lá em
+	// cima). Terminal nenhum recola: não há o que sondar.
+	for (const status of ['na-fila', 'gerando']) {
+		assert.equal(
+			planReattach({ [`sprite-lab::${HASH_NOVA}`]: { status } }, HASH_ANTIGA).kind,
+			'reattach',
+			`status "${status}" está ocupado e a tela precisa voltar a sondá-lo`,
+		);
+	}
+	for (const status of ['falhou', 'cancelado', 'interrompido', 'vazio', '']) {
 		assert.equal(
 			planReattach({ [`sprite-lab::${HASH_NOVA}`]: { status } }, HASH_ANTIGA).kind,
 			'none',
-			`status "${status}" não pode recolar a tela a um job que não está rodando`,
+			`status "${status}" é terminal: não há corrida para retomar`,
 		);
 	}
 });

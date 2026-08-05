@@ -12,14 +12,23 @@
  * A montagem e a validação do body ficam no módulo puro ./blocks-body.ts
  * (testado com node --test); aqui é só DOM e coleta de inputs.
  *
+ * ## Por que este painel se recupera no mount
+ *
+ * O hash da corrida volta uma vez só, no corpo do 202, e vivia apenas em estado
+ * React: um F5 no meio da geração e a tela voltava dizendo "nenhum resultado
+ * ainda" sobre um bloco pago que o servidor continuava gerando. A cura é a mesma
+ * que o painel de personagem já usava — o hash é extraído da CHAVE do job
+ * (`world-block::<hash>`), que chega em `studio.jobs` a cada sondagem. A decisão
+ * fica no módulo puro ./blocks-recovery.ts; aqui só a fiação.
+ *
  * Cada card do catálogo tem um botão de apagar (DELETE /api/world-block/{hash},
  * em ./delete-block-button.tsx). Apagar é irreversível e o dinheiro da geração
  * não volta, então o gesto é pressionar-e-segurar e o retorno diz exatamente o
  * que saiu do disco — inclusive quando junto foi embora trabalho já pago.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckIcon, LoaderCircleIcon, RefreshCwIcon, XIcon } from 'lucide-react';
-import { api } from '../../studio-store.tsx';
+import { api, useStudio } from '../../studio-store.tsx';
 // Do módulo PURO server/model.ts, nunca de server/world-block.ts: aquele
 // importa node:crypto e node:fs, e o navegador não tem nenhum dos dois.
 import type { BlockFacing } from '../../../../server/model.ts';
@@ -60,6 +69,8 @@ import {
   type WorldBlockStatus,
 } from './blocks-body.ts';
 import { DeleteBlockButton, type BlockDeletionReport } from './delete-block-button.tsx';
+import { planBlockReattach, type OwnedBlockRun } from './blocks-recovery.ts';
+import { posicaoNaFila } from '../../../strings/fila.ts';
 
 /** Id único do parágrafo da dica — o `aria-describedby` de cada botão aponta para ele. */
 const REMOVAL_HINT_ID = 'blocos-remocao-dica';
@@ -125,8 +136,27 @@ export function BlocksPanel() {
   /** Retorno da última remoção — o que saiu do disco e o que isso implica. */
   const [removalNotice, setRemovalNotice] = useState<string | null>(null);
   const [removalError, setRemovalError] = useState<string | null>(null);
+  /** true quando o painel voltou a acompanhar um job que já estava no servidor. */
+  const [retomouJob, setRetomouJob] = useState(false);
+  /**
+   * A corrida que ESTA montagem possui — recolada de um job em voo ou disparada
+   * pelo botão "Gerar". É ref, e não estado, por dois motivos: quem consulta é
+   * um efeito que roda a cada snapshot do estúdio, e a posse tem de valer no
+   * MESMO tique em que é assumida (um `setState` só valeria no render seguinte,
+   * e o snapshot seguinte chegaria antes). O mesmo `ownRun` de
+   * `./studio-panel.tsx`.
+   */
+  const ownBlock = useRef<OwnedBlockRun | null>(null);
 
   const running = buttonState === 'running';
+
+  // Andamento pelo registro do servidor: é ele que sobrevive ao F5.
+  const { studio } = useStudio();
+  const job =
+    pendingHash !== null
+      ? studio?.jobs?.[`world-block::${pendingHash}`]
+      : undefined;
+  const naFila = job?.status === 'na-fila';
 
   const loadCatalog = (): void => {
     void api<{ blocks: CatalogEntry[] }>('world-blocks')
@@ -159,6 +189,34 @@ export function BlocksPanel() {
 
   useEffect(loadCatalog, []);
 
+  // ── recolagem a um bloco que já está no servidor ──
+  //
+  // Sem isto, recarregar a página apagava o hash e o bloco pago ficava
+  // invisível até alguém apertar "recarregar" no catálogo — e só depois de
+  // pronto. Não há latch: enquanto a montagem não possui corrida nenhuma, todo
+  // snapshot novo é uma chance de recolar, então um job que entra DEPOIS da
+  // montagem (ou que estava só `'na-fila'` no primeiro snapshot) é recolado no
+  // snapshot em que aparecer.
+  //
+  // Quem impede a recolagem repetida é o DONO (`ownBlock`), nunca `pendingHash`:
+  // este volta a `null` no instante em que o resultado chega, e o snapshot do
+  // estúdio ainda diz `'gerando'` nesse instante — a guarda antiga recolava na
+  // própria corrida recém-entregue e apagava o bloco da tela. O cabeçalho de
+  // ./blocks-recovery.ts tem o mecanismo inteiro.
+  useEffect(() => {
+    const plano = planBlockReattach(studio?.jobs, ownBlock.current);
+    if (plano.kind !== 'reattach') return;
+    // Síncrono, ANTES de qualquer setState: a posse tem de valer já para o
+    // próximo snapshot, que pode chegar antes do render.
+    ownBlock.current = { hash: plano.hash };
+    setError(null);
+    setResult(null);
+    setSemGasto(false);
+    setRetomouJob(true);
+    setButtonState('running');
+    setPendingHash(plano.hash);
+  }, [studio]);
+
   // Sondagem do resultado. 200 com status nomeado — o console do navegador
   // fica limpo e uma falha real aparece na hora.
   useEffect(() => {
@@ -189,6 +247,7 @@ export function BlocksPanel() {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
         setPendingHash(null);
+        setRetomouJob(false);
         setButtonState('error');
       }
     };
@@ -223,6 +282,12 @@ export function BlocksPanel() {
     setButtonState('running');
     setResult(null);
     setSemGasto(false);
+    setRetomouJob(false);
+    // A tela ganha dono já no clique, antes do POST: o hash só volta no 202, e
+    // é justamente nesta janela que um `world-block::*` de outra aba tomaria a
+    // tela — o bloco recém-pedido continuaria na fila, pago, sem ninguém
+    // acompanhando.
+    ownBlock.current = { hash: null };
     try {
       const accepted = await api<WorldBlockAccepted | { status: string; result: WorldBlockResult }>(
         'world-block',
@@ -230,14 +295,21 @@ export function BlocksPanel() {
       );
       // Cache total: o servidor já responde 200 com o resultado pronto.
       if ('result' in accepted) {
+        ownBlock.current = { hash: accepted.result.hash };
         setResult(accepted.result);
         setSemGasto(true);
         setButtonState('done');
         loadCatalog();
         return;
       }
+      ownBlock.current = { hash: accepted.hash };
       setPendingHash(accepted.hash);
     } catch (err) {
+      // Nada foi aceito NESTE clique, então a tela volta a ser órfã: se o
+      // pedido chegou ao servidor e só a resposta se perdeu, o job aparece no
+      // próximo snapshot e a recolagem o encontra — que é exatamente o caso em
+      // que ficar dono de nada esconderia trabalho pago.
+      ownBlock.current = null;
       setError(err instanceof Error ? err.message : String(err));
       setButtonState('error');
     }
@@ -518,14 +590,33 @@ export function BlocksPanel() {
                 <>
                   <Skeleton className="h-24 w-full" />
                   <p className="text-sm text-muted-foreground" role="status">
-                    {SB.resultado.aguardando}
+                    {job?.message ?? SB.resultado.aguardando}
                   </p>
+                  {/* Esperar a vez não é gerar, e a posição é o que responde
+                      "falta quanto?" — vem de `queuePosition` (1 = próximo). */}
+                  {naFila && (
+                    <p className="text-sm text-muted-foreground">
+                      {SB.resultado.naFila}
+                      {typeof job?.queuePosition === 'number'
+                        ? ` (${posicaoNaFila(job.queuePosition)})`
+                        : ''}
+                    </p>
+                  )}
+                  {retomouJob && (
+                    <p className="text-sm text-muted-foreground">
+                      {SB.resultado.jobEmVoo}
+                    </p>
+                  )}
                 </>
               ) : result === null ? (
                 <p className="text-sm text-muted-foreground">{SB.resultado.vazio}</p>
               ) : (
                 <>
-                  {frameCount === 0 ? (
+                  {/* Numa corrida RECOLADA o formulário não descreve o bloco que
+                      voltou (ele é de outra configuração, ou de outra sessão):
+                      os palpites saem de cena e o sidecar animation.json decide
+                      sozinho — sem sidecar, o AnimPreview cai no cubo base. */}
+                  {frameCount === 0 && !retomouJob ? (
                     // Bloco estático: o cubo base, sem animação.
                     <img
                       src={`/world-blocks/${result.hash}/base.png`}
@@ -535,9 +626,9 @@ export function BlocksPanel() {
                   ) : (
                     <AnimPreview
                       hash={result.hash}
-                      frameCount={frameCount}
-                      fps={fps}
-                      pingPong={pingPong}
+                      frameCount={retomouJob ? undefined : frameCount}
+                      fps={retomouJob ? undefined : fps}
+                      pingPong={retomouJob ? undefined : pingPong}
                       alt={description}
                       className="max-h-24 w-full object-contain [image-rendering:pixelated]"
                     />

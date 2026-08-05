@@ -46,7 +46,7 @@ import {
   type DispatchOutcome,
 } from './itens/generate-all-button.tsx';
 import {
-  countGenerating,
+  countBusy,
   fittingWardrobeItems,
   mergeBatch,
   pendingWardrobeItems,
@@ -206,21 +206,24 @@ export function ItensScreen() {
 
   // Contador de progresso: o lote rastreado dá o "X de Y"; sem lote (página
   // recarregada no meio, por exemplo) cai na contagem simples dos jobs de
-  // peça do personagem que ainda estão gerando.
+  // peça do personagem que ainda não acabaram.
+  //
+  // OCUPADO, e não "gerando": com a fila, um lote recém-disparado está todo
+  // em 'na-fila' e o contador sumia da tela dizendo 0. Ver ./itens/generation-batch.ts.
   const tracked = batch !== null && batch.characterId === character.id ? batch : null;
-  const trackedRunning =
-    tracked !== null ? countGenerating(tracked.keys, studio.jobs) : 0;
-  const allRunning = countGenerating(
+  const trackedBusy =
+    tracked !== null ? countBusy(tracked.keys, studio.jobs) : 0;
+  const allBusy = countBusy(
     studio.wardrobe.map((w) => wardrobeKey(character.id, w.id)),
     studio.jobs,
   );
-  const running = trackedRunning > 0 ? trackedRunning : allRunning;
+  const busy = trackedBusy > 0 ? trackedBusy : allBusy;
   const progressText =
-    running === 0
+    busy === 0
       ? null
-      : tracked !== null && trackedRunning > 0 && tracked.keys.length > running
-        ? progressoGeracoes(running, tracked.keys.length)
-        : geracoesEmAndamento(running);
+      : tracked !== null && trackedBusy > 0 && tracked.keys.length > busy
+        ? progressoGeracoes(busy, tracked.keys.length)
+        : geracoesEmAndamento(busy);
 
   const summaryText =
     summary !== null && summary.characterId === character.id

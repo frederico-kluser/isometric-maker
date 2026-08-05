@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/tooltip';
 import { HoldToConfirmButton } from '@/components/motion-ui/hold-to-confirm';
 import type { Character, Silhouette } from '../../../../server/model.ts';
+import { isBusyStatus } from '../../job-scope.ts';
 import { wizard } from '../../../strings/wizard.ts';
 import {
 	api,
@@ -89,11 +90,19 @@ export function CharacterHeader({
 			setCharacterId(resolvedId);
 		}
 	}, [resolvedId, characterId, setCharacterId]);
-	// Bloqueia deletar se houver job rodando para o personagem selecionado.
+	/**
+	 * Bloqueia deletar se houver job OCUPADO para o personagem selecionado.
+	 *
+	 * `isBusyStatus`, e não `=== 'gerando'`: com a fila, um job aceito passa
+	 * minutos em `'na-fila'` antes de começar. Apagar o personagem nessa janela
+	 * deixaria o job rodar contra um dono que não existe mais — e ele é pago.
+	 * Enfileirado impede tanto quanto rodando; o que muda entre os dois é só o
+	 * texto (`src/app/job-scope.ts`).
+	 */
 	const hasRunningJob = selectedChar
 		? Object.entries(studio.jobs).some(
 				([key, job]) =>
-					key.startsWith(selectedChar.id + '::') && job.status === 'gerando',
+					key.startsWith(selectedChar.id + '::') && isBusyStatus(job.status),
 			)
 		: false;
 

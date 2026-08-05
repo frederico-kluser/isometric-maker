@@ -15,6 +15,7 @@
  */
 
 import { erro } from './strings/comum.ts';
+import { fila } from './strings/fila.ts';
 import { inicio } from './strings/inicio.ts';
 import { shell } from './strings/shell.ts';
 import { wizard } from './strings/wizard.ts';
@@ -28,6 +29,7 @@ import { laboratorio } from './strings/laboratorio.ts';
 
 export const S = {
   erro,
+  fila,
   inicio,
   shell,
   wizard,

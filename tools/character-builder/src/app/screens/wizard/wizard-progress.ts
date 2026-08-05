@@ -21,6 +21,7 @@ import {
 	type Studio,
 	type WizardState,
 } from '../../../../server/model.ts';
+import { isBusyStatus } from '../../job-scope.ts';
 
 export type WizardStepId = 'config' | 'sul' | 'direcoes8' | 'pronto';
 
@@ -63,8 +64,28 @@ export function defaultWizardState(): WizardState {
 	return { etapa: 'sul', southVersions: [], activeSouth: 0 };
 }
 
+/**
+ * A etapa está em trabalho — na fila ou gerando.
+ *
+ * O lado da CÉLULA já contava `'na-fila'`; o lado do JOB só contava
+ * `'gerando'`, e essa assimetria virou defeito com a fila.
+ *
+ * Não é que o servidor deixe de marcar a célula: `enqueueAndRespond` passa
+ * `cellKeys: [southKey(...)]` / `[directions8Key(...)]` e `syncJobCells`
+ * escreve `'na-fila'` nela (`server/api.ts`). O buraco é a **regra 1** desse
+ * espelho — célula `'pronto'` nunca é sobrescrita, porque é progresso pago e a
+ * idempotência de `mannequin.ts` lê exatamente esse status. Então ao REGERAR
+ * uma sul que já está pronta, a célula continua `'pronto'` de propósito e só o
+ * lado do JOB tem notícia do pedido novo: contando apenas `'gerando'` lá, a
+ * etapa aceita e enfileirada aparecia como se nada tivesse acontecido — sem
+ * skeleton, com o botão convidando a pedir de novo a MESMA face sul paga.
+ *
+ * `isBusyStatus` é o predicado único dos dois estados (`src/app/job-scope.ts`).
+ */
 const generating = (cell: Cell | undefined, jobStatus?: string): boolean =>
-	jobStatus === 'gerando' || cell?.status === 'gerando' || cell?.status === 'na-fila';
+	isBusyStatus(jobStatus) ||
+	cell?.status === 'gerando' ||
+	cell?.status === 'na-fila';
 
 /** Forma mínima do job que a derivação lê (compatível com StudioResponse.jobs). */
 export interface WizardJobInfo {

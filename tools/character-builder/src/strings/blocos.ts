@@ -103,9 +103,25 @@ export const blocos = {
   resultado: {
     titulo: 'Resultado',
     vazio: 'Nenhum bloco gerado ainda nesta sessão.',
+    /**
+     * O "não feche a aba" saiu daqui, e a remoção é uma correção: com a fila
+     * persistente (`server/job-queue.ts`) o job vive no servidor, e o painel
+     * volta a acompanhá-lo pela chave `world-block::<hash>` depois de um F5
+     * (`./blocks-recovery.ts`). Pedir que o usuário não recarregue passou a ser
+     * exigência falsa.
+     */
     aguardando:
       'Gerando a textura animada. O caminho pode responder na hora ou em segundo ' +
-      'plano — os dois estão cobertos. Não feche a aba.',
+      'plano — os dois estão cobertos. O trabalho é do servidor: recarregar a ' +
+      'página não o perde.',
+    /** O job foi aceito e ainda não começou */
+    naFila:
+      'Este bloco está na fila do servidor, esperando a vez. Nada se perde ao ' +
+      'sair desta seção ou recarregar a página.',
+    /** O painel reencontrou um job que já estava no servidor */
+    jobEmVoo:
+      'Reencontrei uma geração de bloco já em andamento no servidor e voltei a ' +
+      'acompanhá-la — ela seguiu enquanto esta tela esteve fora do ar.',
     doCache: 'do cache — nenhuma chamada saiu',
     aviso:
       'O bloco entrou no catálogo como textura animada. Abra o editor de mapa em ' +

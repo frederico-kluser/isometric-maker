@@ -265,6 +265,13 @@ export const laboratorio = {
 			gerar: 'Gerar sprite sul',
 			/** Estado durante o job */
 			gerando: 'Gerando…',
+			/**
+			 * Estado do job que ainda NÃO começou. Com a fila (server/job-queue.ts)
+			 * "pedido aceito" deixou de ser "rodando", e chamar de "Gerando…" o
+			 * que está esperando a vez faz o usuário procurar lentidão onde só há
+			 * ordem de chegada.
+			 */
+			naFila: 'Na fila…',
 			/** Estado de sucesso */
 			pronto: 'Pronto',
 			/** Estado de erro */
@@ -303,6 +310,13 @@ export const laboratorio = {
 			jobEmVoo:
 				'Reencontrei uma geração ainda em andamento no servidor e voltei a ' +
 				'acompanhá-la — ela seguiu rodando enquanto esta aba esteve fechada.',
+			/**
+			 * O job reencontrado ainda não começou: está na fila. Dizer isso é o
+			 * que impede o usuário de achar que a bancada travou.
+			 */
+			jobNaFila:
+				'Esta geração está na fila do servidor, esperando a vez. Nada se ' +
+				'perde ao sair desta aba ou recarregar a página.',
 			/** Sem a config da corrida não há bundle: manifesto antigo ou job reencontrado */
 			semConfig:
 				'Não tenho a configuração desta corrida — ou o manifesto dela é anterior ' +

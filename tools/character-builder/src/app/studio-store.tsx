@@ -21,14 +21,56 @@ import {
 } from "react";
 import type { Studio } from "../../server/model.ts";
 
+/**
+ * Espelho cliente de `StudioJobView` (`server/job-queue.ts`).
+ *
+ * Os três primeiros campos são os que a rota sempre publicou; o resto entrou com
+ * a fila e é **opcional aqui de propósito**. Um campo obrigatório novo faria a
+ * tela quebrar contra um servidor mais velho em vez de degradar, e o painel da
+ * fila já trata ausência como "não sei" em vez de inventar valor
+ * (`src/app/queue/queue-model.ts`).
+ *
+ * A rota é a fronteira: `server/job-queue.ts` importa `node:fs`, então o tipo é
+ * espelhado e não importado — mesma regra de `studio-body.ts` e `blocks-body.ts`.
+ */
 export interface StudioJobEntry {
 	readonly status: string;
 	readonly label: string;
 	readonly message?: string;
+	/** Momento em que o job começou (ou entrou na fila). */
+	readonly startedAt?: number;
+	/** Qual dos sete `JobKind` é este job. */
+	readonly kind?: string;
+	/** Ordem de chegada, monotônica. */
+	readonly seq?: number;
+	readonly enqueuedAt?: string;
+	/** 1 = próximo a entrar. Ausente quando o job não está mais na fila. */
+	readonly queuePosition?: number;
+	/** `true` = a submissão paga JÁ consta. `false` é "não consta", não "grátis". */
+	readonly paid?: boolean;
+	readonly attempts?: number;
+}
+
+/** Espelho cliente de `QueueStats` (`server/job-queue.ts`). */
+export interface StudioQueueStats {
+	readonly queued?: number;
+	readonly running?: number;
+	readonly done?: number;
+	readonly failed?: number;
+	readonly cancelled?: number;
+	/** Teto EFETIVO de chamadas simultâneas, já resolvido. */
+	readonly concurrency?: number;
+	readonly concurrencySource?: string;
+	/** Soma dos pesos em voo — não é o número de jobs. */
+	readonly inFlightWeight?: number;
+	readonly availableWeight?: number;
+	readonly ratePerSecond?: number;
 }
 
 export interface StudioResponse extends Studio {
 	readonly jobs: Record<string, StudioJobEntry>;
+	/** Estado do teto de admissão. Ausente em servidor anterior à fila. */
+	readonly queue?: StudioQueueStats;
 	readonly hasToken: boolean;
 	readonly mannequinDefaultAvailable: boolean;
 }

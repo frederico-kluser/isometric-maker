@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cellKey, type Cell, type Pose } from '../../../../server/model.ts';
 import {
-  countGenerating,
+  countBusy,
   isPoseCellPending,
   mergeBatch,
   pendingPoses,
@@ -71,17 +71,42 @@ test('pendingPoses não mistura células de outro personagem', () => {
 
 // ------------------------------------------------------------------- contador
 
-test('countGenerating conta só jobs gerando entre as chaves dadas', () => {
+test('countBusy conta gerando E na-fila entre as chaves dadas', () => {
   const jobs = {
     a: { status: 'gerando' },
     b: { status: 'pronto' },
     c: { status: 'falhou' },
     d: { status: 'gerando' },
+    e: { status: 'na-fila' },
     fora: { status: 'gerando' },
   };
-  assert.equal(countGenerating(['a', 'b', 'c', 'd'], jobs), 2);
-  assert.equal(countGenerating([], jobs), 0);
-  assert.equal(countGenerating(['inexistente'], jobs), 0);
+  // Dois 'gerando' e um 'na-fila' entre as chaves pedidas; 'fora' não entra.
+  assert.equal(countBusy(['a', 'b', 'c', 'd', 'e'], jobs), 3);
+  assert.equal(countBusy([], jobs), 0);
+  assert.equal(countBusy(['inexistente'], jobs), 0);
+});
+
+test('countBusy: um lote inteiramente ENFILEIRADO não lê zero', () => {
+  // O caso comum com fila: oito poses disparadas, nenhuma admitida ainda.
+  // Contando só 'gerando' o contador sumia da tela — e mergeBatch, abaixo,
+  // tratava o lote como assentado.
+  const keys = ['a', 'b', 'c'];
+  const jobs = {
+    a: { status: 'na-fila' },
+    b: { status: 'na-fila' },
+    c: { status: 'na-fila' },
+  };
+  assert.equal(countBusy(keys, jobs), 3);
+});
+
+test('countBusy ignora todo status terminal, inclusive os da fila', () => {
+  const jobs = {
+    a: { status: 'cancelado' },
+    b: { status: 'interrompido' },
+    c: { status: 'pronto' },
+    d: { status: 'falhou' },
+  };
+  assert.equal(countBusy(['a', 'b', 'c', 'd'], jobs), 0);
 });
 
 // -------------------------------------------------------------------- mergeBatch
@@ -115,5 +140,17 @@ test('mergeBatch com lote ainda rodando acumula sem duplicar chave', () => {
     b: { status: 'pronto' },
   };
   const batch = mergeBatch(prev, 'manequim', ['b', 'c'], jobs);
+  assert.deepEqual(batch, { characterId: 'manequim', keys: ['a', 'b', 'c'] });
+});
+
+test('mergeBatch NÃO descarta um lote que ainda está todo na fila', () => {
+  // Era o defeito: com o lote inteiro em 'na-fila', o anterior parecia
+  // assentado e o disparo seguinte apagava o denominador do "X de Y".
+  const prev = { characterId: 'manequim', keys: ['a', 'b'] };
+  const jobs = {
+    a: { status: 'na-fila' },
+    b: { status: 'na-fila' },
+  };
+  const batch = mergeBatch(prev, 'manequim', ['c'], jobs);
   assert.deepEqual(batch, { characterId: 'manequim', keys: ['a', 'b', 'c'] });
 });
