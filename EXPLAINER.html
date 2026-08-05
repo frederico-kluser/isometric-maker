@@ -1,10 +1,16 @@
 <!doctype html>
+<!--
+  EXPLAINER da execucao do deep-orchestrator — gerado em 2026-08-05.
+  Branch de integracao: main. 11 commits, 5 ondas, 32 sub-agentes.
+-->
 <html lang="pt-BR" data-bs-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Diz ao navegador que a página é escura ANTES do CSS carregar: sem flash
+     branco, e os controles nativos (scrollbar, select, input) já nascem escuros. -->
 <meta name="color-scheme" content="dark">
-<title>Sprites 3D: sprite única nas faces do cubo</title>
+<title>EXPLAINER — deep-orchestrator · de-para da execução</title>
 
 <link rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
@@ -20,14 +26,115 @@
       crossorigin="anonymous">
 
 <style>
+  /* ── Paleta do deep-orchestrator ──────────────────────────────────────────
+     Fundo #1a1a2e, accent #00d4ff (ciano), sucesso #00ff88, warning #ffaa00.
+     Tudo deriva destas variáveis — não cravamos hex no conteúdo. */
+  :root {
+    --do-bg: #1a1a2e;
+    --do-bg-soft: #16213e;
+    --do-card: #1e1e38;
+    --do-accent: #00d4ff;
+    --do-success: #00ff88;
+    --do-warning: #ffaa00;
+    --do-danger: #ff6b6b;
+  }
+
+  [data-bs-theme="dark"] {
+    --bs-body-bg: var(--do-bg);
+    --bs-body-color: #dcdce8;
+    --bs-secondary-color: #8b8ba7;
+    --bs-border-color: #2e2e4a;
+    --bs-body-font-family: system-ui, -apple-system, 'Segoe UI', Roboto,
+                           'Helvetica Neue', Arial, sans-serif;
+  }
+
+  body { background-image: radial-gradient(ellipse 80% 40% at 50% -10%, rgba(0,212,255,.07), transparent 60%); }
+
+  /* Âncora não fica escondida atrás da navbar fixa. */
   [id] { scroll-margin-top: 5rem; }
+
+  a { color: var(--do-accent); }
+  a:hover { color: #4de0ff; }
+
+  .brand-accent, .stat-value { color: var(--do-accent); }
+
+  /* Navbar com borda inferior em tom de accent. */
+  .navbar { border-bottom: 1px solid rgba(0,212,255,.25); }
+
+  /* Hero com gradiente sutil: azul-noite para um leve toque ciano. */
+  .explainer-hero {
+    background: linear-gradient(135deg, #16213e 0%, #1a1a2e 55%, #0f3460 100%);
+    border: 1px solid var(--bs-border-color);
+    box-shadow: inset 0 0 2.5rem rgba(0,212,255,.05);
+  }
+
+  /* Título de seção com filete de gradiente sutil sob o texto. */
+  .pane-title { position: relative; padding-bottom: .5rem; }
+  .pane-title::after {
+    content: ''; position: absolute; left: 0; bottom: 0;
+    height: 2px; width: 4.5rem; border-radius: 2px;
+    background: linear-gradient(90deg, var(--do-accent), transparent);
+  }
+
+  /* Cards e grupos de lista: tom levemente mais claro que o fundo. */
+  .card { --bs-card-bg: var(--do-card); --bs-card-border-color: var(--bs-border-color); }
+  .card-header {
+    background: linear-gradient(90deg, rgba(0,212,255,.10), rgba(0,212,255,0));
+    border-bottom: 1px solid var(--bs-border-color);
+  }
+  .list-group-item { background-color: var(--do-card); }
+
+  /* Abas: ativa em accent com sublinhado no mesmo tom. */
+  .nav-tabs { border-bottom-color: var(--bs-border-color); }
+  .nav-tabs .nav-link { color: var(--bs-secondary-color); }
+  .nav-tabs .nav-link:hover { color: var(--bs-body-color); border-color: var(--bs-border-color) var(--bs-border-color) transparent; }
+  .nav-tabs .nav-link.active {
+    color: var(--do-accent); font-weight: 600;
+    background-color: transparent;
+    border-color: var(--bs-border-color) var(--bs-border-color) var(--do-accent);
+  }
+
+  /* Badges da paleta. */
+  .badge-accent  { background: rgba(0,212,255,.14);  color: var(--do-accent);  border: 1px solid rgba(0,212,255,.35); }
+  .badge-ok      { background: rgba(0,255,136,.12);  color: var(--do-success); border: 1px solid rgba(0,255,136,.35); }
+  .badge-warn    { background: rgba(255,170,0,.12);  color: var(--do-warning); border: 1px solid rgba(255,170,0,.35); }
+  .badge-danger  { background: rgba(255,107,107,.12); color: var(--do-danger); border: 1px solid rgba(255,107,107,.35); }
+  .badge-soft    { background: rgba(139,139,167,.12); color: var(--bs-secondary-color); border: 1px solid var(--bs-border-color); }
+
+  /* Diff stats: + verde, − vermelho, dígitos tabulares. */
+  .diff-plus  { color: var(--do-success); font-variant-numeric: tabular-nums; }
+  .diff-minus { color: var(--do-danger); font-variant-numeric: tabular-nums; }
+
+  /* De-Para: cartões com borda indicando o lado da comparação. */
+  .depara-antes  { border-color: rgba(139,139,167,.45); }
+  .depara-depois { border-color: rgba(0,255,136,.35); }
+
+  /* Timeline vertical: linha + marcador ciano com brilho sutil. */
+  .timeline { position: relative; }
+  .timeline-item { position: relative; padding-left: 1.4rem; border-left: 2px solid var(--bs-border-color); }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -.42rem; top: .3rem;
+    width: .7rem; height: .7rem; border-radius: 50%;
+    background: var(--do-accent); box-shadow: 0 0 .6rem rgba(0,212,255,.6);
+  }
+  .timeline-item:last-child { border-left-color: transparent; }
+
+  /* Bloco de código: espaço à direita para o botão de copiar não cobrir o texto. */
   pre { position: relative; margin-bottom: 1rem; }
   pre code.hljs { padding-right: 4rem; border-radius: var(--bs-border-radius); font-size: .875rem; }
+
   .copy-btn { position: absolute; top: .5rem; right: .5rem; opacity: .4; transition: opacity .15s; }
   pre:hover .copy-btn, .copy-btn:focus-visible { opacity: 1; }
+
+  /* Abrir o arquivo em #pane-x foca o painel (bom: o leitor de tela cai no
+     conteúdo), e o outline branco do navegador fica gritante. Anel discreto,
+     do tema, no lugar — tirar o indicador por completo quebraria quem navega
+     por teclado. */
   .tab-pane:focus-visible { outline: 0; box-shadow: 0 0 0 .2rem rgba(var(--bs-emphasis-color-rgb), .15); }
+
+  /* Impressão/PDF: abre TODAS as abas, senão o papel sai com uma só. */
   @media print {
-    .nav-tabs, .copy-btn { display: none !important; }
+    .nav-tabs, .copy-btn, details, .explainer-hero { display: none !important; }
     .tab-content > .tab-pane { display: block !important; opacity: 1 !important; page-break-inside: avoid; }
     .tab-pane::before { content: attr(data-print-title); display: block;
                         font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
@@ -37,172 +144,499 @@
 
 <body class="bg-body">
 
-<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary border-bottom">
+<nav class="navbar navbar-expand-lg sticky-top bg-body-tertiary">
   <div class="container">
-    <span class="navbar-brand fw-semibold"><i class="bi bi-file-earmark-code me-1"></i>Sprites 3D: sprite única nas faces</span>
-    <span class="navbar-text small text-body-secondary d-none d-md-inline">onda1-sprite-stretch · onda2-single-sprite</span>
+    <span class="navbar-brand fw-semibold"><i class="bi bi-diagram-3 brand-accent me-2"></i>deep-orchestrator <span class="text-body-secondary fw-normal">· EXPLAINER</span></span>
+    <span class="navbar-text small text-body-secondary d-none d-md-inline">v1.0 · 2026-08-05</span>
   </div>
 </nav>
 
-<main class="container py-4" style="max-width: 60rem">
+<main class="container py-4" style="max-width: 62rem">
 
-  <header class="mb-4">
-    <h1 class="display-6 fw-semibold">Sprites 3D: sprite única nas faces do cubo</h1>
-    <p class="lead text-body-secondary">Sprite isométrica única esticada sobre as 3 faces visíveis do cubo via <strong>UV mapping customizado</strong> no BoxGeometry — cada face sampleia a região correta da sprite, sem recortes e sem duplicação.</p>
+  <header class="explainer-hero rounded-4 p-4 p-md-5 mb-4">
+    <span class="badge badge-accent mb-3"><i class="bi bi-clipboard-data me-1"></i>Relatório de execução</span>
+    <h1 class="display-6 fw-semibold text-white mb-2">O que aconteceu nesta execução</h1>
+    <p class="lead text-white-50 mb-3">Personagem gerado que nao aparecia na tela, bloco que ignorava a descricao, e geracao sem fila: mais simultaneidade, sobrevivencia ao refresh e gerenciamento FIFO. Cinco ondas, 32 sub-agentes, 11 commits, 403 -&gt; 680 testes.</p>
     <div class="d-flex flex-wrap gap-2">
-      <span class="badge text-bg-secondary">Three.js</span>
-      <span class="badge text-bg-secondary">cube3d.ts</span>
-      <span class="badge text-bg-secondary">2026-08-04</span>
-      <span class="badge text-bg-success">onda3 · UV mapping</span>
+      <span class="badge badge-accent">v1.0</span>
+      <span class="badge badge-soft"><i class="bi bi-calendar3 me-1"></i>2026-08-05</span>
+      <span class="badge badge-soft"><i class="bi bi-git-branch me-1"></i>main</span>
     </div>
   </header>
 
+  <!-- ABAS
+       Regras que não podem ser quebradas:
+       · <ul role="tablist"> e cada <button role="tab">
+       · button.id  ←→  tabpanel.aria-labelledby
+       · button.data-bs-target ←→ #id do tabpanel (e aria-controls com o mesmo id, sem #)
+       · exatamente UM botão .active + UM painel .show.active
+       O Bootstrap já faz navegação por seta/Home/End no tablist; não reimplemente. -->
   <ul class="nav nav-tabs" id="doc-tabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="tab-visao-geral" data-bs-toggle="tab" data-bs-target="#pane-visao-geral"
-              type="button" role="tab" aria-controls="pane-visao-geral" aria-selected="true">
-        Visão geral
+      <button class="nav-link active" id="tab-visao" data-bs-toggle="tab" data-bs-target="#pane-visao"
+              type="button" role="tab" aria-controls="pane-visao" aria-selected="true">
+        <i class="bi bi-eye me-1"></i>Visão geral
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-como-fazer" data-bs-toggle="tab" data-bs-target="#pane-como-fazer"
-              type="button" role="tab" aria-controls="pane-como-fazer" aria-selected="false">
-        Código final
+      <button class="nav-link" id="tab-ondas" data-bs-toggle="tab" data-bs-target="#pane-ondas"
+              type="button" role="tab" aria-controls="pane-ondas" aria-selected="false">
+        <i class="bi bi-layers me-1"></i>Ondas
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-armadilhas" data-bs-toggle="tab" data-bs-target="#pane-armadilhas"
-              type="button" role="tab" aria-controls="pane-armadilhas" aria-selected="false">
-        Histórico &amp; iterações
+      <button class="nav-link" id="tab-arquivos" data-bs-toggle="tab" data-bs-target="#pane-arquivos"
+              type="button" role="tab" aria-controls="pane-arquivos" aria-selected="false">
+        <i class="bi bi-files me-1"></i>Arquivos
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-depara" data-bs-toggle="tab" data-bs-target="#pane-depara"
+              type="button" role="tab" aria-controls="pane-depara" aria-selected="false">
+        <i class="bi bi-arrow-left-right me-1"></i>De-Para
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-decisoes" data-bs-toggle="tab" data-bs-target="#pane-decisoes"
+              type="button" role="tab" aria-controls="pane-decisoes" aria-selected="false">
+        <i class="bi bi-lightbulb me-1"></i>Decisões
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-timeline" data-bs-toggle="tab" data-bs-target="#pane-timeline"
+              type="button" role="tab" aria-controls="pane-timeline" aria-selected="false">
+        <i class="bi bi-clock-history me-1"></i>Timeline
       </button>
     </li>
   </ul>
 
   <div class="tab-content border border-top-0 rounded-bottom p-4" id="doc-tabs-content">
 
-    <!-- TAB 1 -->
-    <div class="tab-pane fade show active" id="pane-visao-geral" role="tabpanel"
-         aria-labelledby="tab-visao-geral" tabindex="0" data-print-title="Visão geral">
-      <h2 class="h4">Abordagem final: UV mapping customizado</h2>
-      <p>Blocos com arte gerada (PixelLab v2, <code>faceUrls</code>) têm sprites isométricos (48×53 px) que mostram as 3 faces visíveis do cubo. A sprite é carregada como <strong>UMA textura</strong> e aplicada nas faces +X, +Z, +Y — mas com <strong>UVs customizados</strong> para que cada face sampleie apenas a sua região:</p>
+    <!-- ══════════════ ABA 1 · VISÃO GERAL ══════════════ -->
+    <div class="tab-pane fade show active" id="pane-visao" role="tabpanel"
+         aria-labelledby="tab-visao" tabindex="0" data-print-title="Visão geral">
+      <h2 class="h4 pane-title">Resumo da execução</h2>
+      <p class="text-body-secondary">Personagem gerado que nao aparecia na tela, bloco que ignorava a descricao, e geracao sem fila: mais simultaneidade, sobrevivencia ao refresh e gerenciamento FIFO. Cinco ondas, 32 sub-agentes, 11 commits, 403 -&gt; 680 testes.</p>
 
-      <table class="table table-sm">
-        <thead><tr><th>Face 3D</th><th>BoxGeometry</th><th>Região UV (u, v)</th><th>Parte do sprite</th></tr></thead>
-        <tbody>
-          <tr><td>Direita (SE)</td><td>+X (grupo 0)</td><td>u=[0.5, 1], v=[29/53, 1]</td><td>Metade direita, abaixo do topo</td></tr>
-          <tr><td>Topo</td><td>+Y (grupo 2)</td><td>u=[0, 1], v=[29/53, 1]</td><td>Topo (bounding box do losango)</td></tr>
-          <tr><td>Esquerda (SW)</td><td>+Z (grupo 4)</td><td>u=[0, 0.5], v=[29/53, 1]</td><td>Metade esquerda, abaixo do topo</td></tr>
-          <tr><td>Ocultas</td><td>−X, −Z, −Y</td><td>UV padrão (não usado)</td><td>Cor sólida HSL</td></tr>
-        </tbody>
-      </table>
+      <div class="alert alert-primary d-flex gap-2" role="alert">
+        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+        <div><strong>O que é este documento:</strong> o EXPLAINER gerado pelo deep-orchestrator na fase COMMIT-FINAL, ao fim de cada execução. Mostra o de-para (antes/depois) de tudo que foi feito: ondas, worktrees, arquivos modificados, decisões autônomas e timeline.</div>
+      </div>
 
-      <p><strong>Como funciona:</strong> <code>createSpriteGeometry()</code> clona o <code>BoxGeometry</code> compartilhado e reescreve o atributo UV dos vértices de cada face visível. A função <code>remapFaceUv()</code> encontra os 4 vértices únicos de cada grupo de material e aplica a transformação de UV. A geometria customizada é cacheada e reutilizada por todos os cubos com sprite.</p>
+      <div class="row g-3">
+        <div class="col-6 col-lg-4">
+          <div class="card h-100 text-center">
+            <div class="card-body py-4">
+              <i class="bi bi-layers fs-3 stat-value"></i>
+              <div class="display-6 fw-bold stat-value">5</div>
+              <div class="text-body-secondary small">Ondas executadas</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-4">
+          <div class="card h-100 text-center">
+            <div class="card-body py-4">
+              <i class="bi bi-robot fs-3 stat-value"></i>
+              <div class="display-6 fw-bold stat-value">32</div>
+              <div class="text-body-secondary small">Sub-agentes</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-4">
+          <div class="card h-100 text-center">
+            <div class="card-body py-4">
+              <i class="bi bi-git-commit fs-3 stat-value"></i>
+              <div class="display-6 fw-bold stat-value">11</div>
+              <div class="text-body-secondary small">Commits (squash)</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <h3 class="h5 mt-4">Evolução da solução</h3>
-      <div class="table-responsive">
-      <table class="table table-sm">
-        <thead><tr><th>Onda</th><th>Abordagem</th><th>Problema</th></tr></thead>
-        <tbody>
-          <tr><td>1</td><td>dewarp (projeção inversa)</td><td>105 linhas, complexo, 3 texturas separadas</td></tr>
-          <tr><td>1 (fix)</td><td>crop (3 recortes)</td><td>3 texturas separadas, bugs de transparência e regiões</td></tr>
-          <tr><td>2</td><td>Sprite única em cada face</td><td>Cada face mostrava a sprite INTEIRA (3 lados em miniatura)</td></tr>
-          <tr><td class="text-success"><strong>3</strong></td><td class="text-success"><strong>UV mapping customizado</strong></td><td class="text-success"><strong>Uma textura, cada face mostra sua região ✓</strong></td></tr>
-        </tbody>
-      </table>
+      <h2 class="h4 pane-title mt-5">Como este documento é gerado</h2>
+      <p>O orquestrador, na fase COMMIT-FINAL, gera o explainer a partir deste template:</p>
+<pre><code class="language-bash"># Gera o explainer a partir do template
+./scripts/generate-explainer.sh &gt; EXPLAINER.html
+# Ou preenche manualmente os placeholders 1.0, 2026-08-05, main, ...</code></pre>
+      <p class="text-body-secondary small">O template é <code>templates/html-explainer.html</code> — arquivo único, sem build: abre por file:// e imprime em PDF com todas as abas.</p>
+
+      <details class="mt-4">
+        <summary class="text-body-secondary">Placeholders usados na geração</summary>
+        <div class="table-responsive mt-2">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr><th scope="col">Placeholder</th><th scope="col">Onde aparece</th><th scope="col">Preenchido com</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>&#123;&#123;VERSION&#125;&#125;</code></td><td>Navbar, hero, rodapé</td><td>Versão do orquestrador</td></tr>
+              <tr><td><code>&#123;&#123;DATE&#125;&#125;</code></td><td>Navbar, hero, rodapé</td><td>Data da execução</td></tr>
+              <tr><td><code>&#123;&#123;BRANCH&#125;&#125;</code></td><td>Hero, rodapé</td><td>Branch principal</td></tr>
+              <tr><td><code>&#123;&#123;TASK_SUMMARY&#125;&#125;</code></td><td>Visão geral</td><td>Resumo da tarefa</td></tr>
+              <tr><td><code>&#123;&#123;TOTAL_WAVES&#125;&#125;</code></td><td>Cards de estatística</td><td>Número de ondas</td></tr>
+              <tr><td><code>&#123;&#123;TOTAL_AGENTS&#125;&#125;</code></td><td>Cards de estatística</td><td>Número de sub-agentes</td></tr>
+              <tr><td><code>&#123;&#123;TOTAL_COMMITS&#125;&#125;</code></td><td>Cards de estatística</td><td>Número de commits</td></tr>
+              <tr><td><code>&#123;&#123;WAVES_TABLE&#125;&#125;</code></td><td>Aba Ondas</td><td>Tabela HTML de ondas (Onda | Worktree | Tarefas | Commits | Status)</td></tr>
+              <tr><td><code>&#123;&#123;FILES_TABLE&#125;&#125;</code></td><td>Aba Arquivos</td><td>Tabela HTML de arquivos modificados (Arquivo | Tipo | Diff)</td></tr>
+              <tr><td><code>&#123;&#123;BEFORE_AFTER&#125;&#125;</code></td><td>Aba De-Para</td><td>Seções de de-para adicionais</td></tr>
+              <tr><td><code>&#123;&#123;DECISIONS&#125;&#125;</code></td><td>Aba Decisões</td><td>Lista de decisões autônomas</td></tr>
+              <tr><td><code>&#123;&#123;TIMELINE&#125;&#125;</code></td><td>Aba Timeline</td><td>Linha do tempo da execução</td></tr>
+              <tr><td><code>&#123;&#123;COMMITS_LIST&#125;&#125;</code></td><td>Aba Arquivos</td><td>Lista de commits squash</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+
+    <!-- ══════════════ ABA 2 · ONDAS EXECUTADAS ══════════════ -->
+    <div class="tab-pane fade" id="pane-ondas" role="tabpanel"
+         aria-labelledby="tab-ondas" tabindex="0" data-print-title="Ondas executadas">
+      <h2 class="h4 pane-title">Ondas executadas</h2>
+      <p>Uma linha por sub-agente. Cada sub-agente trabalha numa worktree Git nomeada; a integração é squash-merge um a um, com gate (build + testes) entre merges. Worktrees e branches <code>wt/*</code> são removidos ao fim de cada onda.</p>
+
+      <!-- {{WAVES_TABLE}} begin -->
+<div class="table-responsive"><table class="table table-dark table-striped align-middle">
+<thead><tr><th>Onda</th><th>Worktree</th><th>O que entregou</th><th>Commit</th><th>Status</th></tr></thead><tbody>
+<tr><td><span class="badge badge-accent">0</span></td><td><code>—</code></td><td>Commit preparatorio: preserva 29 arquivos de trabalho local nao commitado. Sem ele, nenhum merge fecharia (world-block.ts e blocks-api.ts estavam sujos e em escopo).</td><td><code>e9f14b3</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">1</span></td><td><code>onda1-prompt-do-bloco</code></td><td>Sete defeitos na cadeia de prompt do bloco. Descoberta: a tabela de acao de fallback era toda em ingles e nunca casava com portugues.</td><td><code>dd6bd85</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">1</span></td><td><code>onda1-render-do-personagem</code></td><td>GET /api/sprite-lab, recuperacao no mount e recolagem a job em voo. Identidade da corrida virou indivisivel.</td><td><code>5a70544</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">1</span></td><td><code>onda1-fila-persistente</code></td><td>Modulo puro de fila FIFO. Achou 3 bugs reais no codigo existente do pipeline.</td><td><code>60f257d</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">1</span></td><td><code>test-onda1-cobertura</code></td><td>41 testes; 4 bugs novos trancados por teste. Sub-onda assincrona.</td><td><code>1dea3f4</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">2</span></td><td><code>onda2-mutex-do-wizard</code></td><td>busy global vira bloqueio por escopo. Um personagem chamado "Sprite Lab" desativava o bloqueio inteiro.</td><td><code>bb161e2</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">2</span></td><td><code>onda2-teto-de-concorrencia</code></td><td>O peso passa a medir chamadas, nao custo. 8 poses: 2 -&gt; 8 simultaneas.</td><td><code>e9eb656</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">3</span></td><td><code>onda3-animacao-do-bloco</code></td><td>A sprite animada passa a ser desenhada no mapa. Escrita atomica com lock; checagem 5x mais barata.</td><td><code>27bb82a</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">3</span></td><td><code>onda3-fila-na-api</code></td><td>spawn() e o Map volatil morrem. Tres buracos de dinheiro fechados apos revisao.</td><td><code>6ba1ea2</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">4</span></td><td><code>onda4-retomada-gratuita</code></td><td>Stub em disco: 6 de 7 ramos retomam sem repagar. Achou bug de dinheiro pre-existente.</td><td><code>f3eb5c7</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">4</span></td><td><code>onda4-painel-da-fila</code></td><td>O painel FIFO, o cancelamento que conta a verdade sobre dinheiro, e 5 guardas de UI.</td><td><code>c15e7f9</code></td><td><span class="badge bg-success">OK</span></td></tr>
+<tr><td><span class="badge badge-accent">5</span></td><td><code>onda5-documentacao</code></td><td>ADRs 0041-0046 e correcao de 3 fatos falsos no README.</td><td><code>2ff4c64</code></td><td><span class="badge bg-success">OK</span></td></tr>
+</tbody></table></div>
+<!-- {{WAVES_TABLE}} end -->
+
+      <p class="text-body-secondary small">Exemplo demonstrativo — a geração substitui o bloco entre os marcadores pelos dados reais da execução.</p>
+
+      <h3 class="h6 mt-4 text-body-secondary">Legenda de status</h3>
+      <div class="d-flex flex-wrap gap-2">
+        <span class="badge badge-ok">Concluída</span>
+        <span class="badge badge-warn">Parcial</span>
+        <span class="badge badge-danger">Bloqueada</span>
       </div>
     </div>
 
-    <!-- TAB 2 -->
-    <div class="tab-pane fade" id="pane-como-fazer" role="tabpanel"
-         aria-labelledby="tab-como-fazer" tabindex="0" data-print-title="Código final">
-      <h2 class="h4">createSpriteGeometry — UV mapping</h2>
-      <pre><code class="language-ts">const SPRITE_UV = {
-  uFold: (CANONICAL_CUBE.tileWidth / 2) / CANONICAL_CUBE.spriteWidth,  // 0.5
-  vRoofBottom: 1 - CANONICAL_CUBE.tileHeight / CANONICAL_CUBE.spriteHeight, // 29/53
-} as const;
+    <!-- ══════════════ ABA 3 · ARQUIVOS MODIFICADOS ══════════════ -->
+    <div class="tab-pane fade" id="pane-arquivos" role="tabpanel"
+         aria-labelledby="tab-arquivos" tabindex="0" data-print-title="Arquivos modificados">
+      <h2 class="h4 pane-title">Arquivos modificados</h2>
+      <p>Diff stats da execução: <span class="diff-plus">+</span> linhas adicionadas, <span class="diff-minus">−</span> removidas.</p>
 
-function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
-  const cached = spriteGeometryCache.get(geom);
-  if (cached) return cached;
+      <!-- {{FILES_TABLE}} begin -->
+<p class="text-body-secondary">68 arquivos: 25 novos, 43 modificados. 18.452 insercoes, 664 remocoes.</p>
+<div class="table-responsive" style="max-height:60vh;overflow-y:auto"><table class="table table-dark table-sm table-striped">
+<thead><tr><th>Arquivo</th><th>Tipo</th><th>Linhas</th></tr></thead><tbody>
+<tr><td><code>.gitignore</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>5</td></tr>
+<tr><td><code>README.md</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>14</td></tr>
+<tr><td><code>docs/README.md</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>14</td></tr>
+<tr><td><code>docs/adr/0041-fila-fifo-persistente-de-geracao.md</code></td><td><span class="badge bg-success">novo</span></td><td>185</td></tr>
+<tr><td><code>docs/adr/0042-teto-de-concorrencia-mede-chamadas.md</code></td><td><span class="badge bg-success">novo</span></td><td>183</td></tr>
+<tr><td><code>docs/adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md</code></td><td><span class="badge bg-success">novo</span></td><td>—</td></tr>
+<tr><td><code>docs/adr/0044-bloqueio-do-wizard-por-escopo.md</code></td><td><span class="badge bg-success">novo</span></td><td>155</td></tr>
+<tr><td><code>docs/adr/0045-animacao-do-bloco-no-mapa.md</code></td><td><span class="badge bg-success">novo</span></td><td>172</td></tr>
+<tr><td><code>docs/adr/0046-prompt-do-bloco-respeita-a-descricao.md</code></td><td><span class="badge bg-success">novo</span></td><td>220</td></tr>
+<tr><td><code>tools/character-builder/server/api-queue.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>920</td></tr>
+<tr><td><code>tools/character-builder/server/api-sprite-lab.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>381</td></tr>
+<tr><td><code>tools/character-builder/server/api.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>149</td></tr>
+<tr><td><code>tools/character-builder/server/api.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>1077</td></tr>
+<tr><td><code>tools/character-builder/server/job-queue.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>2689</td></tr>
+<tr><td><code>tools/character-builder/server/job-queue.ts</code></td><td><span class="badge bg-success">novo</span></td><td>1799</td></tr>
+<tr><td><code>tools/character-builder/server/mannequin.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>160</td></tr>
+<tr><td><code>tools/character-builder/server/mannequin.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>367</td></tr>
+<tr><td><code>tools/character-builder/server/pending-stub.ts</code></td><td><span class="badge bg-success">novo</span></td><td>153</td></tr>
+<tr><td><code>tools/character-builder/server/sprite-bundle.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>10</td></tr>
+<tr><td><code>tools/character-builder/server/sprite-lab.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>381</td></tr>
+<tr><td><code>tools/character-builder/server/sprite-lab.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>370</td></tr>
+<tr><td><code>tools/character-builder/server/world-block.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>1733</td></tr>
+<tr><td><code>tools/character-builder/server/world-block.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>1422</td></tr>
+<tr><td><code>tools/character-builder/src/App.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>28</td></tr>
+<tr><td><code>tools/character-builder/src/app/job-scope.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>347</td></tr>
+<tr><td><code>tools/character-builder/src/app/job-scope.ts</code></td><td><span class="badge bg-success">novo</span></td><td>275</td></tr>
+<tr><td><code>tools/character-builder/src/app/queue/queue-model.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>373</td></tr>
+<tr><td><code>tools/character-builder/src/app/queue/queue-model.ts</code></td><td><span class="badge bg-success">novo</span></td><td>432</td></tr>
+<tr><td><code>tools/character-builder/src/app/queue/queue-panel.tsx</code></td><td><span class="badge bg-success">novo</span></td><td>722</td></tr>
+<tr><td><code>tools/character-builder/src/app/queue/queue-toasts.ts</code></td><td><span class="badge bg-success">novo</span></td><td>114</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/itens.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>23</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/itens/generation-batch.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>37</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/itens/generation-batch.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>20</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/blocks-body.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>40</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/blocks-body.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>74</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/blocks-panel.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>228</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/blocks-recovery.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>174</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/blocks-recovery.ts</code></td><td><span class="badge bg-success">novo</span></td><td>137</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/studio-panel.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>270</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/studio-recovery.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>754</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/laboratorio/studio-recovery.ts</code></td><td><span class="badge bg-success">novo</span></td><td>390</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/poses.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>23</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/poses/generate-button.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>16</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/poses/generation-batch.test.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>37</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/poses/generation-batch.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>20</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>41</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard/character-header.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>46</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard/import-card.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>14</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard/step-directions.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>49</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard/step-south.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>96</td></tr>
+<tr><td><code>tools/character-builder/src/app/screens/wizard/wizard-progress.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>23</td></tr>
+<tr><td><code>tools/character-builder/src/app/shell.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>91</td></tr>
+<tr><td><code>tools/character-builder/src/app/studio-navigation.tsx</code></td><td><span class="badge bg-success">novo</span></td><td>74</td></tr>
+<tr><td><code>tools/character-builder/src/app/studio-store.tsx</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>69</td></tr>
+<tr><td><code>tools/character-builder/src/map/3d/block-animation.test.ts</code></td><td><span class="badge bg-success">novo</span></td><td>305</td></tr>
+<tr><td><code>tools/character-builder/src/map/3d/block-animation.ts</code></td><td><span class="badge bg-success">novo</span></td><td>361</td></tr>
+<tr><td><code>tools/character-builder/src/map/3d/block-def.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>31</td></tr>
+<tr><td><code>tools/character-builder/src/map/3d/cube3d.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>162</td></tr>
+<tr><td><code>tools/character-builder/src/map/3d/scene3d.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>48</td></tr>
+<tr><td><code>tools/character-builder/src/map/editor/blocks-api.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>13</td></tr>
+<tr><td><code>tools/character-builder/src/strings.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>2</td></tr>
+<tr><td><code>tools/character-builder/src/strings/blocos.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>68</td></tr>
+<tr><td><code>tools/character-builder/src/strings/fila.ts</code></td><td><span class="badge bg-success">novo</span></td><td>293</td></tr>
+<tr><td><code>tools/character-builder/src/strings/itens.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>10</td></tr>
+<tr><td><code>tools/character-builder/src/strings/laboratorio.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>38</td></tr>
+<tr><td><code>tools/character-builder/src/strings/poses.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>10</td></tr>
+<tr><td><code>tools/character-builder/src/strings/wizard.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>47</td></tr>
+<tr><td><code>tools/character-builder/vite.config.ts</code></td><td><span class="badge bg-warning text-dark">modificado</span></td><td>12</td></tr>
+</tbody></table></div>
+<!-- {{FILES_TABLE}} end -->
 
-  const geo = sharedBox.clone(); // nunca muta a geometria compartilhada
+      <p class="text-body-secondary small">Exemplo demonstrativo — valores aproximados, substituídos na geração.</p>
 
-  // +X (right): metade direita, faixa das laterais
-  remapFaceUv(geo, BOX_GROUP.right, (u, v) => [
-    SPRITE_UV.uFold + u * (1 - SPRITE_UV.uFold),
-    v * SPRITE_UV.vRoofBottom,
-  ]);
+      <h2 class="h4 pane-title mt-4">Commits (squash)</h2>
+      <p>Histórico final do branch principal: um commit squash por sub-agente. Nenhuma worktree ou branch <code>wt/*</code> sobra ao final.</p>
 
-  // +Z (front): metade esquerda, faixa das laterais
-  remapFaceUv(geo, BOX_GROUP.front, (u, v) => [
-    u * SPRITE_UV.uFold,
-    v * SPRITE_UV.vRoofBottom,
-  ]);
+      <!-- {{COMMITS_LIST}} begin -->
+<ul class="list-group list-group-flush">
+<li class="list-group-item bg-transparent text-body"><code class="text-info">e9f14b3</code> &nbsp;<strong>—</strong><br><small class="text-body-secondary">Commit preparatorio: preserva 29 arquivos de trabalho local nao commitado. Sem ele, nenhum merge fecharia (world-block.ts e blocks-api.ts estavam sujos e em escopo).</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">dd6bd85</code> &nbsp;<strong>onda1-prompt-do-bloco</strong><br><small class="text-body-secondary">Sete defeitos na cadeia de prompt do bloco. Descoberta: a tabela de acao de fallback era toda em ingles e nunca casava com portugues.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">5a70544</code> &nbsp;<strong>onda1-render-do-personagem</strong><br><small class="text-body-secondary">GET /api/sprite-lab, recuperacao no mount e recolagem a job em voo. Identidade da corrida virou indivisivel.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">60f257d</code> &nbsp;<strong>onda1-fila-persistente</strong><br><small class="text-body-secondary">Modulo puro de fila FIFO. Achou 3 bugs reais no codigo existente do pipeline.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">1dea3f4</code> &nbsp;<strong>test-onda1-cobertura</strong><br><small class="text-body-secondary">41 testes; 4 bugs novos trancados por teste. Sub-onda assincrona.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">bb161e2</code> &nbsp;<strong>onda2-mutex-do-wizard</strong><br><small class="text-body-secondary">busy global vira bloqueio por escopo. Um personagem chamado "Sprite Lab" desativava o bloqueio inteiro.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">e9eb656</code> &nbsp;<strong>onda2-teto-de-concorrencia</strong><br><small class="text-body-secondary">O peso passa a medir chamadas, nao custo. 8 poses: 2 -&gt; 8 simultaneas.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">27bb82a</code> &nbsp;<strong>onda3-animacao-do-bloco</strong><br><small class="text-body-secondary">A sprite animada passa a ser desenhada no mapa. Escrita atomica com lock; checagem 5x mais barata.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">6ba1ea2</code> &nbsp;<strong>onda3-fila-na-api</strong><br><small class="text-body-secondary">spawn() e o Map volatil morrem. Tres buracos de dinheiro fechados apos revisao.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">f3eb5c7</code> &nbsp;<strong>onda4-retomada-gratuita</strong><br><small class="text-body-secondary">Stub em disco: 6 de 7 ramos retomam sem repagar. Achou bug de dinheiro pre-existente.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">c15e7f9</code> &nbsp;<strong>onda4-painel-da-fila</strong><br><small class="text-body-secondary">O painel FIFO, o cancelamento que conta a verdade sobre dinheiro, e 5 guardas de UI.</small></li>
+<li class="list-group-item bg-transparent text-body"><code class="text-info">2ff4c64</code> &nbsp;<strong>onda5-documentacao</strong><br><small class="text-body-secondary">ADRs 0041-0046 e correcao de 3 fatos falsos no README.</small></li>
+</ul>
+<!-- {{COMMITS_LIST}} end -->
 
-  // +Y (top): largura cheia, faixa do topo
-  remapFaceUv(geo, BOX_GROUP.top, (u, v) => [
-    u,
-    SPRITE_UV.vRoofBottom + v * (1 - SPRITE_UV.vRoofBottom),
-  ]);
-
-  spriteGeometryCache.set(geom, geo);
-  return geo;
-}</code></pre>
+      <p class="text-body-secondary small mt-2">Exemplo demonstrativo — hashes fictícios, substituídos na geração.</p>
     </div>
 
-    <!-- TAB 3 -->
-    <div class="tab-pane fade" id="pane-armadilhas" role="tabpanel"
-         aria-labelledby="tab-armadilhas" tabindex="0" data-print-title="Histórico &amp; iterações">
-      <h2 class="h4">Iterações</h2>
+    <!-- ══════════════ ABA 4 · DE-PARA (BEFORE/AFTER) ══════════════ -->
+    <div class="tab-pane fade" id="pane-depara" role="tabpanel"
+         aria-labelledby="tab-depara" tabindex="0" data-print-title="De-Para">
+      <h2 class="h4 pane-title">De-Para: o que mudou</h2>
+      <p>Comparação lado a lado entre o estado inicial do repositório e o estado final após a execução.</p>
 
-      <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold">Onda 1 — dewarp → crop (commit <code>5c200da</code>)</div>
-        <div class="card-body">
-          <p>Substituiu o dewarp de 105 linhas (projeção inversa pixel a pixel) por crop de 3 regiões retangulares do sprite. Cada região virava uma textura separada para a face correspondente.</p>
-          <p><strong>Problemas encontrados na revisão adversarial:</strong></p>
-          <ul>
-            <li>Laterais incluíam arte do topo (crop começava na linha 0)</li>
-            <li>Pixels transparentes viravam preto opaco</li>
-            <li>Exceção quebrava fallback procedural</li>
-          </ul>
-          <p>Corrigidos no mesmo agente (commit <code>83ed744</code> na worktree).</p>
+      <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+          <div class="card h-100 depara-antes">
+            <div class="card-header"><i class="bi bi-arrow-left-circle me-1"></i><strong>Antes</strong></div>
+            <div class="card-body">
+              <p class="card-text text-body-secondary">Estado inicial do repositório — apenas o skill de orquestração, sem recursos auxiliares.</p>
+              <ul class="list-unstyled mb-0 d-grid gap-2">
+                <li><i class="bi bi-file-earmark-text me-2 text-body-secondary"></i><code>SKILL.md</code> — definição do orquestrador (XML, fases, regras)</li>
+                <li><i class="bi bi-file-earmark-text me-2 text-body-secondary"></i><code>README.md</code> — documentação pública</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card h-100 depara-depois">
+            <div class="card-header"><i class="bi bi-arrow-right-circle me-1"></i><strong>Depois</strong></div>
+            <div class="card-body">
+              <p class="card-text text-body-secondary">Estado final — três novos diretórios e o skill atualizado.</p>
+              <ul class="list-unstyled mb-0 d-grid gap-2">
+                <li><i class="bi bi-terminal me-2 text-body-secondary"></i><code>scripts/</code> — brave-search.sh · check-brave-credits.sh</li>
+                <li><i class="bi bi-file-earmark-text me-2 text-body-secondary"></i><code>prompts/</code> — ecc-prompts.md · ecc-skills.md · search-prompts.md</li>
+                <li><i class="bi bi-file-earmark-code me-2 text-body-secondary"></i><code>templates/</code> — html-explainer.html</li>
+                <li><i class="bi bi-gear me-2 text-body-secondary"></i><code>SKILL.md</code> — atualizado (ondas ilimitadas, novos recursos)</li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold">Onda 2 — sprite única (commit <code>c346332</code>)</div>
-        <div class="card-body">
-          <p>Removeu o conceito de "recortar em 3 partes". A sprite é carregada como <strong>uma textura</strong> e aplicada nas 3 faces visíveis.</p>
-          <p><strong>Problema:</strong> Com UVs padrão do BoxGeometry, cada face mostrava a sprite isométrica COMPLETA — o cubo parecia ter 3 cópias da mesma sprite, cada uma com os 3 lados em miniatura.</p>
+      <!-- {{BEFORE_AFTER}} begin -->
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Personagem gerado nao aparecia na tela</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">Uma corrida create-character-v3 leva 5-6 min. O unico identificador dela (o hash) voltava uma vez no corpo do 202 e vivia so em estado React. O SmoothTabs monta apenas a aba ativa, entao sair do Laboratorio destruia o hash. Nao existia rota de listagem, o cliente nao sabe calcular o hash, e nao ha localStorage. Os 4 candidatos pagos ficavam inalcancaveis para sempre.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">GET /api/sprite-lab novo, espelhando o que o painel de blocos ja fazia certo. O painel se recupera no mount e se recola a job em voo extraindo o hash da propria chave. A identidade da corrida virou indivisivel: body, resumo e hash vivem num RunDescriptor, e bodyForRun devolve null quando os hashes divergem — "body de uma corrida com candidatos de outra" deixou de ser estado representavel.</p></div>
+</div></div></div>
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Bloco ignorava a descricao</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">A descricao NUNCA chegava ao /animate-with-text-v3, que produz os pixels finais — ele recebe so a imagem e a acao. A acao era parafrase do Haiku, com fallback cuja tabela de 13 regexes e TODA EM INGLES e nunca casava com portugues: todo bloco recebia a mesma string generica. O prompt mandava casar com uma imagem de referencia que o fornecedor recusa e o codigo remove. text_guidance_scale nunca era enviado. E packSpritesheet cortava a arte paga com 48x48 fixo sobre um cubo de 48x53.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">A descricao e normalizada para ingles (Haiku a temperatura 0, com fallback deterministico sem rede que dobra diacriticos 1:1 — assim os indices continuam alinhados e "agua" com acento passa a casar). O material entra na acao. A frase da referencia so entra quando o init_image entra. Os knobs de estilo vao para a UI com rotulo em pt-BR e valor em ingles. A folha usa a dimensao real.</p></div>
+</div></div></div>
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Sem fila: geracao se perdia e nao escalava</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">spawn() gravava num Map em memoria e disparava na hora. Sem ordem, sem payload, sem disco. Restart do Vite perdia tudo e deixava celulas presas em "gerando" para sempre. Sem limite: 6 poses viravam 48 GETs concorrentes contra um teto de 20. Cancelar era cosmetico — o AbortSignal existia no transporte e nenhum caller o passava. E o status "na-fila" ja existia no modelo e ja era renderizado pela UI, sem ninguem que o escrevesse.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">Fila FIFO persistente com seq monotono em disco, descritor serializavel por tipo de job, semaforo ponderado e limitador AIMD. O peso passou a medir CHAMADAS simultaneas, nao custo de servidor: 8 poses saem de 2 para 8 simultaneas. Cancelamento real em pose e guarda-roupa. E o painel mostra ordem, posicao e ocupacao.</p></div>
+</div></div></div>
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Dinheiro: tres caminhos que faziam repagar</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">Reproduzidos por revisao adversarial com fetch dublado. (1) A retomada apos reinicio ressubmetia job JA PAGO — regressao frente ao Map volatil, que apenas perdia o job. (2) A fila retentava submissoes 5xx, desfazendo uma decisao deliberada do cliente HTTP; pior caso: submissao ACEITA, poll caindo com 500, tres geracoes pagas por um clique. (3) Reenfileirar chave paga apagava o unico ponteiro para o artefato comprado.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">Stub em disco ao lado do artefato: 6 de 7 ramos retomam de graca. wizard-south para em "interrompido", e e decisao — o endpoint dele nao devolve identificador nenhum. 429/529 sao a unica classe retentavel. E a janela irredutivel (entre a submissao ser aceita e o id chegar ao disco) fica declarada, nao escondida.</p></div>
+</div></div></div>
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Bloco animado nunca animava no mapa</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">spritesheetUrl, fps, frameCount e pingPong atravessavam tres camadas ate o BlockDef e morriam sem uso. A tela principal desenhava base.png, um quadro parado. So a previa do laboratorio animava, por outro caminho. E as duas folhas em disco contradiziam os frames ao lado.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">A folha vira UMA textura com repeat.x/offset.x. O laco so desenha quando algum bloco troca de quadro e volta a parar quando o ultimo sai do mapa — a promessa da ADR 0040 fica de pe. As folhas legadas sao re-empacotadas a partir de frames/, com escrita atomica e lock, sem chamar a API.</p></div>
+</div></div></div>
+<div class="card bg-dark border-secondary mb-4"><div class="card-header"><h5 class="mb-0">Mutex global congelava o wizard</h5></div>
+<div class="card-body"><div class="row g-3">
+<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-x-circle me-1"></i>Antes</h6><p class="small text-body-secondary">busy era global: qualquer job em qualquer lugar desabilitava 11 botoes. Gerar um bloco no Laboratorio congelava o wizard do personagem. Com a fila serializando, essa janela cresceria.</p></div>
+<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Depois</h6><p class="small text-body-secondary">O dono do job sai do PREFIXO da chave. Isso importa porque sprite-lab::&lt;hash&gt; tem exatamente a forma de uma chave de pose, e o id de personagem vem de slug(label) — um personagem chamado "Sprite Lab" desativava o bloqueio inteiro, e dava para disparar geracao paga sobre a face sul sendo substituida.</p></div>
+</div></div></div>
+<!-- {{BEFORE_AFTER}} end -->
+
+      <h2 class="h4 pane-title">Impacto</h2>
+      <p>O que cada mudança significa para quem usa o deep-orchestrator:</p>
+      <div class="list-group list-group-flush mb-4">
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-search fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>Busca Brave integrada</strong> — sub-agentes pesquisam na web direto do terminal (curl + API Brave), sem depender de outras ferramentas.</div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-credit-card-2-front fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>Créditos sob controle</strong> — o orquestrador consulta os créditos restantes da API antes de disparar ondas longas.</div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-shield-check fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>Execução confiável</strong> — contratos ECC (execução de código confiável) que os sub-agentes seguem ao executar código.</div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-chat-square-text fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>Busca padronizada</strong> — prompts de pesquisa consistentes entre sub-agentes (search-prompts.md).</div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-file-earmark-code fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>De-para visível</strong> — toda execução termina com um EXPLAINER.html legível (este documento).</div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+          <i class="bi bi-gear fs-5 stat-value flex-shrink-0 mt-1"></i>
+          <div><strong>Processo documentado</strong> — ondas ilimitadas e o novo fluxo registrados no SKILL.md.</div>
         </div>
       </div>
 
-      <div class="card bg-body-tertiary mb-3">
-        <div class="card-header fw-semibold text-success">Onda 3 — UV mapping (commit <code>a1a1f59</code>) ✓ SOLUÇÃO FINAL</div>
-        <div class="card-body">
-          <p><strong>Resolve o problema da onda 2.</strong> Implementa <code>createSpriteGeometry()</code> que clona o BoxGeometry e reescreve os UVs das faces +X, +Z, +Y:</p>
-          <ul>
-            <li>+X: u=[0.5,1], v=[29/53,1] → metade direita da sprite</li>
-            <li>+Z: u=[0,0.5], v=[29/53,1] → metade esquerda da sprite</li>
-            <li>+Y: u=[0,1], v=[29/53,1] → topo da sprite</li>
-          </ul>
-          <p><code>remapFaceUv()</code> percorre os grupos de material do BoxGeometry indexado, encontra os 4 vértices únicos de cada face e aplica a transformação. Geometria cacheada; campo opcional <code>geometry</code> em <code>CubeMaterials</code> evita alterar <code>scene3d.ts</code>.</p>
+      <h2 class="h4 pane-title">Novas capacidades</h2>
+      <div class="row g-3">
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <i class="bi bi-search fs-3 stat-value"></i>
+              <h3 class="h6 mt-2 mb-1">Busca Brave interna</h3>
+              <p class="small text-body-secondary mb-0">Sub-agentes pesquisam na web via API Brave, direto do terminal — sem sair do fluxo.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <i class="bi bi-shield-check fs-3 stat-value"></i>
+              <h3 class="h6 mt-2 mb-1">ECC prompts</h3>
+              <p class="small text-body-secondary mb-0">Contratos de execução de código confiável que os sub-agentes seguem (ecc-prompts.md, ecc-skills.md).</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <i class="bi bi-infinity fs-3 stat-value"></i>
+              <h3 class="h6 mt-2 mb-1">Ondas ilimitadas</h3>
+              <p class="small text-body-secondary mb-0">O plano não fica limitado a N ondas — a topologia das dependências manda.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <i class="bi bi-credit-card-2-front fs-3 stat-value"></i>
+              <h3 class="h6 mt-2 mb-1">Verificação de créditos</h3>
+              <p class="small text-body-secondary mb-0">Créditos da API Brave consultados antes de ondas longas — o orquestrador sabe quando parar.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <i class="bi bi-file-earmark-code fs-3 stat-value"></i>
+              <h3 class="h6 mt-2 mb-1">HTML explainer</h3>
+              <p class="small text-body-secondary mb-0">Este documento: o de-para (antes/depois) de tudo que foi feito na execução.</p>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <div class="alert alert-info mt-3">
-        <i class="bi bi-info-circle me-1"></i>
-        <strong>Nota:</strong> O caminho <code>faceUrls</code> (v2) só é usado por blocos com <code>manifest.version === 2</code>. Assets atuais são v3 (<code>baseUrl</code>/<code>spritesheetUrl</code>) e usam <code>materialsWithSingleTexture</code>.
-      </div>
+    <!-- ══════════════ ABA 5 · DECISÕES AUTÔNOMAS ══════════════ -->
+    <div class="tab-pane fade" id="pane-decisoes" role="tabpanel"
+         aria-labelledby="tab-decisoes" tabindex="0" data-print-title="Decisões autônomas">
+      <h2 class="h4 pane-title">Premissas inferidas sem perguntar</h2>
+      <p>O orquestrador opera em autonomia total: nenhuma pergunta foi feita ao usuário. Toda premissa assumida fica registrada aqui — para revisão e reprodutibilidade.</p>
+
+      <!-- {{DECISIONS}} begin -->
+<div class="accordion accordion-flush" id="acc-dec">
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec0">Commitar o trabalho local nao commitado antes de comecar</button></h2>
+  <div id="dec0" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">A arvore chegou suja com 29 arquivos, dois deles no escopo da tarefa. git merge --squash recusa integrar sobre arquivo sujo, entao nenhuma onda fecharia. Preservei num commit isolado e rotulado, com baseline verde verificado antes (403 testes).</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec1">Teto de concorrencia 8, e nao 2 ou 4</button></h2>
+  <div id="dec1" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">INFERENCIA declarada, nao medicao. O unico numero medido do repo diz que 4 create-character-v3 concorrentes passam e 5 dao 429. Errar para cima e o lado barato: 429 na submissao custa US$ 0,00 porque o registro de gasto so roda depois de o submit resolver.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec2">NAO migrar o endpoint do bloco para create-image-pixflux</button></h2>
+  <div id="dec2" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">A ADR 0032 mandou, e o codigo nunca seguiu. Mas o pixflux NAO tem parametro de forma, e e o isometric_tile_shape=block que produz a silhueta 48x53 sobre a qual a ADR 0039 montou o mapeamento UV. Migrar arriscaria o que o editor 3D inteiro apoia — e nao atenderia a reclamacao, que se decide na acao, outra etapa. Virou ADR 0046 com o ganho quantificado como divida de valor conhecido.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec3">stillNeeded passou a ser obrigatorio, sem default</button></h2>
+  <div id="dec3" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">O default () =&gt; true falhava na direcao do GASTO: se alguem esquecesse de passa-lo, o recheque de idempotencia virava no-op silencioso. Obrigatorio, o typecheck cobra em tempo de compilacao.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec4">Na duvida sobre pagamento, tratar como PAGO</button></h2>
+  <div id="dec4" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">paid:false significa "nao consta", nunca "e de graca". Se o processo morreu entre o submit e o registro, o disco mente. Por isso um job que ja comecou nao e reexecutado sozinho: para e avisa. Melhor o usuario clicar de novo de proposito do que o servidor cobrar sozinho.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec5">Mudar o hash do bloco, invalidando cache pago</button></h2>
+  <div id="dec5" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">Autorizado depois de CONTAR: existem exatamente 2 blocos pagos em disco. Teto do prejuizo: 2 regeracoes, e so se o usuario pedir de novo as mesmas descricoes. Os knobs novos mantem compatibilidade — knob no default hasheia igual a omissao.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec6">NAO alterar o .claude/settings.json</button></h2>
+  <div id="dec6" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">Ele nega leitura de .env.*, o que impediu documentar as variaveis novas no .env.example. E configuracao de seguranca do usuario; as variaveis foram para a tabela de Requisitos do README e a limitacao ficou registrada.</div></div>
+</div>
+<div class="accordion-item bg-transparent">
+  <h2 class="accordion-header"><button class="accordion-button collapsed bg-dark text-body" type="button" data-bs-toggle="collapse" data-bs-target="#dec7">Extrair logica de UI para modulos puros em vez de instalar jsdom</button></h2>
+  <div id="dec7" class="accordion-collapse collapse" data-bs-parent="#acc-dec"><div class="accordion-body small text-body-secondary">O repo nao tem infraestrutura de teste de componente React, e instalar seria decisao de arquitetura nao pedida. O padrao de modulo puro com .test.ts ao lado ja existia em oito lugares; a decisao de recuperacao e a de bloqueio foram para la e ficaram testaveis.</div></div>
+</div></div>
+<!-- {{DECISIONS}} end -->
+
+      <p class="text-body-secondary small mt-2">Exemplo demonstrativo — a geração substitui o bloco entre os marcadores pelas decisões reais da execução.</p>
+    </div>
+
+    <!-- ══════════════ ABA 6 · TIMELINE ══════════════ -->
+    <div class="tab-pane fade" id="pane-timeline" role="tabpanel"
+         aria-labelledby="tab-timeline" tabindex="0" data-print-title="Timeline">
+      <h2 class="h4 pane-title">Linha do tempo da execução</h2>
+      <p>As quatro fases do orquestrador e o que aconteceu em cada uma.</p>
+
+      <!-- {{TIMELINE}} begin -->
+<ul class="list-unstyled"><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">FASE 0</strong><span class="small text-body-secondary">Fronteira resolvida: MODE=normal, raiz /home/ondokai/Projects/isometric-maker, integracao em main, 0 worktrees de terceiros.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Analise</strong><span class="small text-body-secondary">3 exploradores em paralelo mapeiam a cadeia do personagem, a construcao do prompt do bloco contra o spec vendorizado, e a orquestracao de jobs.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Bloqueio resolvido</strong><span class="small text-body-secondary">Arvore suja com 29 arquivos, dois em escopo. Baseline verificado verde (403 testes) e trabalho preservado no commit e9f14b3.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Onda 1</strong><span class="small text-body-secondary">3 agentes em paralelo. Os 3 diffs tinham defeito real — nenhum passou limpo na revisao adversarial. 3 agentes de fix.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Replan</strong><span class="small text-body-secondary">Revisor de plano encontra erro no MEU plano: a onda 2 entregaria MENOS simultaneidade que o estado atual. Seis sub-tarefas novas.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Onda 2</strong><span class="small text-body-secondary">Teto de concorrencia e mutex do wizard. Sub-onda de testes assincrona em background.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Onda 3</strong><span class="small text-body-secondary">Fila ligada ao servidor e animacao do bloco. A revisao reproduz TRES caminhos de repagamento e bloqueia o merge.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Onda 4</strong><span class="small text-body-secondary">Retomada gratuita e painel FIFO. A revisao acha defeito no caminho feliz do painel de blocos.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">Onda 5</strong><span class="small text-body-secondary">Seis ADRs, e tres fatos falsos corrigidos no README.</span></li><li class="mb-3 ps-3 border-start border-3 border-info"><strong class="d-block">COMMIT-FINAL</strong><span class="small text-body-secondary">680 testes, gate completo verde, zero worktrees remanescentes, contencao provada.</span></li></ul>
+<!-- {{TIMELINE}} end -->
+
+      <p class="text-body-secondary small mt-3">Exemplo demonstrativo — a geração substitui o bloco entre os marcadores pela timeline real da execução.</p>
     </div>
 
   </div>
 
   <footer class="text-body-secondary small border-top mt-5 pt-3">
-    <strong>Arquivo:</strong> <code>tools/character-builder/src/map/3d/cube3d.ts</code> ·
-    <strong>Commits:</strong> <code>5c200da</code> (onda1) · <code>c346332</code> (onda2) · <code>a1a1f59</code> (onda3) ·
-    <strong>Data:</strong> 2026-08-04 ·
-    <strong>Testes:</strong> 401/401 pass.
+    Gerado por <strong>deep-orchestrator</strong> v1.0 · 2026-08-05 · branch main.
+    Documento de arquivo único — salve, abra com duplo clique ou imprima em PDF (todas as abas entram no papel).
   </footer>
 
 </main>
@@ -215,13 +649,29 @@ function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
         crossorigin="anonymous"></script>
 
 <script>
+/* ── runtime do documento ────────────────────────────────────────────────────
+   Copie este bloco inteiro, sem editar. Ele faz três coisas:
+   1. guarda o código-fonte cru ANTES de qualquer transformação (para o copiar);
+   2. destaca a sintaxe e injeta o botão de copiar;
+   3. liga as abas ao #hash da URL, nos dois sentidos.
+   ────────────────────────────────────────────────────────────────────────── */
 (function () {
   'use strict';
+
+  // 1. Fonte cru primeiro. Depois do highlight o DOM ganha <span>; textContent ainda
+  //    devolve o texto certo, mas plugins de numeração de linha o contaminam. Guardar
+  //    antes é a única versão que nunca mente.
   var sources = new WeakMap();
   document.querySelectorAll('pre > code').forEach(function (code) {
     sources.set(code, code.textContent.replace(/\n$/, ''));
   });
+
+  // 2. Highlight. Declare sempre a linguagem na classe: a auto-detecção erra em
+  //    trechos curtos (o mesmo snippet vira "ruby" numa aba e "perl" na outra).
   if (window.hljs) hljs.highlightAll();
+
+  // Copiar. navigator.clipboard exige contexto seguro; em file:// o comportamento
+  // varia por navegador, então o fallback com execCommand não é opcional.
   function copyText(text) {
     if (navigator.clipboard && window.isSecureContext) {
       return navigator.clipboard.writeText(text).then(function () { return true; },
@@ -229,19 +679,22 @@ function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
     }
     return Promise.resolve(legacyCopy(text));
   }
+
   function legacyCopy(text) {
     var ta = document.createElement('textarea');
     ta.value = text;
     ta.setAttribute('readonly', '');
+    // position:fixed + opacity:0 evita que a página role até o textarea.
     ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
     document.body.appendChild(ta);
     ta.select();
-    ta.setSelectionRange(0, ta.value.length);
+    ta.setSelectionRange(0, ta.value.length); // iOS ignora select() sozinho
     var ok = false;
     try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
     document.body.removeChild(ta);
     return ok;
   }
+
   document.querySelectorAll('pre > code').forEach(function (code) {
     var pre = code.parentElement;
     var btn = document.createElement('button');
@@ -263,26 +716,36 @@ function createSpriteGeometry(geom: IsoCubeGeometry): THREE.BoxGeometry {
     });
     pre.appendChild(btn);
   });
+
+  // 3. Aba ↔ URL. Sem isto, mandar "olha a aba De-Para" exige explicar o clique.
   var tabs = document.querySelectorAll('[data-bs-toggle="tab"]');
   if (!tabs.length) return;
+
   function activateFromHash() {
     var hash = window.location.hash;
     if (!hash || hash.length < 2) return;
     var target = document.querySelector(hash);
     if (!target) return;
+    // O #hash pode apontar para o painel OU para um título dentro dele.
     var pane = target.closest('.tab-pane') || (target.classList.contains('tab-pane') ? target : null);
     if (!pane) return;
     var trigger = document.querySelector('[data-bs-target="#' + CSS.escape(pane.id) + '"]');
     if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+    // O navegador já tentou rolar até o alvo — e falhou, porque naquele instante o
+    // painel ainda era display:none. Agora que apareceu, role de novo: sem isto a
+    // página abre num scroll intermediário, com as abas escondidas atrás da navbar.
     var scrollTo = target !== pane ? target : (trigger && trigger.closest('[role="tablist"]')) || pane;
     requestAnimationFrame(function () { scrollTo.scrollIntoView({ block: 'start' }); });
   }
+
   tabs.forEach(function (t) {
     t.addEventListener('shown.bs.tab', function (e) {
       var id = (e.target.getAttribute('data-bs-target') || '').slice(1);
+      // replaceState, não location.hash: mudar o hash direto faz a página pular.
       if (id) history.replaceState(null, '', '#' + id);
     });
   });
+
   window.addEventListener('hashchange', activateFromHash);
   activateFromHash();
 })();
