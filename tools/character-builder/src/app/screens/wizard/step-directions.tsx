@@ -9,6 +9,10 @@
  * (studio.jobs), não o ciclo do POST. Falha vira caixa com a mensagem do
  * servidor e "Tentar de novo" na mesma rota — a célula não está `pronto`,
  * então a idempotência não bloqueia a nova tentativa.
+ *
+ * O `block` chega resolvido para ESTE personagem e ESTA etapa
+ * (`src/app/job-scope.ts`) — a bancada e os outros personagens não travam mais
+ * este botão. Quando ele bloqueia, a nota diz qual trabalho está segurando.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -17,9 +21,11 @@ import {
 } from '@/components/motion-ui/confetti';
 import { Skeleton } from '@/components/motion-ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { DIRECTIONS, DIR_SHORT } from '../../../../server/model.ts';
 import { directions8Key } from '../../../../server/model.ts';
-import { direcaoAria, wizard } from '../../../strings/wizard.ts';
+import { bloqueioWizard, direcaoAria, wizard } from '../../../strings/wizard.ts';
+import type { WizardBlock } from '../../job-scope.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
 import { FailureNotice } from './failure-notice.tsx';
@@ -29,12 +35,13 @@ import type { WizardProgress } from './wizard-progress.ts';
 export function DirectionsStep({
 	progress,
 	refresh,
-	busy,
+	block,
 }: {
 	readonly progress: WizardProgress;
 	readonly refresh: () => Promise<void>;
-	readonly busy: boolean;
+	readonly block: WizardBlock;
 }) {
+	const blocked = block.blocked;
 	const action = useAction(refresh);
 	const [cancelling, setCancelling] = useState(false);
 	const confettiRef = useRef<ConfettiHandle>(null);
@@ -110,7 +117,9 @@ export function DirectionsStep({
 								state={action.state}
 								message={action.message}
 								label={wizard.acoes.tentarDeNovo}
-							disabled={!progress.southReady || !progress.locked || busy}
+								disabled={
+									!progress.southReady || !progress.locked || blocked
+								}
 								onClick={generate}
 							/>
 						</FailureNotice>
@@ -121,7 +130,7 @@ export function DirectionsStep({
 								message={action.message}
 								generating={generating}
 								label={wizard.direcoes8.gerar}
-								disabled={!progress.southReady || !progress.locked || busy}
+								disabled={!progress.southReady || !progress.locked || blocked}
 								onClick={generate}
 							/>
 							{generating ? (
@@ -142,6 +151,36 @@ export function DirectionsStep({
 					) : null}
 				</>
 			) : null}
+			<BlockNotice block={block} />
 		</div>
+	);
+}
+
+/**
+ * Por que o botão está apagado — o escopo sabe QUAL trabalho está segurando, e
+ * se ele já começou ou ainda está na fila.
+ *
+ * Fica FORA do `!dir8Ready`, ao contrário da versão anterior: em
+ * `step-south.tsx` a nota sempre existiu, e dois passos que dizem a mesma coisa
+ * não podem dizê-la sob condições diferentes. O container também nasce vazio e
+ * nunca desmonta — região live `role="status"` que aparece já preenchida não é
+ * anunciada por várias combinações de leitor de tela e navegador; o que dispara
+ * o anúncio é a inserção de texto num nó que já estava no DOM. `sr-only`
+ * enquanto vazio porque um `<p>` vazio ainda consumiria o `gap-4` do flex
+ * (posicionamento absoluto o tira do fluxo; `hidden` recriaria o problema).
+ */
+function BlockNotice({ block }: { readonly block: WizardBlock }) {
+	return (
+		<p
+			role="status"
+			className={cn(
+				'text-sm text-muted-foreground',
+				!block.blocked && 'sr-only',
+			)}
+		>
+			{block.blocked
+				? bloqueioWizard(block.reason, block.status, block.label)
+				: null}
+		</p>
 	);
 }

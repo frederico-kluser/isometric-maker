@@ -371,6 +371,20 @@ export const wizard = {
       'Segure para confirmar — arquiva o manequim atual e reabre o wizard do zero.',
   },
 
+  // ── bloqueio de escopo (src/app/job-scope.ts) ────────────────
+  /**
+   * O botão desabilitado não diz nada; estas strings dizem POR QUE.
+   *
+   * O bloqueio é por personagem, não global: bancada e job de outro
+   * personagem não aparecem aqui porque não bloqueiam nada do wizard.
+   */
+  bloqueio: {
+    /** Job que ainda não começou — enfileirado é tão ocupado quanto rodando */
+    naFila: 'na fila',
+    /** Job já em execução */
+    gerando: 'gerando',
+  },
+
   // ── estados das ações (multi-state-button) ───────────────────
   acoes: {
     /** Rótulo enquanto a geração está em andamento */
@@ -412,6 +426,39 @@ export const configTravada = (
 /** "Versão 2 da face sul" — nome acessível de cada thumbnail da faixa */
 export const versaoSulAria = (indice: number): string =>
   `Versão ${indice} da face sul`;
+
+/**
+ * Por que esta etapa do wizard está bloqueada agora.
+ *
+ * Quatro frases, e não uma: o motivo (a MESMA etapa vs. outro trabalho do
+ * MESMO personagem) e o estado (na fila vs. gerando) mudam o que o usuário
+ * tem de fazer — esperar a vez, ou esperar terminar. O rótulo do job entra na
+ * frase porque com escopo dá para dizer QUAL trabalho está segurando; o
+ * `busy` global antigo só sabia que "algo" estava.
+ *
+ * Os tipos são literais em vez de importados de `src/app/job-scope.ts`: o
+ * módulo de strings não importa lógica de aplicação em lugar nenhum. Já o NOME
+ * de cada estado sai de `wizard.bloqueio`, e não de literal repetido quatro
+ * vezes: é a mesma palavra que o usuário lê em qualquer lugar da tela.
+ */
+export const bloqueioWizard = (
+  motivo: 'mesma-etapa' | 'mesmo-personagem',
+  status: 'na-fila' | 'gerando',
+  label: string,
+): string => {
+  const estado =
+    status === 'na-fila' ? wizard.bloqueio.naFila : wizard.bloqueio.gerando;
+  if (motivo === 'mesma-etapa') {
+    return status === 'na-fila'
+      ? `Esta etapa já está ${estado} — espere a vez dela em vez de pedir de novo.`
+      : `Esta etapa já está ${estado} — espere terminar em vez de pedir de novo.`;
+  }
+  return status === 'na-fila'
+    ? `Bloqueado por “${label}”, que está ${estado} para este personagem — ` +
+        'espere a vez dele.'
+    : `Bloqueado por “${label}”, que está ${estado} neste personagem — ` +
+        'espere terminar.';
+};
 
 /** "Cardeal E" — nome acessível da célula de uma cardeal */
 export const cardealAria = (sigla: string): string => `Cardeal ${sigla}`;

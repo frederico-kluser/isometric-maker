@@ -12,8 +12,16 @@
  * studio do useStudio, que já faz poll enquanto houver geração. Toda ação
  * remota sai pelo multi-state-button e todo erro HTTP aparece como veio do
  * servidor (pt-BR), sem diálogo de orçamento em nenhuma forma.
+ *
+ * O BLOQUEIO É POR ESCOPO, não global. Cada passo recebe o seu próprio
+ * `WizardBlock`, derivado das CHAVES dos jobs deste personagem
+ * (`src/app/job-scope.ts`): um bloco do mundo ou a bancada não travam mais o
+ * wizard, e um job de outro personagem também não. O que continua travando é
+ * o que impede de verdade — a mesma etapa (mutex de dinheiro) e o resto da
+ * cadeia derivativa DESTE personagem.
  */
 import { wizard } from '../../strings/wizard.ts';
+import { wizardStepBlock } from '../job-scope.ts';
 import { useSelectedCharacter, useStudio } from '../studio-store.tsx';
 import { CharacterHeader } from './wizard/character-header.tsx';
 import { FirstRun } from './wizard/first-run.tsx';
@@ -32,7 +40,7 @@ import {
 } from './wizard/wizard-progress.ts';
 
 export function WizardScreen() {
-	const { studio, refresh, busy, error } = useStudio();
+	const { studio, refresh, error } = useStudio();
 	const { characterId } = useSelectedCharacter();
 
 	if (!studio) {
@@ -61,6 +69,10 @@ export function WizardScreen() {
 		);
 	}
 	const progress = deriveWizard(studio, character, studio.jobs);
+	// Um bloqueio por passo, cada um perguntando só pelo que impede aquele
+	// passo. Nada de um booleano para a tela inteira.
+	const southBlock = wizardStepBlock(studio.jobs, character.id, 'sul');
+	const dir8Block = wizardStepBlock(studio.jobs, character.id, 'direcoes8');
 	const status = (id: WizardStepId): StepStatus =>
 		progress.steps.find((s) => s.id === id)?.status ?? 'todo';
 
@@ -97,14 +109,18 @@ export function WizardScreen() {
 					note={wizard.sul.nota}
 					status={status('sul')}
 				>
-					<SouthStep progress={progress} refresh={refresh} busy={busy} />
+					<SouthStep progress={progress} refresh={refresh} block={southBlock} />
 				</StepCard>
 				<StepCard
 					title={wizard.direcoes8.titulo}
 					note={wizard.direcoes8.nota}
 					status={status('direcoes8')}
 				>
-					<DirectionsStep progress={progress} refresh={refresh} busy={busy} />
+					<DirectionsStep
+						progress={progress}
+						refresh={refresh}
+						block={dir8Block}
+					/>
 				</StepCard>
 				<StepCard title={wizard.pronto.titulo} status={status('pronto')}>
 					<ReadyStep progress={progress} refresh={refresh} />

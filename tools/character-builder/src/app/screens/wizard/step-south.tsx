@@ -13,6 +13,10 @@
  * ~200ms e a geração leva minutos. A caixa de falha tem "Tentar de novo",
  * que re-chama a mesma rota (a idempotência não bloqueia: a célula não
  * está `pronto`; na edição, o prompt diferente também não é idempotente).
+ *
+ * O `block` substitui o antigo `busy` global: ele já vem resolvido para ESTE
+ * personagem e ESTA etapa (`src/app/job-scope.ts`), e quando bloqueia diz por
+ * quê — a nota no fim do passo nomeia o trabalho que está segurando.
  */
 import { useState } from 'react';
 import { Skeleton } from '@/components/motion-ui/skeleton';
@@ -29,7 +33,8 @@ import {
 import { cn } from '@/lib/utils';
 import type { MoldId } from '../../../../server/model.ts';
 import { southKey } from '../../../../server/model.ts';
-import { versaoSulAria, wizard } from '../../../strings/wizard.ts';
+import { bloqueioWizard, versaoSulAria, wizard } from '../../../strings/wizard.ts';
+import type { WizardBlock } from '../../job-scope.ts';
 import { api } from '../../studio-store.tsx';
 import { ActionButton } from './action-button.tsx';
 import { FailureNotice } from './failure-notice.tsx';
@@ -45,18 +50,61 @@ import type { WizardProgress } from './wizard-progress.ts';
 export function SouthStep({
 	progress,
 	refresh,
-	busy,
+	block,
 }: {
 	readonly progress: WizardProgress;
 	readonly refresh: () => Promise<void>;
-	readonly busy: boolean;
+	readonly block: WizardBlock;
 }) {
-	if (!progress.southReady) {
-		return (
-			<SouthGenerate progress={progress} refresh={refresh} busy={busy} />
-		);
-	}
-	return <SouthReview progress={progress} refresh={refresh} busy={busy} />;
+	return (
+		<>
+			{progress.southReady ? (
+				<SouthReview
+					progress={progress}
+					refresh={refresh}
+					blocked={block.blocked}
+				/>
+			) : (
+				<SouthGenerate
+					progress={progress}
+					refresh={refresh}
+					blocked={block.blocked}
+				/>
+			)}
+			<BlockNotice block={block} />
+		</>
+	);
+}
+
+/**
+ * Por que os controles estão apagados. O botão desabilitado sozinho não conta
+ * nada — com escopo, dá para nomear o trabalho que está segurando e dizer se
+ * ele já começou ou ainda está na fila.
+ *
+ * O container NASCE VAZIO e nunca desmonta. `role="status"` é o papel certo,
+ * mas região live que aparece na tela já preenchida não é anunciada por várias
+ * combinações de leitor de tela e navegador — o que dispara o anúncio é a
+ * inserção de texto num nó que já estava lá. `sr-only` enquanto vazio porque um
+ * `<p>` vazio ainda consumiria o `gap-4` do CardContent (posicionamento
+ * absoluto o tira do fluxo do flex; `hidden` recriaria o problema do anúncio).
+ *
+ * Idêntico ao de `step-directions.tsx`, de propósito: os dois passos dizem a
+ * mesma coisa do mesmo jeito.
+ */
+function BlockNotice({ block }: { readonly block: WizardBlock }) {
+	return (
+		<p
+			role="status"
+			className={cn(
+				'text-sm text-muted-foreground',
+				!block.blocked && 'sr-only',
+			)}
+		>
+			{block.blocked
+				? bloqueioWizard(block.reason, block.status, block.label)
+				: null}
+		</p>
+	);
 }
 
 // ------------------------------------------------------------------ gerar
@@ -64,11 +112,11 @@ export function SouthStep({
 function SouthGenerate({
 	progress,
 	refresh,
-	busy,
+	blocked,
 }: {
 	readonly progress: WizardProgress;
 	readonly refresh: () => Promise<void>;
-	readonly busy: boolean;
+	readonly blocked: boolean;
 }) {
 	// Prefill: o que o usuário escreveu, não a descrição efetiva. Em modo
 	// manequim `character.description` já vem com o andaime dentro, e reexibi-lo
@@ -166,7 +214,7 @@ function SouthGenerate({
 					}}
 					probeKey={refProbe}
 					refresh={refresh}
-					disabled={generating || busy}
+					disabled={generating || blocked}
 				/>
 			</div>
 			<div className="flex flex-col gap-2">
@@ -174,7 +222,7 @@ function SouthGenerate({
 				<MoldPicker
 					value={mold}
 					onChange={setMold}
-					disabled={generating || busy}
+					disabled={generating || blocked}
 				/>
 				<p className="max-w-prose text-xs text-muted-foreground">
 					{wizard.sul.moldeNota}
@@ -186,7 +234,7 @@ function SouthGenerate({
 						id="wizard-sul-manequim"
 						checked={mannequin}
 						onCheckedChange={(v: boolean) => setMannequin(v)}
-						disabled={generating || busy}
+						disabled={generating || blocked}
 					/>
 					<Label htmlFor="wizard-sul-manequim">
 						{wizard.sul.manequimRotulo}
@@ -211,7 +259,7 @@ function SouthGenerate({
 							? wizard.sul.placeholderEstilo
 							: wizard.sul.placeholderDescricao
 					}
-					disabled={generating || busy}
+					disabled={generating || blocked}
 				/>
 			</div>
 			{mannequin ? (
@@ -224,7 +272,7 @@ function SouthGenerate({
 						value={negativo}
 						onChange={(e) => setNegativo(e.target.value)}
 						placeholder={wizard.sul.placeholderNegativo}
-						disabled={generating || busy}
+						disabled={generating || blocked}
 					/>
 				</div>
 			) : null}
@@ -234,7 +282,7 @@ function SouthGenerate({
 						state={action.state}
 						message={action.message}
 						label={wizard.acoes.tentarDeNovo}
-						disabled={description.trim() === '' || busy}
+						disabled={description.trim() === '' || blocked}
 						onClick={generate}
 					/>
 				</FailureNotice>
@@ -245,7 +293,7 @@ function SouthGenerate({
 						message={action.message}
 						generating={generating}
 						label={wizard.sul.gerar}
-						disabled={description.trim() === '' || busy}
+						disabled={description.trim() === '' || blocked}
 						onClick={generate}
 					/>
 					{generating ? (
@@ -277,11 +325,11 @@ function SouthGenerate({
 function SouthReview({
 	progress,
 	refresh,
-	busy,
+	blocked,
 }: {
 	readonly progress: WizardProgress;
 	readonly refresh: () => Promise<void>;
-	readonly busy: boolean;
+	readonly blocked: boolean;
 }) {
 	const [prompt, setPrompt] = useState('');
 	const edit = useAction(refresh);
@@ -327,7 +375,7 @@ function SouthReview({
 							value={prompt}
 							onChange={(e) => setPrompt(e.target.value)}
 							placeholder={wizard.sul.placeholderEdicao}
-							disabled={busy}
+							disabled={blocked}
 						/>
 					</div>
 					{failure !== undefined ? (
@@ -336,7 +384,7 @@ function SouthReview({
 								state={edit.state}
 								message={edit.message}
 								label={wizard.acoes.tentarDeNovo}
-								disabled={prompt.trim() === '' || busy}
+								disabled={prompt.trim() === '' || blocked}
 								onClick={runEdit}
 							/>
 						</FailureNotice>
@@ -348,7 +396,7 @@ function SouthReview({
 								message={edit.message}
 								generating={generating}
 								label={wizard.sul.editar}
-								disabled={prompt.trim() === '' || busy}
+								disabled={prompt.trim() === '' || blocked}
 								onClick={runEdit}
 							/>
 						) : null}
@@ -359,7 +407,7 @@ function SouthReview({
 								label={wizard.sul.desfazer}
 								loadingLabel={wizard.acoes.aguarde}
 								idleSurface="bg-secondary text-secondary-foreground"
-								disabled={busy}
+								disabled={blocked}
 								onClick={() =>
 									void undo.run(() =>
 										api('wizard/south/undo', {

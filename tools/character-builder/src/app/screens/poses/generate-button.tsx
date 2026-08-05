@@ -6,6 +6,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cellKey, type Cell, type Pose } from '../../../../server/model.ts';
+import { isBusyStatus } from '../../job-scope.ts';
 import { api } from '../../studio-store.tsx';
 import { gerarPose, poses as t } from '../../../strings/poses.ts';
 
@@ -45,8 +46,11 @@ export function GenerateButton({
   const failTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(failTimer.current), []);
 
-  const busy =
-    posting || cell?.status === 'gerando' || cell?.status === 'na-fila';
+  // O bloqueio é da PRÓPRIA célula — esta pose, deste personagem. Nunca de um
+  // job qualquer do estúdio. `isBusyStatus` é a mesma regra que o wizard usa
+  // (`src/app/job-scope.ts`): 'na-fila' conta como ocupado, porque o job
+  // enfileirado ainda vai rodar e gerar de novo pagaria duas vezes.
+  const busy = posting || isBusyStatus(cell?.status);
   const state = postFailed
     ? 'erro'
     : busy
@@ -60,9 +64,15 @@ export function GenerateButton({
   const blocked = !hasRemoteId;
   const disabled = blocked || busy || state === 'pronto';
 
+  // Bloqueia igual, se escreve diferente: 'na-fila' é trabalho que AINDA não
+  // começou. O botão continua no estado visual 'gerando' (o multi-state-button
+  // é vendorizado e não tem estado próprio para fila), mas o rótulo não mente.
+  const queued = cell?.status === 'na-fila';
   const label =
     state === 'gerando'
-      ? t.gerando
+      ? queued
+        ? t.statusNaFila
+        : t.gerando
       : state === 'pronto'
         ? t.pronto
         : state === 'falhou'

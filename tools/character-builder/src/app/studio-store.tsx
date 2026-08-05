@@ -43,11 +43,22 @@ export const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
 	return body;
 };
 
+/**
+ * NÃO existe mais um `busy` global aqui, e a ausência é a correção.
+ *
+ * O campo respondia "algum job está gerando?" — e QUALQUER job servia: um bloco
+ * do mundo, uma sprite da bancada, uma pose de outro personagem. O wizard
+ * inteiro apagava por causa de trabalho sem relação nenhuma com ele. Com a fila
+ * (`server/job-queue.ts`) os jobs passam a ser serializados, então essa janela
+ * de congelamento só cresceria.
+ *
+ * Quem precisa saber se uma ação está impedida pergunta pelo ESCOPO dela, em
+ * `src/app/job-scope.ts`, passando `studio.jobs`. Reintroduzir um booleano
+ * global aqui é reintroduzir o defeito.
+ */
 export interface StudioState {
 	readonly studio: StudioResponse | undefined;
 	readonly refresh: () => Promise<void>;
-	/** true enquanto QUALQUER job estiver gerando. */
-	readonly busy: boolean;
 	readonly error: string | null;
 }
 
@@ -66,20 +77,16 @@ export function useStudio(pollMs = 3000): StudioState {
 		}
 	}, []);
 
-	const busy = Object.values(studio?.jobs ?? {}).some(
-		(j) => j.status === "gerando",
-	);
-
 	useEffect(() => {
 		void refresh();
 	}, [refresh]);
 
 	// Sondagem INCONDICIONAL — e isso é uma correção, não desleixo.
 	//
-	// A versão anterior só ligava o intervalo quando `busy` já era true, e
-	// `busy` sai do próprio snapshot. Um job que nasce DEPOIS da montagem
+	// A versão anterior só ligava o intervalo quando havia geração em curso, e
+	// isso saía do próprio snapshot. Um job que nasce DEPOIS da montagem
 	// nunca aparecia: sem sondagem não chega snapshot novo, sem snapshot novo
-	// `busy` fica false, e sem `busy` não liga a sondagem. O Sprite Studio
+	// nada parece em andamento, e sem isso não liga a sondagem. O Sprite Studio
 	// ficava sondando o resultado para sempre porque a falha do job existia no
 	// servidor e jamais chegava à tela.
 	//
@@ -91,7 +98,7 @@ export function useStudio(pollMs = 3000): StudioState {
 		return () => window.clearInterval(timer.current);
 	}, [pollMs, refresh]);
 
-	return { studio, refresh, busy, error };
+	return { studio, refresh, error };
 }
 
 // ---------------------------------------------------------------- personagem
