@@ -89,8 +89,8 @@
  *     artefato pago (ADR 0023).
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { mkdir, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { PixelLabClient, Usage } from '../../pixellab-pipeline/src/api.ts';
 import { PixelLabError, pollJob } from '../../pixellab-pipeline/src/api.ts';
@@ -101,7 +101,7 @@ import {
 } from '../../pixellab-pipeline/src/cost.ts';
 import { asBase64Image, extractBase64 } from './base64-image.ts';
 import { trackSpend } from './estimate.ts';
-import { encodePngFromRgba, isPng } from './png.ts';
+import { encodePngFromRgba, isPng, readPngHeader } from './png.ts';
 import { BLOCK_GEOMETRY, apiImageSize, blockImageSize, mouldBase64 } from './cube-mould.ts';
 import { waitForCharacterRotations } from './character-detail.ts';
 import {
@@ -1098,6 +1098,74 @@ function scaleEstimate(single: CostEstimate, calls: number): CostEstimate {
   };
 }
 
+/**
+ * Teto de pixels do `/animate-with-text-v3`, do spec vendorizado.
+ *
+ * Texto literal (`openapi/openapi-v2.json`, capturado 2026-08-01):
+ * "**Size Limits:** - Maximum image dimension: 256x256 pixels - Total pixel
+ * budget: width × height × frame_count ≤ 524,288".
+ */
+export const ANIMATION_PIXEL_BUDGET = 524_288;
+
+/**
+ * A área que o `/animate-with-text-v3` de fato trabalha: `width × height ×
+ * frame_count`.
+ *
+ * **Corrige uma estimativa que errava sempre para baixo.** Até 2026-08-04 o
+ * guard chamava `estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48)` —
+ * a área de UM quadro, e ainda por cima de um quadro que este pipeline não usa
+ * (o canônico é 48×53). O log saía `0.0221 USD` idêntico para `frameCount` 4, 8
+ * e 16, quando o único parâmetro que multiplica o trabalho é justamente o
+ * `frame_count`. Num repositório cuja regra dura é "nada de custo surpresa",
+ * uma estimativa que não se move com o multiplicador não é estimativa.
+ *
+ * Duas armadilhas medidas, e vale registrar as duas:
+ *
+ * 1. **O literal `48*48` não mudava o número** — 2304 e 2544 caem os dois abaixo
+ *    do primeiro ponto medido da `COST_TABLE` (64×64 = 4096) e `estimateByArea`
+ *    prende no piso. Estava mascarado pelo clamp, e voltaria a importar no dia
+ *    em que a tabela ganhasse um ponto menor. Corrigido junto, de propósito.
+ * 2. **O que subestimava era ignorar o `frame_count`.** Com a área real de 8
+ *    quadros de 48×53 (20 352) a conta passa do último ponto medido
+ *    (128×128 = 16 384) e prende no teto: `0.0424 USD` de preço estimado,
+ *    quase o dobro do que era logado.
+ *
+ * O orçamento é o do endpoint, não uma invenção deste módulo: o próprio spec
+ * define o limite como `width × height × frame_count`. Preço **estimado** — a
+ * PixelLab rotula a coluna como `Estimated Price* (USD)` e avisa que varia com
+ * o tempo de GPU.
+ */
+export function animationPixelBudget(
+  width: number,
+  height: number,
+  frameCount: number,
+): number {
+  const frames = Number.isFinite(frameCount) && frameCount > 0 ? frameCount : 1;
+  return width * height * frames;
+}
+
+/**
+ * O tamanho do PNG em disco, ou o quadro canônico quando ele não se deixa ler.
+ *
+ * Degradar para a constante é melhor que estourar: a estimativa é um AVISO
+ * (ADR 0012, o guard informa e nunca recusa), e derrubar uma geração porque o
+ * cabeçalho de um PNG não abriu seria transformar informação em bloqueio.
+ */
+function pngSizeOrCanonical(bytes: Buffer): { width: number; height: number } {
+  try {
+    const head = readPngHeader(bytes);
+    if (head.width > 0 && head.height > 0) {
+      return { width: head.width, height: head.height };
+    }
+  } catch {
+    // segue para o canônico
+  }
+  return {
+    width: BLOCK_GEOMETRY.spriteWidth,
+    height: BLOCK_GEOMETRY.spriteHeight,
+  };
+}
+
 // ---- manifesto
 
 interface ManifestGeometry {
@@ -1390,8 +1458,17 @@ async function readViewUrls(
  * Catálogo dos blocos completos em disco — é daqui que o map-builder monta a
  * paleta. Só entram blocos com manifesto completo: v2 com as 4 faces ou v3 com
  * a spritesheet.
+ *
+ * **É aqui que a folha de um bloco animado é conferida contra os frames**
+ * (`repackSpritesheetIfStale`), porque é o único ponto por onde todo bloco passa
+ * antes de o editor tentar desenhá-lo. Custa a leitura de um JSON e do CABEÇALHO
+ * de alguns PNGs — os pixels só são inflados quando a folha vai mesmo ser
+ * reescrita. Só escreve quando a folha está de fato errada, e nunca chama a API.
  */
-export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSummary[]> {
+export async function listWorldBlocks(
+  assetsDir: string,
+  onLog?: (m: string) => void,
+): Promise<WorldBlockSummary[]> {
   const root = join(assetsDir, 'world-blocks');
   if (!existsSync(root)) return [];
 
@@ -1412,12 +1489,22 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
       const animated = manifest.animated ?? true;
       if (animated) {
         if (!existsSync(spritesheetPath(assetsDir, hash))) continue;
+        // Folha legada (gravada com o quadro fixo antigo) volta a bater com os
+        // frames aqui, de graça. Idempotente: na segunda passada não faz nada.
+        await repackSpritesheetIfStale(assetsDir, hash, onLog);
         out.push({
           hash,
           description: manifest.description,
           shape: 'block', // o cubo base da textura animada é sempre 'block'
           technique: 'texture',
-          geometry: MANIFEST_GEOMETRY,
+          // A geometria GRAVADA manda; a constante é só o piso de um manifesto
+          // antigo que não a tenha. Publicar a constante por cima do manifesto
+          // (como este ramo fazia até 2026-08-04, enquanto os ramos `views` e
+          // v2 já liam o disco) é invisível só enquanto as duas coincidem: no
+          // dia em que a geometria do projeto mudar, os blocos PAGOS com a
+          // antiga passariam a ser publicados com a nova e o editor desenharia
+          // arte comprada na projeção errada, sem nada reclamar.
+          geometry: manifest.geometry ?? MANIFEST_GEOMETRY,
           animated: true,
           spritesheetUrl: `/world-blocks/${hash}/spritesheet.png`,
           animationUrl: `/world-blocks/${hash}/animation.json`,
@@ -1441,7 +1528,8 @@ export async function listWorldBlocks(assetsDir: string): Promise<WorldBlockSumm
           description: manifest.description,
           shape: 'block',
           technique: 'texture',
-          geometry: MANIFEST_GEOMETRY,
+          // Mesma correção do ramo animado, logo acima.
+          geometry: manifest.geometry ?? MANIFEST_GEOMETRY,
           animated: false,
           baseUrl: `/world-blocks/${hash}/base.png`,
           frameCount: 0,
@@ -2143,6 +2231,85 @@ interface AnimSidecar {
 }
 
 /**
+ * Grava por arquivo temporário + `rename`.
+ *
+ * **Não é zelo: é o conserto de uma corrupção medida.** `spritesheet.png` e
+ * `spritesheet.json` são reescritos DENTRO de `listWorldBlocks`, que atende
+ * `GET /api/world-blocks`, enquanto `GET /world-blocks/<hash>/spritesheet.png`
+ * serve o mesmo arquivo com um `readFile` simples. Com `writeFile` puro, um
+ * leitor concorrente enxerga a janela do `O_TRUNC` (0 byte) e as escritas
+ * parciais no meio do caminho — 153 de 1372 leituras concorrentes vieram
+ * truncadas numa medição de 40 rodadas, com tamanhos 0, 7965 e 8192 para um
+ * arquivo final de 8296. O navegador recebe corpo cortado, `img.onerror`
+ * dispara, e o bloco animado degrada para quadro parado justamente na primeira
+ * carga, que é quando o re-empacotamento acontece.
+ *
+ * `rename` dentro do mesmo sistema de arquivos é atômico no POSIX: o leitor vê
+ * o arquivo antigo INTEIRO ou o novo INTEIRO, nunca uma mistura.
+ *
+ * O sufixo é aleatório, e não derivado de pid+relógio, pelo mesmo motivo que o
+ * `writeStudioFile` de `api.ts` documenta: dois saves nunca podem dividir o
+ * mesmo caminho temporário. Aqui é defesa em profundidade — `withSheetLock` já
+ * serializa —, e defesa em profundidade é o que sobra quando a serialização for
+ * refatorada por alguém que não leu este comentário.
+ */
+async function writeFileAtomically(path: string, data: Buffer | string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    await writeFile(tmp, data);
+    await rename(tmp, path);
+  } catch (err) {
+    // O temporário nunca pode virar lixo permanente ao lado da arte paga.
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Uma corrente de promessas por bloco, para serializar quem escreve a folha.
+ *
+ * A chave é `assetsDir` + hash porque o mesmo hash pode existir em dois
+ * catálogos (os testes usam um diretório temporário por caso) e travar por hash
+ * puro faria um teste esperar pelo outro sem necessidade.
+ */
+const sheetLocks = new Map<string, Promise<unknown>>();
+
+function sheetLockKey(assetsDir: string, hash: string): string {
+  return `${assetsDir} ${hash}`;
+}
+
+/**
+ * Serializa, por bloco, tudo o que lê-decide-e-reescreve a folha.
+ *
+ * **Sem isto, a atomicidade do `rename` não basta.** Dois `GET
+ * /api/world-blocks` sobrepostos — duas abas, ou o poll de 3 s do painel de
+ * blocos cruzando com o `loadPalette()` do editor de mapa — leem os mesmos
+ * `frames/`, chegam os dois à conclusão de que a folha está obsoleta e
+ * re-empacotam em cima um do outro. Com o lock, o segundo espera, relê o atlas
+ * JÁ corrigido pelo primeiro e não faz nada: é assim que a idempotência
+ * declarada em `repackSpritesheetIfStale` continua valendo sob concorrência, e
+ * não só quando as chamadas vêm em fila.
+ *
+ * A corrente nunca trava: o erro vai para o chamador, mas o elo seguinte roda.
+ * A entrada sai do mapa quando ninguém mais está atrás dela, então o mapa não
+ * cresce com o catálogo.
+ */
+function withSheetLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prev = sheetLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(work);
+  const tail = run.then(
+    () => {},
+    () => {},
+  );
+  sheetLocks.set(key, tail);
+  void tail.then(() => {
+    if (sheetLocks.get(key) === tail) sheetLocks.delete(key);
+  });
+  return run;
+}
+
+/**
  * Escreve os frames de animação como PNGs individuais e um atlas JSON no
  * formato PixiJS (TexturePacker-compatible).
  *
@@ -2170,51 +2337,157 @@ async function packSpritesheet(
 ): Promise<void> {
   if (frames.length === 0) throw new Error('sem frames para empacotar');
 
-  // Salva frames individuais
-  const framesDir = join(blockDir(assetsDir, hash), 'frames');
-  await mkdir(framesDir, { recursive: true });
+  // Sob o MESMO lock do re-empacotamento: um `GET /api/world-blocks` que caia
+  // no meio da gravação dos frames veria uma pasta `frames/` incompleta ao lado
+  // de uma folha antiga e concluiria, com razão aparente, que precisa
+  // re-empacotar — reescrevendo a folha com metade dos quadros.
+  return withSheetLock(sheetLockKey(assetsDir, hash), async () => {
+    // Salva frames individuais
+    const framesDir = join(blockDir(assetsDir, hash), 'frames');
+    await mkdir(framesDir, { recursive: true });
 
-  // Fallback de decodificação: só entra em cena se o fornecedor mandar RGBA
-  // cru em vez de PNG, como o /create-isometric-tile faz (ver png.ts).
-  //
-  // São DUAS formas aceitas, e não uma. A canônica é o cubo 48×53, o tamanho
-  // do `first_frame` que este código manda. A outra é a quadrada 48×48, que
-  // era a única aceita até 2026-08-04 — e não há evidência nenhuma de que ela
-  // tenha deixado de poder ocorrer: o `/animate-with-text-v3` não documenta o
-  // tamanho do frame que devolve, e blocos gerados antes desta correção
-  // existem em disco. Estreitar o aceite sem prova transformaria em exceção um
-  // frame JÁ PAGO que hoje é gravado sem reclamação. Um buffer cru só casa uma
-  // das duas formas (9216 ≠ 10176 bytes), então aceitar as duas não é ambíguo.
+    const decoded: DecodedFrame[] = [];
+    for (let i = 0; i < frames.length; i++) {
+      const png = frames[i]!;
+      await writeFileAtomically(
+        join(framesDir, `frame_${String(i).toString().padStart(3, '0')}.png`),
+        png,
+      );
+      decoded.push(decodeFrame(png, i));
+    }
+
+    await writeSheet(assetsDir, hash, decoded, onLog);
+    await writeFileAtomically(
+      animSidecarPath(assetsDir, hash),
+      `${JSON.stringify(sidecar, null, 2)}\n`,
+    );
+
+    onLog?.(
+      `[world-block] spritesheet empacotada: ${decoded.length} frames, ${sidecar.fps} fps`,
+    );
+  });
+}
+
+/** Um frame já decodificado em RGBA cru. */
+interface DecodedFrame {
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: Buffer;
+}
+
+/**
+ * Decodifica UM frame, aceitando PNG e RGBA cru.
+ *
+ * Fallback de decodificação: só entra em cena se o fornecedor mandar RGBA cru
+ * em vez de PNG, como o /create-isometric-tile faz (ver png.ts).
+ *
+ * São DUAS formas aceitas, e não uma. A canônica é o cubo 48×53, o tamanho do
+ * `first_frame` que este código manda. A outra é a quadrada 48×48, que era a
+ * única aceita até 2026-08-04 — e não há evidência nenhuma de que ela tenha
+ * deixado de poder ocorrer: o `/animate-with-text-v3` não documenta o tamanho
+ * do frame que devolve, e blocos gerados antes daquela correção existem em
+ * disco. Estreitar o aceite sem prova transformaria em exceção um frame JÁ PAGO
+ * que hoje é gravado sem reclamação. Um buffer cru só casa uma das duas formas
+ * (9216 ≠ 10176 bytes), então aceitar as duas não é ambíguo.
+ */
+function decodeFrame(bytes: Buffer, index: number): DecodedFrame {
+  try {
+    return decode(bytes);
+  } catch {
+    const shape = rawFrameShape(bytes.length);
+    if (shape) return { width: shape[0], height: shape[1], rgba: bytes };
+    throw new Error(notAFrameMessage(index, bytes.length));
+  }
+}
+
+/** As duas formas de RGBA cru aceitas, na ordem em que são testadas. */
+function rawFrameShapes(): ReadonlyArray<readonly [number, number]> {
   const canonW = BLOCK_GEOMETRY.spriteWidth;
   const canonH = BLOCK_GEOMETRY.spriteHeight;
-  const RAW_SHAPES: ReadonlyArray<readonly [number, number]> = [
+  return [
     [canonW, canonH],
     [canonW, canonW],
   ];
+}
 
-  // Decodifica frames para RGBA cru (são PNGs)
-  const decoded: Array<{ width: number; height: number; rgba: Buffer }> = [];
-  for (let i = 0; i < frames.length; i++) {
-    const png = frames[i]!;
-    await writeFile(join(framesDir, `frame_${String(i).toString().padStart(3, '0')}.png`), png);
-    try {
-      const img = decode(png);
-      decoded.push(img);
-    } catch {
-      // Fallback: frame não é PNG válido, tenta como RGBA cru nas formas conhecidas
-      const shape = RAW_SHAPES.find(([w, h]) => png.length === w * h * 4);
-      if (shape) {
-        decoded.push({ width: shape[0], height: shape[1], rgba: png });
-      } else {
-        throw new Error(
-          `frame ${i} não é PNG nem RGBA cru de ` +
-            RAW_SHAPES.map(([w, h]) => `${w}×${h}`).join(' ou ') +
-            ` (${png.length} bytes)`,
-        );
-      }
+function rawFrameShape(byteLength: number): readonly [number, number] | undefined {
+  return rawFrameShapes().find(([w, h]) => byteLength === w * h * 4);
+}
+
+function notAFrameMessage(index: number, byteLength: number): string {
+  return (
+    `frame ${index} não é PNG nem RGBA cru de ` +
+    rawFrameShapes()
+      .map(([w, h]) => `${w}×${h}`)
+      .join(' ou ') +
+    ` (${byteLength} bytes)`
+  );
+}
+
+/**
+ * O tamanho de um frame lendo só o CABEÇALHO — sem inflar os pixels.
+ *
+ * **Conserta uma regressão medida, não uma micro-otimização.** A decisão de
+ * re-empacotar (`sheetNeedsRepack`) precisa de `width` e `height` e de mais
+ * nada, mas até 2026-08-04 `repackSpritesheetIfStale` chamava `decodeFrame` em
+ * TODOS os quadros antes de decidir — inflate + unfilter completos, a cada
+ * `GET /api/world-blocks`, mesmo quando não havia nada a fazer. Com 50 blocos
+ * de 9 quadros o catálogo saiu de 8,7–13,4 ms para 130–147 ms; dos 450 quadros,
+ * `decodePngToRgba` custava 89 ms contra 2,5 ms de `readPngHeader`. Com os dois
+ * blocos que existem hoje em disco a diferença é de ~5 ms e some no ruído — o
+ * que é exatamente o motivo de a regressão ter passado.
+ *
+ * Aceita as mesmas duas formas que `decodeFrame`: um buffer de RGBA cru não tem
+ * cabeçalho, e a forma sai do tamanho em bytes.
+ *
+ * Ler o cabeçalho é metade do conserto; a outra metade é ler MENOS arquivos —
+ * ver `FramesOnDisk`. Na mesma bancada de 50 blocos × 9 quadros, com o catálogo
+ * já correto, o `listWorldBlocks` mediu 83,5–112,8 ms decodificando tudo contra
+ * 16,1–30,9 ms lendo só o que a decisão consome, com o `main` (que não conferia
+ * nada) em 3,5–16,0 ms. Com os 2 blocos reais em disco: 3,1–7,5 ms contra
+ * 0,7–2,0 ms, com o `main` em 0,2–4,9 ms.
+ */
+function frameHeaderSize(bytes: Buffer, index: number): { width: number; height: number } {
+  try {
+    const head = readPngHeader(bytes);
+    if (head.width > 0 && head.height > 0) {
+      return { width: head.width, height: head.height };
     }
+  } catch {
+    // segue para o RGBA cru
   }
+  const shape = rawFrameShape(bytes.length);
+  if (shape) return { width: shape[0], height: shape[1] };
+  throw new Error(notAFrameMessage(index, bytes.length));
+}
 
+/**
+ * Monta a tira horizontal e o atlas a partir dos frames decodificados, e grava
+ * os dois. **Não** toca no sidecar nem nos PNGs de `frames/`.
+ *
+ * Separado de `packSpritesheet` porque o re-empacotamento das folhas legadas
+ * (`repackSpritesheetIfStale`) precisa exatamente disto e de mais nada: os
+ * frames já estão em disco, íntegros, e o sidecar já está certo — o que está
+ * errado é só a folha.
+ *
+ * **A ordem PNG-antes-do-atlas é deliberada, não acidente.** Os dois arquivos
+ * vão para o disco atomicamente, um de cada vez; entre um `rename` e o outro há
+ * uma janela em que a folha é a nova e o atlas ainda é o velho. Gravar nesta
+ * ordem faz dessa janela um estado que se AUTODENUNCIA: o atlas antigo declara
+ * dimensões que não são as da folha nova, `sheetNeedsRepack` acusa na leitura
+ * seguinte e o conserto se completa sozinho, de graça. Na ordem inversa o atlas
+ * novo descreveria a folha velha — coerente com os frames, mentindo sobre os
+ * pixels, e invisível para sempre. Não assuma que dá na mesma.
+ *
+ * Não toma o lock: quem chama já está dentro dele (`packSpritesheet` e
+ * `repackSpritesheetIfStale`), e reentrar travaria de vez.
+ */
+async function writeSheet(
+  assetsDir: string,
+  hash: string,
+  decoded: readonly DecodedFrame[],
+  onLog?: (m: string) => void,
+): Promise<void> {
   // O quadro da folha é o do PRIMEIRO frame decodificado — é o tamanho que a
   // API devolveu, que é o tamanho do first_frame que mandamos.
   const first = decoded[0]!;
@@ -2230,7 +2503,7 @@ async function packSpritesheet(
   }
 
   // Monta tira horizontal como RGBA cru
-  const totalWidth = frameWidth * frames.length;
+  const totalWidth = frameWidth * decoded.length;
   const totalHeight = frameHeight;
   const sheetRgba = Buffer.alloc(totalWidth * totalHeight * 4);
 
@@ -2248,7 +2521,7 @@ async function packSpritesheet(
 
   // Codifica a spritesheet como PNG
   const sheetPng = encodePngFromRgba(sheetRgba, totalWidth, totalHeight);
-  await writeFile(spritesheetPath(assetsDir, hash), sheetPng);
+  await writeFileAtomically(spritesheetPath(assetsDir, hash), sheetPng);
 
   // Atlas JSON (formato TexturePacker)
   const atlasFrames: Record<string, {
@@ -2260,7 +2533,7 @@ async function packSpritesheet(
   }> = {};
 
   const animFrames: string[] = [];
-  for (let i = 0; i < frames.length; i++) {
+  for (let i = 0; i < decoded.length; i++) {
     const name = `frame_${String(i).toString().padStart(3, '0')}`;
     animFrames.push(name);
     atlasFrames[name] = {
@@ -2287,16 +2560,340 @@ async function packSpritesheet(
     },
   };
 
-  await writeFile(atlasPath(assetsDir, hash), `${JSON.stringify(atlas, null, 2)}\n`);
-  await writeFile(
-    animSidecarPath(assetsDir, hash),
-    `${JSON.stringify(sidecar, null, 2)}\n`,
-  );
+  await writeFileAtomically(atlasPath(assetsDir, hash), `${JSON.stringify(atlas, null, 2)}\n`);
 
   onLog?.(
-    `[world-block] spritesheet empacotada: ${totalWidth}×${totalHeight}, ` +
-      `${frames.length} frames, ${sidecar.fps} fps`,
+    `[world-block] folha gravada: ${totalWidth}×${totalHeight}, ` +
+      `${decoded.length} quadros de ${frameWidth}×${frameHeight}`,
   );
+}
+
+// ---- coexistência de folhas antigas e novas
+
+/** O que o `spritesheet.json` em disco declara sobre a folha. */
+export interface SheetDeclaration {
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly frameCount: number;
+  readonly sheetWidth: number;
+  readonly sheetHeight: number;
+}
+
+/**
+ * O que `frames/` tem, do ponto de vista de quem decide re-empacotar.
+ *
+ * **É a lista INTEIRA que não é preciso ler, e o tipo existe para dizer isso.**
+ * A decisão consome exatamente duas coisas: quantos PNGs há — o `readdir` já
+ * entrega de graça — e o quadro do PRIMEIRO, que é o quadro que `writeSheet`
+ * impõe à folha inteira. Passar um array de tamanhos convidava a lê-los todos,
+ * e foi assim que a checagem passou a inflar 450 PNGs a cada leitura do
+ * catálogo (ver `frameHeaderSize`). Com este tipo, ler mais do que isto vira
+ * trabalho visivelmente inútil em vez de descuido invisível.
+ *
+ * Frames desiguais entre si continuam não sendo detectados aqui — nunca foram.
+ * Quem avisa é `writeSheet`, na hora de escrever, onde os tamanhos de verdade
+ * já estão em mãos.
+ */
+export interface FramesOnDisk {
+  /** Quantos PNGs `frame_NNN.png` existem em `frames/`. */
+  readonly count: number;
+  /** O quadro do primeiro frame. `null` quando não há frame legível. */
+  readonly first: { readonly width: number; readonly height: number } | null;
+}
+
+/**
+ * A folha declarada bate com os frames que estão ao lado dela?
+ *
+ * **Pura, e é o coração da coexistência.** `packSpritesheet` foi corrigido numa
+ * onda anterior para usar a dimensão REAL do quadro, mas as duas folhas já
+ * gravadas ficaram com o antigo 48×48 fixo: `a880b32d82456c4e` é 432×48 (9
+ * quadros) e `df00c6479810988c` é 240×48 (5), enquanto os `frames/*.png` e o
+ * `base.png` correspondentes estão íntegros em 48×53. Ou seja: o
+ * `spritesheet.json` desses dois CONTRADIZ os PNGs ao lado.
+ *
+ * Enquanto ninguém lia a folha, isso era inofensivo. O editor 3D passou a ler.
+ *
+ * Devolve `null` quando está tudo certo (ou quando não há como decidir), e o
+ * motivo em português quando a folha precisa ser reescrita. Nunca é uma migração
+ * de mão única: a decisão é por CONTEÚDO, então re-empacotar duas vezes dá o
+ * mesmo resultado e a segunda vez não faz nada.
+ *
+ * `sheet` é o cabeçalho REAL do `spritesheet.png` — `null` quando os bytes não
+ * se deixam ler como PNG, `undefined` quando o chamador não quis olhar. Até
+ * 2026-08-04 esta função só comparava o `.json` com os frames, e uma folha com
+ * os pixels corrompidos ao lado de um atlas coerente era invisível para sempre:
+ * o editor recusava a folha e nada nunca a reescrevia. Ler o cabeçalho custa o
+ * mesmo que já se paga por cada frame.
+ */
+export function sheetNeedsRepack(
+  declared: SheetDeclaration | null,
+  frames: FramesOnDisk,
+  sheet?: { readonly width: number; readonly height: number } | null,
+): string | null {
+  // Sem frames em disco não há de onde re-empacotar. Refazer a folha a partir
+  // dela mesma seria trocar seis por meia dúzia — e apagar arte paga.
+  const first = frames.first;
+  if (frames.count === 0 || first === null) return null;
+  if (!declared) return 'não há spritesheet.json legível ao lado dos frames';
+
+  if (sheet === null) return 'o spritesheet.png não se deixa ler como PNG';
+  if (
+    sheet !== undefined &&
+    (sheet.width !== declared.sheetWidth || sheet.height !== declared.sheetHeight)
+  ) {
+    return (
+      `o spritesheet.png em disco é ${sheet.width}×${sheet.height} e o atlas ` +
+      `declara ${declared.sheetWidth}×${declared.sheetHeight}`
+    );
+  }
+
+  if (declared.frameCount !== frames.count) {
+    return (
+      `a folha declara ${declared.frameCount} quadros e há ${frames.count} ` +
+      'PNGs em frames/'
+    );
+  }
+  if (declared.frameWidth !== first.width || declared.frameHeight !== first.height) {
+    return (
+      `o quadro da folha (${declared.frameWidth}×${declared.frameHeight}) não bate ` +
+      `com o dos frames (${first.width}×${first.height})`
+    );
+  }
+  if (
+    declared.sheetWidth !== first.width * frames.count ||
+    declared.sheetHeight !== first.height
+  ) {
+    return (
+      `a folha ${declared.sheetWidth}×${declared.sheetHeight} não é a tira de ` +
+      `${frames.count}×${first.width}×${first.height}`
+    );
+  }
+  return null;
+}
+
+/** Lê o `spritesheet.json` e resume o que ele declara. `null` se não der. */
+async function readSheetDeclaration(
+  assetsDir: string,
+  hash: string,
+): Promise<SheetDeclaration | null> {
+  const path = atlasPath(assetsDir, hash);
+  if (!existsSync(path)) return null;
+  try {
+    const atlas = JSON.parse(await readFile(path, 'utf8')) as {
+      frames?: Record<string, { frame?: { w?: number; h?: number } }>;
+      meta?: { size?: { w?: number; h?: number } };
+    };
+    const entries = Object.values(atlas.frames ?? {});
+    const first = entries[0]?.frame;
+    const size = atlas.meta?.size;
+    if (
+      entries.length === 0 ||
+      typeof first?.w !== 'number' ||
+      typeof first?.h !== 'number' ||
+      typeof size?.w !== 'number' ||
+      typeof size?.h !== 'number'
+    ) {
+      return null;
+    }
+    return {
+      frameWidth: first.w,
+      frameHeight: first.h,
+      frameCount: entries.length,
+      sheetWidth: size.w,
+      sheetHeight: size.h,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Os PNGs de `frames/`, em ordem numérica. Vazio quando não há pasta. */
+async function readFrameFiles(assetsDir: string, hash: string): Promise<string[]> {
+  const dir = join(blockDir(assetsDir, hash), 'frames');
+  if (!existsSync(dir)) return [];
+  try {
+    const files = await readdir(dir);
+    return files
+      .map((name) => /^frame_(\d+)\.png$/.exec(name))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .sort((a, b) => Number(a[1]) - Number(b[1]))
+      .map((m) => join(dir, m[0]));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Quantos quadros o `animation.json` diz que a animação tem. `null` quando o
+ * sidecar não existe, não abre, ou não declara um número utilizável.
+ *
+ * Existe porque a contagem em `frames/` é o que o `readdir` encontrar, e isso
+ * não é a mesma coisa. Um `frame_009.png` órfão — deixado por uma execução
+ * interrompida — faria a folha nascer com 10 quadros enquanto o sidecar declara
+ * 9; o editor recusaria a folha no `checkSheet` e o bloco pararia de animar. O
+ * sidecar é escrito junto com os frames pela mesma função, então ele é a
+ * autoridade sobre quantos quadros foram pagos.
+ */
+async function readSidecarFrameCount(
+  assetsDir: string,
+  hash: string,
+): Promise<number | null> {
+  const path = animSidecarPath(assetsDir, hash);
+  if (!existsSync(path)) return null;
+  try {
+    const sc = JSON.parse(await readFile(path, 'utf8')) as { frameCount?: unknown };
+    const n = sc.frameCount;
+    if (typeof n === 'number' && Number.isInteger(n) && n > 0) return n;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** O cabeçalho do `spritesheet.png`. `null` quando não há PNG legível ali. */
+async function readSheetHeader(
+  assetsDir: string,
+  hash: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const head = readPngHeader(await readFile(spritesheetPath(assetsDir, hash)));
+    if (head.width > 0 && head.height > 0) return { width: head.width, height: head.height };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-empacota a folha a partir de `frames/` quando ela discorda deles.
+ *
+ * **Custo zero: nenhuma chamada à API, nenhum pixel novo.** Os frames em disco
+ * já foram pagos e estão íntegros; o que se reescreve é a tira derivada deles e
+ * o `spritesheet.json`. `animation.json` (fps, ação, ping-pong) e os próprios
+ * PNGs de `frames/` não são tocados.
+ *
+ * É chamada na leitura do catálogo, e isso é decisão: é o único ponto por onde
+ * TODO bloco passa antes de o editor tentar desenhá-lo. A checagem custa a
+ * leitura de um JSON pequeno e do CABEÇALHO de alguns PNGs — os pixels só são
+ * inflados quando a folha vai mesmo ser reescrita (ver `frameHeaderSize`, que
+ * documenta a medição da regressão em que não era assim). Detecta por CONTEÚDO,
+ * então rodar de novo não faz nada — não é migração de mão única e não há flag
+ * de "já migrei" para ficar mentindo.
+ *
+ * Serializada por bloco (`withSheetLock`): dois `GET /api/world-blocks`
+ * sobrepostos não decidem em cima do mesmo estado obsoleto.
+ *
+ * Falha em silêncio (com log): uma folha que não dá para reescrever não pode
+ * derrubar a paleta inteira. O editor degrada esse bloco para o quadro parado.
+ *
+ * **Loga por `console.warn` além do `onLog`, e isso é de propósito.** Reescrever
+ * a folha é raro e mexe num artefato derivado de arte PAGA; até 2026-08-04 o
+ * único rastro era o `onLog`, e o servidor chama `listWorldBlocks` sem passar
+ * um — o "Falha em silêncio (com log)" desta mesma doc era falso em produção.
+ * `console.warn` sai por stderr, que é fd separado do protocolo do
+ * `node --test`, então não corrompe o transporte de resultados dos testes.
+ */
+export async function repackSpritesheetIfStale(
+  assetsDir: string,
+  hash: string,
+  onLog?: (m: string) => void,
+): Promise<boolean> {
+  return withSheetLock(sheetLockKey(assetsDir, hash), () =>
+    repackSpritesheetIfStaleLocked(assetsDir, hash, onLog),
+  );
+}
+
+/** Grita no `onLog` E no stderr. Só para o que precisa ser visto sem editor. */
+function warnRepack(message: string, onLog?: (m: string) => void): void {
+  onLog?.(message);
+  console.warn(message);
+}
+
+async function repackSpritesheetIfStaleLocked(
+  assetsDir: string,
+  hash: string,
+  onLog?: (m: string) => void,
+): Promise<boolean> {
+  let framePaths = await readFrameFiles(assetsDir, hash);
+  if (framePaths.length === 0) return false;
+
+  // Três leituras por bloco, em paralelo, e nenhum pixel inflado: o cabeçalho
+  // do PRIMEIRO frame, o atlas e o cabeçalho da folha. É tudo o que a decisão
+  // consome. Só a primeira pode falhar — as outras duas engolem o próprio erro
+  // e devolvem `null`, que já é uma resposta válida para `sheetNeedsRepack`.
+  let first: { width: number; height: number };
+  let declared: SheetDeclaration | null;
+  let sheetHead: { width: number; height: number } | null;
+  try {
+    [first, declared, sheetHead] = await Promise.all([
+      readFile(framePaths[0]!).then((b) => frameHeaderSize(b, 0)),
+      readSheetDeclaration(assetsDir, hash),
+      readSheetHeader(assetsDir, hash),
+    ]);
+  } catch (err) {
+    warnRepack(
+      `[world-block] ${hash}: não deu para ler os frames para conferir a folha ` +
+        `(${err instanceof Error ? err.message : String(err)}).`,
+      onLog,
+    );
+    return false;
+  }
+
+  let reason = sheetNeedsRepack(declared, { count: framePaths.length, first }, sheetHead);
+
+  if (reason !== null) {
+    // Antes de reescrever, conferir a contagem com o sidecar — e SÓ aqui, que é
+    // o caminho raro. Ver `readSidecarFrameCount`: um `frame_009.png` órfão faria
+    // a folha nascer com 10 quadros contra os 9 do `animation.json`, e o editor
+    // recusaria a animação inteira por causa dele. Se o órfão era o único
+    // motivo da divergência, a folha já estava certa e nada é reescrito.
+    const declaredFrames = await readSidecarFrameCount(assetsDir, hash);
+    if (declaredFrames !== null && declaredFrames < framePaths.length) {
+      warnRepack(
+        `[world-block] ${hash}: há ${framePaths.length} PNGs em frames/ e o ` +
+          `animation.json declara ${declaredFrames} quadros. A folha usa os ` +
+          `${declaredFrames} primeiros; os PNGs sobrando ficam em disco (arte paga ` +
+          'não se apaga por conta própria).',
+        onLog,
+      );
+      framePaths = framePaths.slice(0, declaredFrames);
+      reason = sheetNeedsRepack(declared, { count: framePaths.length, first }, sheetHead);
+    }
+  }
+  if (reason === null) return false;
+
+  // Só AGORA os pixels são inflados — este é o caminho raro.
+  let decoded: DecodedFrame[];
+  try {
+    const buffers = await Promise.all(framePaths.map((p) => readFile(p)));
+    decoded = buffers.map((b, i) => decodeFrame(b, i));
+  } catch (err) {
+    warnRepack(
+      `[world-block] ${hash}: a folha discorda dos frames (${reason}) e os frames ` +
+        `não se deixam decodificar (${err instanceof Error ? err.message : String(err)}). ` +
+        'O editor vai desenhar o quadro parado.',
+      onLog,
+    );
+    return false;
+  }
+
+  try {
+    await writeSheet(assetsDir, hash, decoded, onLog);
+    warnRepack(
+      `[world-block] ${hash}: folha re-empacotada a partir de frames/ — ${reason}. ` +
+        'Nenhuma chamada à API: os quadros já estavam pagos e em disco.',
+      onLog,
+    );
+    return true;
+  } catch (err) {
+    warnRepack(
+      `[world-block] ${hash}: a folha discorda dos frames (${reason}) e o ` +
+        `re-empacotamento falhou (${err instanceof Error ? err.message : String(err)}). ` +
+        'O editor vai desenhar o quadro parado.',
+      onLog,
+    );
+    return false;
+  }
 }
 
 // ---- execução
@@ -2742,17 +3339,43 @@ export async function runWorldBlock(
           textureAnimJobId = animStub.jobId;
           baseSeedNum = animStub.seed;
         } else {
+          // O `first_frame` é o cubo base que ESTE código acabou de gravar —
+          // o tamanho dele é o tamanho do trabalho, e é ele que entra no
+          // orçamento de pixels do endpoint. Ler o cabeçalho do PNG evita tanto
+          // o literal errado quanto a suposição de que o canônico sempre valeu.
+          const baseBytes = await readFile(basePath);
+          const frameSize = pngSizeOrCanonical(baseBytes);
+          const pixelBudget = animationPixelBudget(
+            frameSize.width,
+            frameSize.height,
+            frameCount,
+          );
+          // O teto é do endpoint, não deste módulo. Com o cubo canônico 48×53 e
+          // os 16 quadros do maior `frameCount` dá 40 704 — folgadíssimo. O
+          // aviso existe porque o tamanho do `first_frame` vem do FORNECEDOR:
+          // se um dia ele devolver o tile maior, a submissão seria recusada e o
+          // erro chegaria como um 4xx opaco, sem dizer que o problema é este.
+          if (pixelBudget > ANIMATION_PIXEL_BUDGET) {
+            opts.onLog?.(
+              `[world-block] AVISO: ${frameCount} quadros de ${frameSize.width}×` +
+                `${frameSize.height} somam ${pixelBudget} pixels, acima do teto de ` +
+                `${ANIMATION_PIXEL_BUDGET} do /animate-with-text-v3 (spec vendorizado, ` +
+                'width × height × frame_count). A submissão segue — quem decide é o ' +
+                'fornecedor —, mas espere recusa.',
+            );
+          }
           const animEstimate = estimateByArea(
             COST_TABLE['animate-with-text-v3'],
-            48 * 48,
+            pixelBudget,
           );
           logGuard(
-            `animate-with-text-v3 (${frameCount} frames; preço estimado)`,
+            `animate-with-text-v3 (${frameCount} frames de ${frameSize.width}×${frameSize.height}; ` +
+              'preço estimado)',
             guardFor(animEstimate, animEstimate.point),
             opts.onLog,
           );
 
-          const baseB64 = (await readFile(basePath)).toString('base64');
+          const baseB64 = baseBytes.toString('base64');
           const animSeed = baseSeedNum + 1;
           const animParams: Record<string, unknown> = {
             first_frame: asBase64Image(baseB64),

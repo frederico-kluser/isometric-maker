@@ -52,6 +52,19 @@ interface WorldBlockSummary {
   readonly animated?: boolean;
   /** v3 (texture): URL da imagem base quando estático. */
   readonly baseUrl?: string;
+  /**
+   * A projeção em que o bloco está desenhado, como o manifesto a gravou.
+   *
+   * **Lida do catálogo e deliberadamente NÃO repassada ao `BlockDef`.** Quem
+   * desenha (`cube3d.ts`) mede a geometria da IMAGEM real
+   * (`spriteGeometryFromImage`), não de uma declaração — é a mesma regra que
+   * escolhe a vista canônica por silhueta em vez de por índice. E é a regra
+   * certa aqui por evidência: os dois blocos pagos em disco tinham a folha
+   * declarando um quadro (48×48) que os pixels ao lado desmentiam (48×53). Se
+   * um dia o desenho passar a depender deste campo, ele precisa vir junto — e
+   * aí o ramo `texture` do servidor precisa publicar o que está gravado, que é
+   * a correção feita em `listWorldBlocks` nesta mesma onda.
+   */
   readonly geometry?: {
     readonly tileWidth: number;
     readonly tileHeight: number;

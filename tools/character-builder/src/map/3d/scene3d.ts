@@ -43,8 +43,10 @@ import {
   createPreviewMesh,
   createHighlightMesh,
   disposeCubeCache,
+  prefersReducedMotion,
   type CubeArt,
 } from './cube3d.ts';
+import { BlockAnimator } from './block-animation.ts';
 import {
   createGroundRig,
   disposeGroundRig,
@@ -228,6 +230,15 @@ export async function createIsoScene3D(
 
   // --- caches ---
   const artByBlock = new Map<string, CubeArt>();
+  /**
+   * O relógio dos blocos animados (ADR 0032) — um por cena.
+   *
+   * Ele não desenha e não agenda nada: só responde "alguém trocou de quadro?" e
+   * "ainda há animação viva?". Quem decide é o `tick` logo abaixo, que é o
+   * mesmo laço único do zoom e do giro (ADR 0040).
+   */
+  const animator = new BlockAnimator();
+  animator.setEnabled(!prefersReducedMotion());
   /** Meshes dos blocos no mapa. Key = "x:z:y". */
   const meshes = new Map<string, THREE.Mesh>();
   /** A mesma coleção em array, para o raycaster não varrer a cena. */
@@ -313,6 +324,19 @@ export async function createIsoScene3D(
         animating = true;
       }
     }
+
+    // Blocos animados. `advance` só devolve true quando algum bloco TROCOU de
+    // quadro — a 8 fps num monitor de 60 Hz, sete de cada oito voltas não
+    // desenham nada. `hasLive` é o que mantém o laço agendado, e é o que o
+    // deixa parar quando o último bloco animado sai do mapa: a promessa da
+    // ADR 0040 ("para sozinho") continua de pé, agora com uma condição a mais.
+    //
+    // O shadow map NÃO é invalidado aqui de propósito: a animação troca cor de
+    // textura, não silhueta, e o `alphaTest` do cubo é do material, não do
+    // passe de profundidade. Marcar `needsUpdate` traria de volta o passe de
+    // 2048² por quadro que o `autoUpdate = false` existe para evitar.
+    if (animator.advance(now)) drawPending = true;
+    if (animator.hasLive()) animating = true;
 
     if (drawPending) {
       drawPending = false;
@@ -478,7 +502,13 @@ export async function createIsoScene3D(
       if (art.hasSprite) art.material.dispose();
     }
     artByBlock.clear();
-    for (const [id, art] of entries) artByBlock.set(id, art);
+    // A paleta trocou: os clipes antigos apontam para texturas que acabaram de
+    // ser descartadas. Registrar de novo, do zero.
+    animator.clear();
+    for (const [id, art] of entries) {
+      artByBlock.set(id, art);
+      if (art.animation) animator.register(id, art.animation.clip, art.animation.show);
+    }
     // Blocos já na cena podem ter ficado com material velho.
     for (const mesh of meshes.values()) {
       const id = (mesh.userData as { blockId?: string }).blockId;
@@ -515,6 +545,13 @@ export async function createIsoScene3D(
     lastMap = map;
 
     const seen = new Set<string>();
+    /**
+     * Os ids de bloco que estão NO MAPA — não os da paleta.
+     *
+     * É esta distinção que impede o editor de queimar GPU à toa: um bloco
+     * animado que existe só na paleta não mantém o laço de quadro acordado.
+     */
+    const placedBlocks = new Set<string>();
     const cubeAngle = yaw - BASE_YAW;
     let changed = false;
     let minX = Infinity;
@@ -535,6 +572,7 @@ export async function createIsoScene3D(
       let y = 0;
       for (const run of runs) {
         if (run.block !== '') {
+          placedBlocks.add(run.block);
           for (let i = 0; i < run.count; i += 1) {
             const blockY = y + i;
             const meshKey = `${x}:${z}:${blockY}`;
@@ -579,6 +617,11 @@ export async function createIsoScene3D(
     }
 
     if (changed) meshListStale = true;
+
+    // Sempre, não só quando `changed`: o mapa pode ter mudado para OUTRO objeto
+    // com o mesmo conteúdo (o histórico devolve snapshots), e o conjunto ativo
+    // tem de refletir o que está na tela agora.
+    animator.setActive(placedBlocks);
 
     const bounds: MapBounds = Number.isFinite(minX)
       ? { minX, maxX, minZ, maxZ }
@@ -712,6 +755,9 @@ export async function createIsoScene3D(
     for (const mesh of meshes.values()) scene.remove(mesh);
     meshes.clear();
     meshList = [];
+    // Antes de descartar os materiais: os clipes seguram closures sobre as
+    // texturas que estão prestes a sumir.
+    animator.clear();
     for (const [, art] of artByBlock) {
       if (art.hasSprite) art.material.dispose();
     }

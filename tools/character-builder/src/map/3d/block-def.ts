@@ -34,19 +34,40 @@ export interface BlockDef {
    * vermelha).
    */
   readonly hue?: number | undefined;
-  /** URL da spritesheet da animação (v3: texture, ADR 0032). */
+  /**
+   * URL da spritesheet da animação (v3: texture, ADR 0032) — uma tira
+   * horizontal com todos os quadros, sem calha.
+   *
+   * **Quem lê é `cube3d.ts`**, que a transforma numa textura com
+   * `repeat.x = 1/frameCount`; trocar de quadro é mexer no `offset.x`. Até
+   * 2026-08-04 este campo (e os quatro abaixo) atravessava o catálogo inteiro
+   * sem ninguém ler: o mapa desenhava o `base.png`, um quadro parado de uma
+   * animação que o usuário pagou.
+   */
   readonly spritesheetUrl?: string | undefined;
-  /** URL do sidecar de animação com fps e frameCount. */
+  /**
+   * URL do sidecar de animação com fps e frameCount.
+   *
+   * Quem consome é a prévia do laboratório, que busca o JSON para saber quantos
+   * quadros a API de fato devolveu. O editor 3D não busca: `frameCount`, `fps`
+   * e `pingPong` já vêm resolvidos abaixo, na mesma resposta do catálogo.
+   */
   readonly animationUrl?: string | undefined;
-  /** Número de frames da animação (v3: texture). 0 = estático. */
+  /** Número de frames da animação (v3: texture). 0 ou 1 = estático. */
   readonly frameCount?: number | undefined;
-  /** FPS da animação (v3: texture). */
+  /** FPS da animação (v3: texture). Ausente = 8, o default do servidor. */
   readonly fps?: number | undefined;
   /** Ping-pong: vai-e-volta em vez de loop com reset. Default true. */
   readonly pingPong?: boolean | undefined;
   /** false = bloco estático, sem animação. Default true. */
   readonly animated?: boolean | undefined;
-  /** URL da imagem base (estática) quando animated === false. */
+  /**
+   * URL da imagem base (estática).
+   *
+   * Existe mesmo no bloco animado, e não é sobra: é a miniatura da paleta, é a
+   * régua que confere a folha (o quadro dela tem de ter este tamanho) e é o que
+   * o mapa desenha quando a folha não serve.
+   */
   readonly baseUrl?: string | undefined;
 }
 

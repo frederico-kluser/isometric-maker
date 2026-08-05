@@ -35,6 +35,24 @@
  * CÂMERA". Iluminar por cima disso escurece a arte duas vezes e, pior, faz a
  * mesma peça mudar de cor ao girar a câmera, que se lê como bug. A sombra
  * projetada continua existindo — ela cai no CHÃO, ver `grid3d.ts`.
+ *
+ * ## O bloco animado (ADR 0032), que até 2026-08-04 não animava
+ *
+ * A técnica `texture` grava UMA folha horizontal com todos os quadros
+ * (`spritesheet.png`) e um sidecar com fps, contagem e vai-e-volta. Esses campos
+ * atravessavam o catálogo, o `blocks-api.ts` e o `BlockDef` inteiros e morriam
+ * aqui: `spriteCandidates` nunca listou `spritesheetUrl`, então o mapa desenhava
+ * o `base.png` — um quadro parado de uma animação que foi paga.
+ *
+ * Agora a folha vira UMA textura com `repeat.x = 1/n`, e trocar de quadro é
+ * mexer no `offset.x`. Não há troca de material, não há recompilação de shader e
+ * não há UV novo: a geometria é a mesma, compartilhada por proporção, medida do
+ * QUADRO (não da folha). A aritmética — qual quadro no instante t, o vai-e-volta,
+ * e se a folha descreve mesmo este cubo — mora em `block-animation.ts`, que é
+ * puro e testado; aqui fica só o que precisa de GPU.
+ *
+ * Quem chama `advance` é o laço único da cena (`scene3d.ts`), que continua
+ * parando sozinho quando não há bloco animado no mapa (ADR 0040).
  */
 import * as THREE from 'three';
 import {
@@ -49,6 +67,14 @@ import {
   spriteStretchError,
 } from '../../../../../packages/iso-core/src/iso-cube-uv.ts';
 import { makeCubeViewsFromHue } from './cube-canvas.ts';
+import {
+  animationClipOf,
+  checkSheet,
+  frameOffsetU,
+  frameRepeatU,
+  type AnimationClip,
+  type ShowFrame,
+} from './block-animation.ts';
 import type { BlockDef } from './block-def.ts';
 
 // ------------------------------------------------------------------ constantes
@@ -245,6 +271,17 @@ export function canonicalSpriteUrl(block: BlockDef): Promise<string | null> {
 
 // ------------------------------------------------------------------ arte do cubo
 
+/**
+ * O que a cena precisa para animar um bloco.
+ *
+ * `show` já está amarrado à textura deste bloco — o animador não conhece
+ * Three.js e não precisa conhecer.
+ */
+export interface CubeAnimation {
+  readonly clip: AnimationClip;
+  readonly show: ShowFrame;
+}
+
 /** Tudo que um cubo precisa para existir: uma geometria e um material. */
 export interface CubeArt {
   /** Material único — as seis faces usam o mesmo; o UV é que difere. */
@@ -259,14 +296,22 @@ export interface CubeArt {
    * disso evita atribuir à geração o que é proporção.
    */
   readonly stretch: number;
+  /** Presente só no bloco que anima de verdade. Ausente = quadro parado. */
+  readonly animation?: CubeAnimation | undefined;
 }
 
 /**
- * As URLs candidatas a sprite de um bloco, em ordem de preferência.
+ * As URLs candidatas a sprite PARADA de um bloco, em ordem de preferência.
  *
  * `spriteUrls` (as oito vistas do `/rotate`) vem primeiro porque é a única
  * fonte com mais de uma candidata — e portanto a única que precisa da escolha
  * por silhueta. Os demais caminhos têm uma imagem só.
+ *
+ * **`spritesheetUrl` não entra nesta lista, e isso é decisão.** A folha não é
+ * uma candidata a sprite: ela é uma TIRA de n quadros, e enfiá-la aqui pintaria
+ * o cubo com a fileira inteira espremida. O caminho animado (`createAnimatedArt`)
+ * é separado, e o resultado desta função é justamente o que ele usa como quadro
+ * parado — para conferir a folha e para degradar quando ela não serve.
  */
 function spriteCandidates(block: BlockDef): readonly string[] {
   if (block.spriteUrls && block.spriteUrls.length > 0) return block.spriteUrls;
@@ -277,21 +322,101 @@ function spriteCandidates(block: BlockDef): readonly string[] {
 }
 
 /**
- * Monta a arte de um bloco: sprite gerada quando existe, cubo procedural quando
- * não.
+ * Monta a arte ANIMADA de um bloco a partir da folha, ou `null` quando não dá.
  *
- * O caminho é UM só. Antes havia três (quatro faces, textura única, procedural)
- * e eles discordavam sobre o que é a arte de um bloco — o de textura única
- * colava a sprite isométrica inteira em cada face lateral, que é o defeito que
- * esta reescrita corrige. Agora todo bloco é uma sprite isométrica sobre a
- * mesma geometria; o procedural só troca a origem da imagem, do PNG para o
- * rasterizador do iso-core.
+ * `null` não é falha: é a resposta certa para bloco sem folha, bloco de um
+ * quadro só, folha que não carrega e folha que discorda do quadro parado. Em
+ * todos esses casos quem desenha é o caminho normal, com a imagem estática — o
+ * mapa continua funcionando.
+ *
+ * A geometria sai do QUADRO, nunca da folha: uma tira de 9 quadros de 48×53 é
+ * 432×53, e `spriteGeometryFromImage(432, 53)` descreveria um cubo achatado
+ * absurdo. Medido o quadro, o bloco animado cai na MESMA chave de cache de
+ * geometria (`48x53`) que o bloco parado — nenhuma geometria a mais na memória.
+ *
+ * `alphaTest` continua valendo: os quadros vêm com `no_background` e a silhueta
+ * do cubo não preenche o retângulo do quadro.
+ */
+async function createAnimatedArt(
+  block: BlockDef,
+  still: HTMLImageElement | null,
+): Promise<CubeArt | null> {
+  const clip = animationClipOf(block);
+  const url = block.spritesheetUrl;
+  if (!clip || url === undefined || url === '') return null;
+
+  const sheet = await loadImage(url);
+  if (!sheet) {
+    console.warn(
+      `[cubo 3d] ${block.id}: a folha ${url} não carregou — desenhando o quadro parado.`,
+    );
+    return null;
+  }
+
+  const verdict = checkSheet(
+    { width: sheet.naturalWidth, height: sheet.naturalHeight },
+    clip,
+    still ? { width: still.naturalWidth, height: still.naturalHeight } : null,
+  );
+  if (!verdict.ok) {
+    console.warn(`[cubo 3d] ${block.id}: ${verdict.reason} — desenhando o quadro parado.`);
+    return null;
+  }
+
+  const geom = spriteGeometryFromImage(
+    verdict.layout.frameWidth,
+    verdict.layout.frameHeight,
+  );
+  if (!geom) return null;
+
+  const texture = asPixelArt(new THREE.Texture(sheet));
+  // A janela da textura é UM quadro. O UV que a geometria escreve continua indo
+  // de 0 a 1; é a matriz da textura que o traduz para dentro do quadro corrente.
+  texture.repeat.set(frameRepeatU(clip.frameCount), 1);
+  texture.offset.set(0, 0);
+  texture.needsUpdate = true;
+
+  return {
+    material: new THREE.MeshBasicMaterial({
+      map: texture,
+      alphaTest: ALPHA_TEST,
+    }),
+    geometry: spriteGeometry(geom),
+    hasSprite: true,
+    stretch: spriteStretchError(geom),
+    animation: {
+      clip,
+      show: (index: number): void => {
+        texture.offset.x = frameOffsetU(index, clip.frameCount);
+      },
+    },
+  };
+}
+
+/**
+ * Monta a arte de um bloco: folha animada quando existe e serve, sprite gerada
+ * quando existe, cubo procedural quando não há nenhuma das duas.
+ *
+ * O caminho é praticamente UM só. Antes havia três (quatro faces, textura
+ * única, procedural) e eles discordavam sobre o que é a arte de um bloco — o de
+ * textura única colava a sprite isométrica inteira em cada face lateral, que é o
+ * defeito que esta reescrita corrigiu. Hoje todo bloco é uma sprite isométrica
+ * sobre a mesma geometria; o que muda é a origem da imagem — o PNG parado, a
+ * janela sobre a folha, ou o rasterizador do iso-core.
+ *
+ * A sprite parada é escolhida SEMPRE, mesmo em bloco animado: ela é a miniatura
+ * da paleta (`canonicalSpriteUrl`), é a régua que confere a folha, e é o que
+ * sobra quando a folha não serve.
  */
 export async function createCubeArt(block: BlockDef): Promise<CubeArt> {
   const chosen = await pickCanonicalSprite(spriteCandidates(block));
+  if (chosen) chosenSprite.set(block.id, Promise.resolve(chosen.url));
+
+  const animated = await createAnimatedArt(block, chosen?.image ?? null);
+  if (animated) return animated;
+
   if (chosen) {
     const img = chosen.image;
-    chosenSprite.set(block.id, Promise.resolve(chosen.url));
     const geom = spriteGeometryFromImage(img.naturalWidth, img.naturalHeight);
     if (geom) {
       const texture = asPixelArt(new THREE.Texture(img));
@@ -310,6 +435,21 @@ export async function createCubeArt(block: BlockDef): Promise<CubeArt> {
     // cai no procedural em vez de esticar arte que não descreve um volume.
   }
   return proceduralArt(block.hue ?? DEFAULT_HUE);
+}
+
+/**
+ * O sistema pediu menos movimento?
+ *
+ * `prefers-reduced-motion` é o interruptor que a ADR 0040 exige que exista: com
+ * ele ligado nenhum `rAF` fica agendado por causa de animação, e o bloco fica no
+ * quadro 0 — exatamente como era antes desta onda. Fora do navegador (ou num
+ * navegador sem `matchMedia`) a resposta é `false`: o default é animar.
+ */
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 /** Cache do cubo procedural por matiz — o rasterizador é caro para repetir. */

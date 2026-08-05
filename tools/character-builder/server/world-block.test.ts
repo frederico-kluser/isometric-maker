@@ -31,7 +31,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -54,6 +55,10 @@ import {
   worldBlockHash,
   padPngToApiCanvas,
   apiBytesToCanonicalPng,
+  animationPixelBudget,
+  sheetNeedsRepack,
+  repackSpritesheetIfStale,
+  ANIMATION_PIXEL_BUDGET,
   WorldBlockValidationError,
   BLOCK_FACINGS,
   FACING_TO_V3_DIRECTION,
@@ -114,6 +119,29 @@ function makePNGRect(width: number, height: number, fill: number): Buffer {
 
 function makePNG(side: number, fill: number): Buffer {
   return makePNGRect(side, side, fill);
+}
+
+/**
+ * PNG com CABEÇALHO válido e PIXELS podres: o IHDR declara `width×height`, o
+ * IDAT não é zlib nenhum.
+ *
+ * É o reagente que separa "leu o cabeçalho" de "inflou a imagem". `readPngHeader`
+ * abre este arquivo sem reclamar; `decodePngToRgba` estoura no `inflateSync`.
+ * Um caminho que só precisa das dimensões passa por ele em silêncio — e é
+ * exatamente essa a propriedade sob teste.
+ */
+function makePNGCabecalhoValidoPixelsPodres(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', Buffer.from('isto nao e um fluxo zlib, e de proposito')),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 /** Um PNG distinto por seed — é como provamos qual chamada produziu o quê. */
@@ -2515,42 +2543,35 @@ test('packSpritesheet: RGBA cru de forma DESCONHECIDA é erro nomeado, não folh
 });
 
 // ============================================================================
-// BUGS CONHECIDOS — estes testes DOCUMENTAM o comportamento de hoje
+// OS DOIS BUGS QUE ESTAVAM TRANCADOS POR TESTE — agora consertados
 // ============================================================================
 
 /**
- * **Comportamento conhecido a corrigir (world-block.ts:2745-2748).** O guard da
- * animação chama `estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48)`
- * — literal, com o quadro errado (o canônico é 48×53) e sem o `frame_count`.
+ * **Bug consertado (era `estimateByArea(COST_TABLE[...], 48 * 48)`).**
  *
- * Duas coisas, e só uma delas aparece no número:
+ * Eram duas coisas erradas na mesma linha, e só uma delas aparecia no número:
  *
- * 1. O 48×48 literal HOJE não muda o valor: 2304 e 2544 caem os dois ABAIXO do
- *    primeiro ponto medido da tabela (64×64 = 4096), e `estimateByArea` prende
- *    no piso. O literal errado está mascarado pelo clamp — e volta a importar
- *    no dia em que a tabela ganhar um ponto menor.
- * 2. O que de fato subestima é ignorar o `frame_count`: o orçamento do endpoint
- *    é `width × height × frame_count`, e a estimativa é de UM quadro. A conta
- *    sai idêntica para 4, 8 e 16 frames.
+ * 1. O `48*48` literal NÃO mudava o valor: 2304 e 2544 caem os dois abaixo do
+ *    primeiro ponto medido da tabela (64×64 = 4096) e `estimateByArea` prende
+ *    no piso. O literal estava mascarado pelo clamp — e voltaria a importar no
+ *    dia em que a tabela ganhasse um ponto menor. Consertado junto assim mesmo:
+ *    o quadro agora sai do cabeçalho do PNG do cubo base.
+ * 2. O que de fato subestimava era ignorar o `frame_count`. O orçamento do
+ *    endpoint é `width × height × frame_count` (spec vendorizado: "Total pixel
+ *    budget: width × height × frame_count ≤ 524,288") e a estimativa era de UM
+ *    quadro: 0.0221 USD idêntico para 4, 8 e 16 frames.
  *
- * Num repositório cuja regra dura é "nada de custo surpresa", uma estimativa
- * que não se move com o único parâmetro que multiplica o trabalho merece ficar
- * escrita. Este teste NÃO conserta nada: ele tranca o valor atual para que a
- * correção seja visível quando vier.
+ * Preço ESTIMADO, sempre: a própria PixelLab rotula a coluna como
+ * `Estimated Price* (USD)` e avisa que varia com o tempo de GPU.
  */
-test('[bug conhecido] o guard da animação estima 48×48 e ignora o frame_count', async () => {
-  const doQuadroErrado = estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48);
-  const doQuadroCerto = estimateByArea(
-    COST_TABLE['animate-with-text-v3'],
-    BLOCK_GEOMETRY.spriteWidth * BLOCK_GEOMETRY.spriteHeight,
-  );
-  // O literal errado está mascarado: os dois caem no piso da tabela.
+test('a estimativa da animação entra com o frame_count e com o quadro real', async () => {
+  // A fórmula do orçamento é a do spec, não uma invenção do módulo.
   assert.equal(
-    doQuadroErrado.point,
-    doQuadroCerto.point,
-    'hoje 48×48 e 48×53 dão o MESMO ponto — o clamp esconde o literal errado',
+    animationPixelBudget(BLOCK_GEOMETRY.spriteWidth, BLOCK_GEOMETRY.spriteHeight, 8),
+    BLOCK_GEOMETRY.spriteWidth * BLOCK_GEOMETRY.spriteHeight * 8,
   );
 
+  const deUmQuadroSo = estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48);
   const pontos: string[] = [];
   for (const frameCount of [4, 8, 16] as const) {
     const dir = tmpDir();
@@ -2561,6 +2582,14 @@ test('[bug conhecido] o guard da animação estima 48×48 e ignora o frame_count
       );
       const linha = logs.find((l) => l.includes('animate-with-text-v3'));
       assert.ok(linha, `o guard da animação tem que logar para ${frameCount} frames`);
+      assert.match(
+        linha,
+        new RegExp(
+          `${frameCount} frames de ${BLOCK_GEOMETRY.spriteWidth}×${BLOCK_GEOMETRY.spriteHeight}`,
+        ),
+        'o rótulo tem que dizer QUANTOS quadros e de que tamanho',
+      );
+      assert.match(linha, /preço estimado/, 'preço é estimativa, e o rótulo diz isso');
       const m = /: ([0-9.]+) USD/.exec(linha);
       assert.ok(m?.[1], `não achei o valor em "${linha}"`);
       pontos.push(m[1]);
@@ -2569,37 +2598,43 @@ test('[bug conhecido] o guard da animação estima 48×48 e ignora o frame_count
     }
   }
 
-  assert.equal(
-    new Set(pontos).size,
-    1,
-    `a estimativa não se move com o frame_count: ${pontos.join(', ')}`,
-  );
-  assert.equal(pontos[0], doQuadroErrado.point.toFixed(4), 'é o valor de um quadro só');
-
-  // E o que a área REAL do trabalho renderia, se o frame_count entrasse.
-  const comFrames = estimateByArea(
-    COST_TABLE['animate-with-text-v3'],
-    BLOCK_GEOMETRY.spriteWidth * BLOCK_GEOMETRY.spriteHeight * 8,
+  // Agora a estimativa SE MOVE com o único parâmetro que multiplica o trabalho.
+  assert.ok(
+    Number(pontos[0]) > deUmQuadroSo.point,
+    `4 frames (${pontos[0]}) tem de custar mais que um quadro só (${deUmQuadroSo.point})`,
   );
   assert.ok(
-    comFrames.point > doQuadroErrado.point,
-    'a estimativa de hoje é a MENOR das duas — ela subestima, nunca superestima',
+    Number(pontos[1]) > Number(pontos[0]),
+    `8 frames (${pontos[1]}) tem de custar mais que 4 (${pontos[0]})`,
   );
+  // 8 e 16 empatam, e não é bug: 48×53×8 = 20 352 já passa do ÚLTIMO ponto
+  // medido da tabela (128×128 = 16 384), e `estimateByArea` prende no teto em
+  // vez de extrapolar — inventar número fora da faixa medida é como se estoura
+  // orçamento. O empate é o clamp declarado, não a estimativa parada.
+  assert.equal(pontos[1], pontos[2], '8 e 16 frames prendem no teto da tabela medida');
+
+  // O valor exato é o da área real do trabalho.
+  const esperado8 = estimateByArea(
+    COST_TABLE['animate-with-text-v3'],
+    animationPixelBudget(BLOCK_GEOMETRY.spriteWidth, BLOCK_GEOMETRY.spriteHeight, 8),
+  );
+  assert.equal(pontos[1], esperado8.point.toFixed(4));
+  // O número que esta correção troca: 0.0221 → 0.0424 (preço estimado).
+  assert.equal(deUmQuadroSo.point.toFixed(4), '0.0221');
+  assert.equal(esperado8.point.toFixed(4), '0.0424');
 });
 
 /**
- * **Comportamento conhecido a corrigir (world-block.ts:1420 e 1444).** No ramo
- * `texture` de `listWorldBlocks` a geometria publicada é a constante
- * `MANIFEST_GEOMETRY`, e não a que está GRAVADA no manifesto — enquanto o ramo
- * `views` (linha 1464) e o v2 (linha 1481) leem `manifest.geometry ??
- * MANIFEST_GEOMETRY`.
+ * **Bug consertado (era `geometry: MANIFEST_GEOMETRY` no ramo `texture`).**
  *
- * Hoje é invisível porque a constante coincide com o que os blocos em disco
- * têm. Deixa de ser no dia em que a geometria do projeto mudar: os blocos
- * PAGOS com a geometria antiga passam a ser publicados com a nova, e o editor
- * desenha arte comprada na projeção errada sem nada reclamar.
+ * `listWorldBlocks` publicava a constante do módulo por cima da geometria
+ * GRAVADA, enquanto o ramo `views` e o v2 já liam `manifest.geometry ??
+ * MANIFEST_GEOMETRY`. Era invisível só porque a constante coincide com o que os
+ * blocos em disco têm: no dia em que a geometria do projeto mudasse, os blocos
+ * PAGOS com a antiga passariam a ser publicados com a nova, e o editor
+ * desenharia arte comprada na projeção errada sem nada reclamar.
  */
-test('[bug conhecido] o catálogo ignora a geometria gravada no manifesto de TEXTURA', async () => {
+test('o catálogo respeita a geometria gravada no manifesto de TEXTURA', async () => {
   const dir = tmpDir();
   try {
     const assets = join(dir, 'assets');
@@ -2611,7 +2646,7 @@ test('[bug conhecido] o catálogo ignora a geometria gravada no manifesto de TEX
       spriteHeight: 72,
     };
 
-    // Um bloco de TEXTURA cuja geometria em disco NÃO é a constante.
+    // Um bloco de TEXTURA animado cuja geometria em disco NÃO é a constante.
     const hashTextura = 'dddddddddddddddd';
     const dirTextura = join(assets, 'world-blocks', hashTextura);
     mkdirSync(dirTextura, { recursive: true });
@@ -2631,8 +2666,28 @@ test('[bug conhecido] o catálogo ignora a geometria gravada no manifesto de TEX
     );
     writeFileSync(join(dirTextura, 'spritesheet.png'), 'png');
 
-    // O MESMO manifesto de geometria, num bloco de VISTAS — o ramo que lê o
-    // manifesto. É o contraste que prova que a divergência é do ramo texture.
+    // E um bloco de TEXTURA estático (frameCount 0) — o outro ramo corrigido.
+    const hashParado = 'cccccccccccccccc';
+    const dirParado = join(assets, 'world-blocks', hashParado);
+    mkdirSync(dirParado, { recursive: true });
+    writeFileSync(
+      join(dirParado, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash: hashParado,
+        technique: 'texture',
+        description: 'bloco pago sem animação, geometria antiga',
+        geometry: geometriaGravada,
+        action: 'x',
+        animated: false,
+        frameCount: 0,
+        fps: 8,
+      }),
+    );
+    writeFileSync(join(dirParado, 'base.png'), 'png');
+
+    // O MESMO manifesto de geometria, num bloco de VISTAS — o ramo que sempre
+    // leu o manifesto. É o contraste que prova que os três concordam agora.
     const hashVistas = 'eeeeeeeeeeeeeeee';
     const dirVistas = join(assets, 'world-blocks', hashVistas);
     mkdirSync(dirVistas, { recursive: true });
@@ -2651,23 +2706,745 @@ test('[bug conhecido] o catálogo ignora a geometria gravada no manifesto de TEX
 
     const list = await listWorldBlocks(assets);
     const textura = list.find((b) => b.hash === hashTextura);
+    const parado = list.find((b) => b.hash === hashParado);
     const vistas = list.find((b) => b.hash === hashVistas);
-    assert.ok(textura && vistas);
+    assert.ok(textura && parado && vistas);
 
-    // O ramo `views` respeita o que está gravado…
-    assert.deepEqual(vistas.geometry, geometriaGravada);
-    // …e o ramo `texture` SOBRESCREVE com a constante do módulo.
-    assert.equal(
-      textura.geometry.spriteHeight,
-      BLOCK_GEOMETRY.spriteHeight,
-      'comportamento de hoje: a constante ganha do manifesto',
+    assert.deepEqual(vistas.geometry, geometriaGravada, 'ramo views (nunca teve o bug)');
+    assert.deepEqual(textura.geometry, geometriaGravada, 'ramo texture ANIMADO');
+    assert.deepEqual(parado.geometry, geometriaGravada, 'ramo texture ESTÁTICO');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Manifesto SEM geometria continua caindo na constante — o `??` é piso, não
+ * substituição. Blocos de gerações anteriores existem em disco assim.
+ */
+test('manifesto de textura sem geometria cai na constante do módulo', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'abababababababab';
+    const blockPath = join(assets, 'world-blocks', hash);
+    mkdirSync(blockPath, { recursive: true });
+    writeFileSync(
+      join(blockPath, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash,
+        technique: 'texture',
+        description: 'bloco antigo sem geometria no manifesto',
+        action: 'x',
+        animated: true,
+        frameCount: 4,
+        fps: 8,
+      }),
     );
-    assert.notDeepEqual(
-      textura.geometry,
-      geometriaGravada,
-      'este assert é a DOCUMENTAÇÃO do bug — quando ele falhar, o bug foi corrigido',
+    writeFileSync(join(blockPath, 'spritesheet.png'), 'png');
+
+    const list = await listWorldBlocks(assets);
+    const bloco = list.find((b) => b.hash === hash);
+    assert.ok(bloco);
+    assert.equal(bloco.geometry.spriteWidth, BLOCK_GEOMETRY.spriteWidth);
+    assert.equal(bloco.geometry.spriteHeight, BLOCK_GEOMETRY.spriteHeight);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// COEXISTÊNCIA DE FOLHAS ANTIGAS E NOVAS
+// ============================================================================
+
+/**
+ * A decisão de re-empacotar é PURA e por conteúdo — nada de flag de migração.
+ *
+ * O caso real: `a880b32d82456c4e` tem 9 frames de 48×53 em disco e uma folha
+ * 432×48 declarando quadro 48×48, gravada pelo código antigo que assumia o
+ * quadro quadrado.
+ */
+test('sheetNeedsRepack detecta a folha que discorda dos frames, e só ela', () => {
+  // Nove PNGs em frames/, o primeiro deles 48×53. A função não pergunta mais
+  // nada sobre os outros oito — e nunca perguntou.
+  const frames53 = { count: 9, first: { width: 48, height: 53 } };
+  const semFrames = { count: 0, first: null };
+
+  // O caso real em disco: quadro 48×48 declarado sobre frames 48×53.
+  assert.match(
+    sheetNeedsRepack(
+      { frameWidth: 48, frameHeight: 48, frameCount: 9, sheetWidth: 432, sheetHeight: 48 },
+      frames53,
+    ) ?? '',
+    /não bate com o dos frames/,
+  );
+
+  // A folha correta: nada a fazer. É isto que torna o conserto idempotente.
+  assert.equal(
+    sheetNeedsRepack(
+      { frameWidth: 48, frameHeight: 53, frameCount: 9, sheetWidth: 432, sheetHeight: 53 },
+      frames53,
+    ),
+    null,
+  );
+
+  // Contagem divergente (a API devolveu menos quadros do que a folha declara).
+  assert.match(
+    sheetNeedsRepack(
+      { frameWidth: 48, frameHeight: 53, frameCount: 8, sheetWidth: 384, sheetHeight: 53 },
+      frames53,
+    ) ?? '',
+    /declara 8 quadros e há 9/,
+  );
+
+  // Atlas ilegível, com frames presentes: reescreve.
+  assert.match(sheetNeedsRepack(null, frames53) ?? '', /não há spritesheet\.json/);
+
+  // SEM frames em disco não há de onde re-empacotar: não mexe em nada. Refazer
+  // a folha a partir dela mesma seria apagar arte paga.
+  assert.equal(sheetNeedsRepack(null, semFrames), null);
+  assert.equal(
+    sheetNeedsRepack(
+      { frameWidth: 48, frameHeight: 48, frameCount: 9, sheetWidth: 432, sheetHeight: 48 },
+      semFrames,
+    ),
+    null,
+  );
+  // Frames contados mas nenhum legível: mesma degradação — não se toca em nada.
+  assert.equal(
+    sheetNeedsRepack(
+      { frameWidth: 48, frameHeight: 48, frameCount: 9, sheetWidth: 432, sheetHeight: 48 },
+      { count: 9, first: null },
+    ),
+    null,
+  );
+});
+
+/**
+ * O re-empacotamento de verdade, na forma exata das duas folhas legadas: 9
+ * quadros de 48×53 em `frames/`, folha 432×48 ao lado.
+ *
+ * Prova quatro coisas: a folha volta a 432×53, o atlas volta a declarar o
+ * quadro certo, `animation.json` e os PNGs de `frames/` NÃO são tocados, e uma
+ * segunda passada não escreve nada.
+ */
+test('a folha legada é re-empacotada a partir de frames/, sem tocar no que já está certo', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'a880b32d82456c4e';
+    const blockPath = join(assets, 'world-blocks', hash);
+    const framesPath = join(blockPath, 'frames');
+    mkdirSync(framesPath, { recursive: true });
+
+    const w = BLOCK_GEOMETRY.spriteWidth;
+    const h = BLOCK_GEOMETRY.spriteHeight;
+    const contagem = 9;
+    for (let i = 0; i < contagem; i += 1) {
+      writeFileSync(join(framesPath, `frame_${String(i).padStart(3, '0')}.png`), makePNGRect(w, h, i + 1));
+    }
+    const framesAntes = Array.from({ length: contagem }, (_, i) =>
+      readFileSync(join(framesPath, `frame_${String(i).padStart(3, '0')}.png`)),
+    );
+
+    // A folha do código antigo: quadro quadrado, cinco linhas da base cortadas.
+    writeFileSync(join(blockPath, 'spritesheet.png'), makePNGRect(w * contagem, w, 9));
+    writeFileSync(
+      join(blockPath, 'spritesheet.json'),
+      JSON.stringify({
+        frames: Object.fromEntries(
+          Array.from({ length: contagem }, (_, i) => [
+            `frame_${String(i).padStart(3, '0')}`,
+            { frame: { x: i * w, y: 0, w, h: w }, rotated: false, trimmed: false },
+          ]),
+        ),
+        meta: { image: 'spritesheet.png', size: { w: w * contagem, h: w } },
+      }),
+    );
+    const sidecar = JSON.stringify({ fps: 8, frameCount: contagem, action: 'gotas', pingPong: true });
+    writeFileSync(join(blockPath, 'animation.json'), sidecar);
+    writeFileSync(join(blockPath, 'base.png'), makePNGRect(w, h, 42));
+    writeFileSync(
+      join(blockPath, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash,
+        technique: 'texture',
+        description: 'bloco de gero',
+        geometry: {
+          tileWidth: BLOCK_GEOMETRY.tileWidth,
+          tileHeight: BLOCK_GEOMETRY.tileHeight,
+          cubeHeight: BLOCK_GEOMETRY.cubeHeight,
+          spriteWidth: w,
+          spriteHeight: h,
+        },
+        action: 'gotas',
+        animated: true,
+        frameCount: contagem,
+        fps: 8,
+      }),
+    );
+
+    const logs: string[] = [];
+    const list = await listWorldBlocks(assets, (m) => logs.push(m));
+    assert.equal(list.length, 1, 'o bloco continua no catálogo');
+    assert.equal(list[0]?.spritesheetUrl, `/world-blocks/${hash}/spritesheet.png`);
+
+    // A folha agora tem a altura REAL do quadro.
+    const folha = readPngHeader(readFileSync(join(blockPath, 'spritesheet.png')));
+    assert.equal(folha.width, w * contagem);
+    assert.equal(folha.height, h, 'as cinco linhas da base voltaram para a folha');
+
+    const atlas = JSON.parse(readFileSync(join(blockPath, 'spritesheet.json'), 'utf-8')) as {
+      frames: Record<string, { frame: { w: number; h: number } }>;
+      meta: { size: { w: number; h: number } };
+    };
+    assert.deepEqual(atlas.meta.size, { w: w * contagem, h });
+    assert.deepEqual(atlas.frames['frame_000']?.frame, { x: 0, y: 0, w, h });
+    assert.equal(Object.keys(atlas.frames).length, contagem);
+
+    // O que já estava certo não foi tocado — arte paga não se reescreve.
+    assert.equal(readFileSync(join(blockPath, 'animation.json'), 'utf-8'), sidecar);
+    for (let i = 0; i < contagem; i += 1) {
+      assert.deepEqual(
+        readFileSync(join(framesPath, `frame_${String(i).padStart(3, '0')}.png`)),
+        framesAntes[i],
+        `frame_${i} não pode ser reescrito`,
+      );
+    }
+    assert.ok(
+      logs.some((l) => l.includes('re-empacotada')),
+      'o re-empacotamento tem de aparecer no log',
+    );
+
+    // IDEMPOTENTE: a segunda passada não reescreve nada.
+    const folhaBytes = readFileSync(join(blockPath, 'spritesheet.png'));
+    const atlasBytes = readFileSync(join(blockPath, 'spritesheet.json'));
+    const logs2: string[] = [];
+    await listWorldBlocks(assets, (m) => logs2.push(m));
+    assert.deepEqual(readFileSync(join(blockPath, 'spritesheet.png')), folhaBytes);
+    assert.deepEqual(readFileSync(join(blockPath, 'spritesheet.json')), atlasBytes);
+    assert.ok(
+      !logs2.some((l) => l.includes('re-empacotada')),
+      'a segunda passada não pode re-empacotar nada',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/**
+ * Bloco de textura SEM `frames/` (ou com folha ilegível) não pode derrubar o
+ * catálogo: ele continua listado, e quem degrada para o quadro parado é o
+ * editor.
+ */
+test('bloco de textura sem frames/ não é re-empacotado nem some do catálogo', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'fefefefefefefefe';
+    const blockPath = join(assets, 'world-blocks', hash);
+    mkdirSync(blockPath, { recursive: true });
+    const folhaOriginal = Buffer.from('nem PNG isto é');
+    writeFileSync(join(blockPath, 'spritesheet.png'), folhaOriginal);
+    writeFileSync(
+      join(blockPath, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash,
+        technique: 'texture',
+        description: 'bloco sem frames em disco',
+        action: 'x',
+        animated: true,
+        frameCount: 4,
+        fps: 8,
+      }),
+    );
+
+    const list = await listWorldBlocks(assets);
+    assert.equal(list.length, 1, 'o bloco continua listado');
+    assert.deepEqual(
+      readFileSync(join(blockPath, 'spritesheet.png')),
+      folhaOriginal,
+      'sem frames não há o que re-empacotar: a folha fica como está',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Depois de uma geração normal a folha já nasce coerente com os frames — o
+ * re-empacotamento não tem o que fazer. É o teste que impede a checagem de
+ * virar reescrita a cada leitura do catálogo.
+ */
+test('folha recém-gerada não é re-empacotada', async () => {
+  const dir = tmpDir();
+  try {
+    const result = await withFallbackAction(() =>
+      runWorldBlock(new FakeClient(), textureConfig(), opts(dir)),
+    );
+    const assets = join(dir, 'assets');
+    const antes = readFileSync(blockFile(dir, result.hash, 'spritesheet.png'));
+    const logs: string[] = [];
+    await listWorldBlocks(assets, (m) => logs.push(m));
+    assert.deepEqual(readFileSync(blockFile(dir, result.hash, 'spritesheet.png')), antes);
+    assert.ok(!logs.some((l) => l.includes('re-empacotada')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------- concorrência
+
+const FRAME_W = BLOCK_GEOMETRY.spriteWidth;
+const FRAME_H = BLOCK_GEOMETRY.spriteHeight;
+
+/** Grava como o código de produção grava: temporário + rename, nunca truncando. */
+function escreveAtomico(path: string, data: Buffer | string): void {
+  const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`;
+  writeFileSync(tmp, data);
+  renameSync(tmp, path);
+}
+
+function atlasJson(frameW: number, frameH: number, count: number): string {
+  return JSON.stringify({
+    frames: Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [
+        `frame_${String(i).padStart(3, '0')}`,
+        {
+          frame: { x: i * frameW, y: 0, w: frameW, h: frameH },
+          rotated: false,
+          trimmed: false,
+        },
+      ]),
+    ),
+    meta: { image: 'spritesheet.png', size: { w: frameW * count, h: frameH } },
+  });
+}
+
+/**
+ * Um bloco de textura pronto em disco, com `frames/` íntegros e a folha no
+ * estado que o teste pedir.
+ */
+function montaBlocoDeTextura(
+  assets: string,
+  hash: string,
+  opcoes: {
+    readonly count?: number;
+    readonly frames?: (i: number) => Buffer;
+    readonly sidecarFrameCount?: number | null;
+  } = {},
+): { blockPath: string; framesPath: string } {
+  const count = opcoes.count ?? 9;
+  const blockPath = join(assets, 'world-blocks', hash);
+  const framesPath = join(blockPath, 'frames');
+  mkdirSync(framesPath, { recursive: true });
+  for (let i = 0; i < count; i += 1) {
+    writeFileSync(
+      join(framesPath, `frame_${String(i).padStart(3, '0')}.png`),
+      opcoes.frames ? opcoes.frames(i) : makePNGRect(FRAME_W, FRAME_H, i + 1),
+    );
+  }
+  const sidecarCount =
+    opcoes.sidecarFrameCount === undefined ? count : opcoes.sidecarFrameCount;
+  if (sidecarCount !== null) {
+    writeFileSync(
+      join(blockPath, 'animation.json'),
+      JSON.stringify({ fps: 8, frameCount: sidecarCount, action: 'pulsa', pingPong: true }),
+    );
+  }
+  writeFileSync(join(blockPath, 'base.png'), makePNGRect(FRAME_W, FRAME_H, 42));
+  writeFileSync(
+    join(blockPath, 'block.json'),
+    JSON.stringify({
+      version: 3,
+      hash,
+      technique: 'texture',
+      description: 'bloco de teste de concorrência',
+      geometry: {
+        tileWidth: BLOCK_GEOMETRY.tileWidth,
+        tileHeight: BLOCK_GEOMETRY.tileHeight,
+        cubeHeight: BLOCK_GEOMETRY.cubeHeight,
+        spriteWidth: FRAME_W,
+        spriteHeight: FRAME_H,
+      },
+      action: 'pulsa',
+      animated: true,
+      frameCount: sidecarCount ?? count,
+      fps: 8,
+    }),
+  );
+  return { blockPath, framesPath };
+}
+
+/** Devolve a folha ao estado LEGADO (quadro quadrado), sem nunca truncar. */
+function deixaFolhaObsoleta(blockPath: string, count: number): void {
+  escreveAtomico(join(blockPath, 'spritesheet.png'), makePNGRect(FRAME_W * count, FRAME_W, 9));
+  escreveAtomico(join(blockPath, 'spritesheet.json'), atlasJson(FRAME_W, FRAME_W, count));
+}
+
+/**
+ * DEFEITO 1 — a escrita da folha acontece dentro de um caminho de LEITURA, e
+ * até 2026-08-04 era um `writeFile` puro.
+ *
+ * `repackSpritesheetIfStale` roda dentro de `listWorldBlocks`, que atende
+ * `GET /api/world-blocks`; ao mesmo tempo, `GET /world-blocks/<hash>/spritesheet.png`
+ * lê o MESMO arquivo com um `readFile` simples. Numa medição de 40 rodadas com
+ * um leitor concorrente, 153 de 1372 leituras vieram truncadas — tamanhos 0
+ * (a janela do `O_TRUNC`), 7965 e 8192, para um arquivo final de 8296. Onze por
+ * cento das leituras entregavam ao navegador um PNG quebrado, `img.onerror`
+ * disparava e o bloco degradava para quadro parado.
+ *
+ * O leitor aqui é o mesmo `readFile` do servidor. A asserção não é sobre
+ * tamanho: cada leitura é DECODIFICADA. Um PNG cortado no meio estoura no
+ * inflate, e é isso que se conta.
+ */
+test('DEFEITO 1: leitor concorrente nunca pega a folha pela metade', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000001';
+    const count = 9;
+    const { blockPath } = montaBlocoDeTextura(assets, hash, { count });
+    const sheetFile = join(blockPath, 'spritesheet.png');
+    deixaFolhaObsoleta(blockPath, count);
+
+    const tamanhos = new Set<number>();
+    let leituras = 0;
+    let quebradas = 0;
+    let ausentes = 0;
+    let lendo = true;
+
+    const leitor = (async () => {
+      while (lendo && leituras < 4_000) {
+        let bytes: Buffer;
+        try {
+          bytes = await readFile(sheetFile);
+        } catch {
+          // Com rename o arquivo NUNCA some: o alvo já existe e é substituído
+          // num passo só. Um ENOENT aqui já seria o defeito.
+          ausentes += 1;
+          continue;
+        }
+        leituras += 1;
+        tamanhos.add(bytes.length);
+        try {
+          decodePngToRgba(bytes);
+        } catch {
+          quebradas += 1;
+        }
+      }
+    })();
+
+    // 30 rodadas de re-empacotamento, cada uma precedida de um retorno ao
+    // estado obsoleto (também atômico — um writeFile aqui faria o teste acusar
+    // a si mesmo).
+    for (let rodada = 0; rodada < 30; rodada += 1) {
+      deixaFolhaObsoleta(blockPath, count);
+      const reescreveu = await repackSpritesheetIfStale(assets, hash);
+      assert.equal(reescreveu, true, `rodada ${rodada}: a folha obsoleta tinha de ser reescrita`);
+    }
+    lendo = false;
+    await leitor;
+
+    assert.ok(leituras > 50, `o leitor precisa ter observado a janela de escrita (${leituras})`);
+    assert.equal(ausentes, 0, 'a folha nunca pode sumir do disco: rename substitui em um passo');
+    assert.equal(quebradas, 0, `nenhuma leitura pode vir truncada (${quebradas}/${leituras})`);
+    // Sem rename, o `O_TRUNC` deixa aparecer 0 e os tamanhos parciais. Com
+    // rename só existem os dois arquivos INTEIROS: o obsoleto e o corrigido.
+    assert.ok(
+      tamanhos.size <= 2,
+      `só o arquivo antigo e o novo podem ser observados, vieram ${[...tamanhos].join(', ')}`,
+    );
+    assert.ok(!tamanhos.has(0), 'tamanho 0 é a janela do O_TRUNC, e ela não pode existir');
+
+    const folha = readPngHeader(readFileSync(sheetFile));
+    assert.deepEqual({ w: folha.width, h: folha.height }, { w: FRAME_W * count, h: FRAME_H });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * DEFEITO 1, segunda metade — `rename` deixa cada arquivo íntegro, mas não
+ * impede dois re-empacotamentos SIMULTÂNEOS do mesmo bloco de decidirem sobre o
+ * mesmo estado obsoleto e escreverem um por cima do outro.
+ *
+ * Dois `GET /api/world-blocks` sobrepostos são o caso normal, não o exótico:
+ * duas abas, ou o poll de 3 s do painel de blocos cruzando com o `loadPalette()`
+ * do editor de mapa. Com a serialização por bloco, o segundo espera, relê o
+ * atlas já corrigido e conclui — corretamente — que não há nada a fazer.
+ */
+test('DEFEITO 1: re-empacotamentos concorrentes do mesmo bloco são serializados', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000002';
+    const count = 9;
+    const { blockPath } = montaBlocoDeTextura(assets, hash, { count });
+    deixaFolhaObsoleta(blockPath, count);
+
+    const resultados = await Promise.all(
+      Array.from({ length: 8 }, () => repackSpritesheetIfStale(assets, hash)),
+    );
+    assert.equal(
+      resultados.filter(Boolean).length,
+      1,
+      'exatamente UM dos oito pode ter reescrito a folha; os outros releem e desistem',
+    );
+
+    const folha = readPngHeader(readFileSync(join(blockPath, 'spritesheet.png')));
+    assert.deepEqual({ w: folha.width, h: folha.height }, { w: FRAME_W * count, h: FRAME_H });
+    const atlas = JSON.parse(
+      readFileSync(join(blockPath, 'spritesheet.json'), 'utf-8'),
+    ) as { meta: { size: { w: number; h: number } } };
+    assert.deepEqual(atlas.meta.size, { w: FRAME_W * count, h: FRAME_H });
+
+    // O mesmo pelo caminho por onde o servidor de fato passa.
+    deixaFolhaObsoleta(blockPath, count);
+    const listas = await Promise.all(Array.from({ length: 6 }, () => listWorldBlocks(assets)));
+    for (const l of listas) assert.equal(l.length, 1);
+    const depois = readPngHeader(readFileSync(join(blockPath, 'spritesheet.png')));
+    assert.deepEqual({ w: depois.width, h: depois.height }, { w: FRAME_W * count, h: FRAME_H });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * DEFEITO 2 — a checagem decodificava os pixels de TODOS os quadros só para
+ * comparar dimensões.
+ *
+ * Medido: 50 blocos de 9 quadros com o catálogo já correto levaram o
+ * `GET /api/world-blocks` de 8,7–13,4 ms para 130–147 ms; dos 450 quadros,
+ * `decodePngToRgba` custava 89 ms contra 2,5 ms de `readPngHeader`.
+ *
+ * Aqui a prova não é cronômetro — é comportamento. Os frames têm cabeçalho
+ * válido e pixels podres: quem só lê o cabeçalho passa em silêncio, quem infla
+ * estoura. As duas metades do teste são o par:
+ *   - folha COERENTE  → nada a fazer, nenhum log: não decodificou.
+ *   - folha OBSOLETA  → precisa reescrever, aí sim decodifica, e o erro aparece.
+ */
+test('DEFEITO 2: a checagem lê o cabeçalho, e só decodifica quando vai reescrever', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000003';
+    const count = 9;
+    const { blockPath } = montaBlocoDeTextura(assets, hash, {
+      count,
+      frames: () => makePNGCabecalhoValidoPixelsPodres(FRAME_W, FRAME_H),
+    });
+
+    // Folha e atlas COERENTES com o que os cabeçalhos declaram.
+    const folhaBoa = makePNGRect(FRAME_W * count, FRAME_H, 3);
+    escreveAtomico(join(blockPath, 'spritesheet.png'), folhaBoa);
+    escreveAtomico(join(blockPath, 'spritesheet.json'), atlasJson(FRAME_W, FRAME_H, count));
+
+    const logs: string[] = [];
+    const reescreveu = await repackSpritesheetIfStale(assets, hash, (m) => logs.push(m));
+    assert.equal(reescreveu, false, 'não há nada a fazer: a folha já bate com os frames');
+    assert.deepEqual(
+      logs,
+      [],
+      'nenhum log significa que os pixels NÃO foram inflados — se fossem, o ' +
+        'IDAT podre teria estourado e reclamado',
+    );
+    assert.deepEqual(
+      readFileSync(join(blockPath, 'spritesheet.png')),
+      folhaBoa,
+      'a folha não pode ser tocada',
+    );
+
+    // Agora a folha discorda: o caminho raro precisa dos pixels, e aí o IDAT
+    // podre é descoberto — com log, e sem destruir a folha que existe.
+    deixaFolhaObsoleta(blockPath, count);
+    const folhaObsoleta = readFileSync(join(blockPath, 'spritesheet.png'));
+    const logs2: string[] = [];
+    const reescreveu2 = await repackSpritesheetIfStale(assets, hash, (m) => logs2.push(m));
+    assert.equal(reescreveu2, false, 'frames ilegíveis não viram folha');
+    assert.ok(
+      logs2.some((l) => l.includes('não se deixam decodificar')),
+      `o caminho de reescrita TEM de decodificar e reclamar: ${logs2.join(' | ')}`,
+    );
+    assert.deepEqual(
+      readFileSync(join(blockPath, 'spritesheet.png')),
+      folhaObsoleta,
+      'falhar ao decodificar não pode apagar a folha que estava lá',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * DEFEITO 3 — `api.ts` chama `listWorldBlocks(ASSETS)` sem `onLog`, então a
+ * mensagem do re-empacotamento não chegava a lugar nenhum. É o ÚNICO rastro de
+ * que uma folha derivada de arte paga foi reescrita, e a doc da função dizia
+ * "falha em silêncio (com log)" sobre um log que em produção não existia.
+ *
+ * `console.warn` sai por stderr — fd separado do protocolo v8 com prefixo de
+ * tamanho pelo qual o `node --test` transporta os resultados —, então gritar
+ * aqui não corrompe o stream de nenhum arquivo de teste.
+ */
+test('DEFEITO 3: o re-empacotamento grita no stderr mesmo sem onLog', async () => {
+  const dir = tmpDir();
+  const original = console.warn;
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000004';
+    const count = 5;
+    const { blockPath } = montaBlocoDeTextura(assets, hash, { count });
+    deixaFolhaObsoleta(blockPath, count);
+
+    const avisos: string[] = [];
+    console.warn = (...args: unknown[]): void => {
+      avisos.push(args.map((a) => String(a)).join(' '));
+    };
+    // Exatamente como `api.ts` chama: sem onLog.
+    const list = await listWorldBlocks(assets);
+    console.warn = original;
+
+    assert.equal(list.length, 1);
+    assert.ok(
+      avisos.some((a) => a.includes('folha re-empacotada a partir de frames/')),
+      `o re-empacotamento tem de aparecer sem onLog: ${avisos.join(' | ')}`,
+    );
+    assert.ok(
+      avisos.some((a) => a.includes('Nenhuma chamada à API')),
+      'o aviso tem de dizer que nada foi pago de novo',
+    );
+
+    // E o caminho normal continua mudo: gritar a cada leitura do catálogo
+    // treinaria qualquer um a ignorar o aviso.
+    const avisos2: string[] = [];
+    console.warn = (...args: unknown[]): void => {
+      avisos2.push(args.map((a) => String(a)).join(' '));
+    };
+    await listWorldBlocks(assets);
+    console.warn = original;
+    assert.deepEqual(avisos2, [], 'a segunda passada não tem nada a dizer');
+  } finally {
+    console.warn = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * MENOR 2 — `frames/` é o que o `readdir` encontrar, e isso não é a mesma coisa
+ * que o número de quadros pagos. Um `frame_009.png` órfão, deixado por uma
+ * execução interrompida, faria a folha nascer com 10 quadros enquanto o
+ * `animation.json` declara 9; o editor recusaria a folha no `checkSheet` e o
+ * bloco pararia de animar. O sidecar é escrito pela mesma função que grava os
+ * frames, então é ele a autoridade sobre a contagem.
+ */
+test('MENOR: frame órfão não entra na folha — o animation.json manda na contagem', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000005';
+    // 10 PNGs em disco, sidecar declarando 9.
+    const { blockPath, framesPath } = montaBlocoDeTextura(assets, hash, {
+      count: 10,
+      sidecarFrameCount: 9,
+    });
+    deixaFolhaObsoleta(blockPath, 10);
+
+    const logs: string[] = [];
+    assert.equal(await repackSpritesheetIfStale(assets, hash, (m) => logs.push(m)), true);
+
+    const folha = readPngHeader(readFileSync(join(blockPath, 'spritesheet.png')));
+    assert.deepEqual(
+      { w: folha.width, h: folha.height },
+      { w: FRAME_W * 9, h: FRAME_H },
+      'a folha tem os 9 quadros que o sidecar declara, não os 10 arquivos',
+    );
+    const atlas = JSON.parse(
+      readFileSync(join(blockPath, 'spritesheet.json'), 'utf-8'),
+    ) as { frames: Record<string, unknown> };
+    assert.equal(Object.keys(atlas.frames).length, 9);
+    assert.ok(
+      logs.some((l) => l.includes('animation.json declara 9')),
+      `a divergência tem de aparecer: ${logs.join(' | ')}`,
+    );
+    assert.ok(
+      existsSync(join(framesPath, 'frame_009.png')),
+      'o PNG sobrando fica em disco: arte paga não se apaga por conta própria',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * MENOR 3 — até 2026-08-04 `sheetNeedsRepack` só comparava o `.json` com os
+ * frames. Uma folha com os PIXELS corrompidos ao lado de um atlas coerente era
+ * invisível para sempre: o editor recusava a animação e nada nunca reescrevia a
+ * folha. Ler o cabeçalho dela custa o mesmo que já se paga por cada frame.
+ */
+test('MENOR: folha corrompida com atlas coerente é detectada e reescrita', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const hash = 'c0ffee0000000006';
+    const count = 9;
+    const { blockPath } = montaBlocoDeTextura(assets, hash, { count });
+
+    // Atlas PERFEITO; folha que não é PNG nenhum.
+    escreveAtomico(join(blockPath, 'spritesheet.json'), atlasJson(FRAME_W, FRAME_H, count));
+    escreveAtomico(join(blockPath, 'spritesheet.png'), Buffer.from('bytes que já foram um PNG'));
+
+    const logs: string[] = [];
+    assert.equal(await repackSpritesheetIfStale(assets, hash, (m) => logs.push(m)), true);
+    assert.ok(
+      logs.some((l) => l.includes('não se deixa ler como PNG')),
+      `o motivo tem de nomear a folha ilegível: ${logs.join(' | ')}`,
+    );
+    const folha = readPngHeader(readFileSync(join(blockPath, 'spritesheet.png')));
+    assert.deepEqual({ w: folha.width, h: folha.height }, { w: FRAME_W * count, h: FRAME_H });
+
+    // E a folha de tamanho ERRADO com atlas coerente também: os dois discordam
+    // do disco, não um do outro.
+    assert.match(
+      sheetNeedsRepack(
+        { frameWidth: 48, frameHeight: 53, frameCount: 9, sheetWidth: 432, sheetHeight: 53 },
+        { count: 9, first: { width: 48, height: 53 } },
+        { width: 432, height: 48 },
+      ) ?? '',
+      /em disco é 432×48 e o atlas declara 432×53/,
+    );
+    // Sem o terceiro argumento nada muda: quem não quis olhar os bytes continua
+    // decidindo só pelo JSON.
+    assert.equal(
+      sheetNeedsRepack(
+        { frameWidth: 48, frameHeight: 53, frameCount: 9, sheetWidth: 432, sheetHeight: 53 },
+        { count: 9, first: { width: 48, height: 53 } },
+      ),
+      null,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * MENOR 1 — `ANIMATION_PIXEL_BUDGET` era exportado e não tinha um único uso no
+ * repositório. Agora ele é o teto que a submissão da animação confere, e este
+ * teste é quem o mantém honesto: se a geometria do projeto crescer, ou se
+ * `ANIMATION_FRAME_COUNTS` ganhar um valor maior, é aqui que se descobre — e
+ * não num 4xx opaco do fornecedor depois de o cubo já ter sido pago.
+ */
+test('MENOR: todo frameCount do projeto cabe no teto de pixels do endpoint', () => {
+  for (const n of [0, 4, 8, 16] as const) {
+    const usado = animationPixelBudget(FRAME_W, FRAME_H, n);
+    assert.ok(
+      usado <= ANIMATION_PIXEL_BUDGET,
+      `frameCount ${n}: ${usado} px passa do teto ${ANIMATION_PIXEL_BUDGET}`,
+    );
+  }
+  // O teto não é decorativo: o limite de 256×256 do próprio endpoint o estoura.
+  assert.ok(animationPixelBudget(256, 256, 16) > ANIMATION_PIXEL_BUDGET);
+  assert.equal(ANIMATION_PIXEL_BUDGET, 524_288, 'o número é do spec vendorizado');
 });
