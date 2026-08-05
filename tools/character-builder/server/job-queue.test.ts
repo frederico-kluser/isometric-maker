@@ -12,18 +12,25 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { TIER_CONCURRENCY } from "../../pixellab-pipeline/src/cost.ts";
+import { weightFor } from "../../pixellab-pipeline/src/queue.ts";
 import {
+	DEFAULT_CONCURRENCY,
+	ENDPOINT_BY_KIND,
 	JobQueue,
+	SPRITE_LAB_MAX_PARALLEL_CALLS,
 	cellStatusFor,
 	classifyByStatus,
 	defaultStatePath,
 	resolveConcurrency,
+	resolveConcurrencyDecision,
 	weightForDescriptor,
 	type JobDescriptor,
 	type JobQueueOptions,
 	type QueuedJob,
 	type RemoteHandle,
 } from "./job-queue.ts";
+import type { WorldBlockConfig } from "./world-block.ts";
 
 // ---------------------------------------------------------------- utilidades
 
@@ -112,6 +119,97 @@ async function readState(dir: string): Promise<{
 	const raw = await readFile(join(dir, "job-queue.json"), "utf8");
 	return JSON.parse(raw) as { nextSeq: number; jobs: QueuedJob[] };
 }
+
+// ------------------------------------------- medição de simultaneidade real
+
+/**
+ * Enfileira uma mistura e devolve QUANTOS EXECUTORES ficaram em voo ao mesmo
+ * tempo. Os executores travam num portão até a medição terminar, então o
+ * patamar é o teto de admissão da mistura, não uma corrida de quem termina
+ * primeiro.
+ *
+ * A medição tem duas metades, e nenhuma das duas sozinha prova o número:
+ *
+ *   1. `waitFor(live >= expected)` prova o PISO — a fila realmente admite
+ *      tantos ao mesmo tempo. Sem ele, uma máquina carregada faria a medição
+ *      parar num patamar intermediário e o teste viraria falso negativo.
+ *   2. a janela de 30 ms depois dele deixa entrar quem ainda fosse entrar, e o
+ *      `peak` medido depois dela pega o excesso. **Ela só prova o teto quando
+ *      há job SOBRANDO na fila** — se `expected` for igual ao número de jobs
+ *      enfileirados, não existe candidato a mais e a janela é satisfeita à toa.
+ *      Nessas chamadas (a maioria dos braços "DEPOIS" das aceitações) quem
+ *      prova o teto é o PAR: o braço "ANTES", com o modelo antigo, mede um
+ *      patamar menor sobre a mesma mistura, e a assertiva de `inFlightWeight`
+ *      mostra a ocupação exata. A metade sozinha não prova.
+ *
+ * O `expected` é declarado pelo teste de propósito: o critério de aceitação
+ * desta onda é um número, e um número que o próprio harness descobre não pode
+ * falhar quando estiver errado.
+ */
+async function observeParallelism(
+	dir: string,
+	entries: readonly { readonly key: string; readonly descriptor: JobDescriptor }[],
+	overrides: Partial<JobQueueOptions>,
+	expected: number,
+): Promise<{ readonly peak: number; readonly inFlightWeight: number }> {
+	let live = 0;
+	let peak = 0;
+	const gate = deferred();
+	const queue = await openQueue(dir, {
+		...overrides,
+		execute: async () => {
+			live += 1;
+			peak = Math.max(peak, live);
+			await gate.promise;
+			live -= 1;
+		},
+	});
+	try {
+		for (const e of entries) {
+			await queue.enqueue({
+				key: e.key,
+				label: e.key,
+				descriptor: e.descriptor,
+			});
+		}
+		await waitFor(() => live >= expected, `${expected} executores em voo`);
+		await new Promise((r) => setTimeout(r, 30));
+		return { peak, inFlightWeight: queue.stats().inFlightWeight };
+	} finally {
+		gate.resolve();
+		await queue.idle();
+		await queue.close();
+	}
+}
+
+/**
+ * O modelo de peso ANTERIOR, reconstruído a partir da mesma fonte que ele usava
+ * — `COST_TABLE[...].concurrencyWeight` via `weightFor`. Não são números
+ * copiados à mão: se a tabela do pipeline mudar, o "antes" desta comparação
+ * muda junto, como tem de ser.
+ */
+const pesoAntigo = (d: JobDescriptor): number =>
+	weightFor(ENDPOINT_BY_KIND[d.kind]);
+
+/** O teto anterior: DEFAULT_TIER era `t2`. */
+const TETO_ANTIGO = TIER_CONCURRENCY.t2;
+
+const mix = (
+	prefix: string,
+	count: number,
+	make: (i: number) => JobDescriptor,
+): { readonly key: string; readonly descriptor: JobDescriptor }[] =>
+	Array.from({ length: count }, (_, i) => ({
+		key: `${prefix}-${i}`,
+		descriptor: make(i),
+	}));
+
+const spriteLab = (outputs: number) =>
+	(i: number): JobDescriptor => ({
+		kind: "sprite-lab",
+		hash: `h${i}`,
+		config: { description: "x", size: 64, outputs },
+	});
 
 // ---------------------------------------------------------------- FIFO
 
@@ -626,36 +724,444 @@ test("job mais pesado que o teto roda sozinho em vez de travar a fila", async ()
 	});
 });
 
+// ------------------------------------------------ o critério de aceitação
+//
+// O pedido do usuário foi literal: "quero poder rodar mais gerações
+// simultâneas". A única prova disso é CONTAR quantos executores ficam em voo ao
+// mesmo tempo, para misturas de jobs que o editor realmente produz — não
+// afirmar que o semáforo está correto.
+//
+// Cada teste mede as duas calibragens no mesmo cenário: o modelo ANTERIOR
+// (teto t2 = 4, peso da COST_TABLE) e o atual (teto 8, peso = fan-out de
+// chamadas). O número do "antes" não é constante escrita à mão: sai de rodar a
+// fila com o peso antigo.
+
+test("aceitação · 8 poses: de 2 simultâneas para 8", async () => {
+	await withDir(async (dir) => {
+		const poses = mix("pose", 8, (i) => ({
+			kind: "pose",
+			characterId: "heroi",
+			poseId: `p${i}`,
+		}));
+
+		const antes = await observeParallelism(
+			dir,
+			poses,
+			{
+				statePath: join(dir, "antes.json"),
+				concurrency: TETO_ANTIGO,
+				weightOf: pesoAntigo,
+			},
+			2,
+		);
+		const depois = await observeParallelism(
+			dir,
+			poses,
+			{ statePath: join(dir, "depois.json"), concurrency: DEFAULT_CONCURRENCY },
+			8,
+		);
+
+		// animate-character pesava 2 num teto de 4.
+		assert.equal(antes.peak, 2, "ANTES: 8 poses rodavam de duas em duas");
+		// Uma pose é UMA submissão. As oito cabem no teto e rodam juntas — que é
+		// exatamente o que o servidor sem limite nenhum já fazia hoje.
+		assert.equal(depois.peak, 8, "DEPOIS: as oito juntas");
+		assert.equal(depois.inFlightWeight, 8, "teto cheio, sem sobra");
+	});
+});
+
+test("aceitação · 4 blocos de mundo: 2 simultâneos, e o limite é o fan-out", async () => {
+	await withDir(async (dir) => {
+		const blocos = mix("bloco", 4, (i) => ({
+			kind: "world-block",
+			hash: `h${i}`,
+			config: { description: `bloco ${i}` },
+		}));
+
+		const antes = await observeParallelism(
+			dir,
+			blocos,
+			{
+				statePath: join(dir, "antes.json"),
+				concurrency: TETO_ANTIGO,
+				weightOf: pesoAntigo,
+			},
+			2,
+		);
+		const depois = await observeParallelism(
+			dir,
+			blocos,
+			{ statePath: join(dir, "depois.json"), concurrency: DEFAULT_CONCURRENCY },
+			2,
+		);
+
+		assert.equal(antes.peak, 2, "ANTES: create-isometric-tile pesava 2 num teto de 4");
+		// Este é o caso em que a contagem de JOBS não melhora — e o motivo mudou.
+		// Antes eram 2 por acidente de tabela; agora são 2 porque cada bloco
+		// 'chained' já dispara TRÊS create-isometric-tile em paralelo dentro de
+		// si. Dois blocos são 6 chamadas concorrentes, já acima das 4 que são a
+		// única evidência medida. Admitir os quatro seriam 12, e isso seria
+		// inventar folga que ninguém mediu.
+		assert.equal(depois.peak, 2, "DEPOIS: 2 blocos = 6 chamadas concorrentes");
+		assert.equal(depois.inFlightWeight, 6);
+	});
+});
+
+test("aceitação · 1 guarda-roupa + 4 poses: de 1 simultânea para 5", async () => {
+	await withDir(async (dir) => {
+		const entries = [
+			{
+				key: "wardrobe-0",
+				descriptor: {
+					kind: "wardrobe",
+					characterId: "heroi",
+					wardrobeId: "elmo",
+				} as JobDescriptor,
+			},
+			...mix("pose", 4, (i) => ({
+				kind: "pose",
+				characterId: "heroi",
+				poseId: `p${i}`,
+			})),
+		];
+
+		const antes = await observeParallelism(
+			dir,
+			entries,
+			{
+				statePath: join(dir, "antes.json"),
+				concurrency: TETO_ANTIGO,
+				weightOf: pesoAntigo,
+			},
+			1,
+		);
+		const depois = await observeParallelism(
+			dir,
+			entries,
+			{ statePath: join(dir, "depois.json"), concurrency: DEFAULT_CONCURRENCY },
+			5,
+		);
+
+		// O pior caso do modelo antigo: create-character-state pesava 6 num teto
+		// de 4, era clampado, e o guarda-roupa — que faz UMA chamada — segurava
+		// a fila inteira sozinho. Nenhuma pose entrava junto.
+		assert.equal(antes.peak, 1, "ANTES: o guarda-roupa rodava sozinho");
+		assert.equal(depois.peak, 5, "DEPOIS: guarda-roupa e as quatro poses juntos");
+		assert.equal(depois.inFlightWeight, 5);
+	});
+});
+
+test("aceitação · 2 sprite-lab com outputs 4: de 1 simultâneo para 2", async () => {
+	await withDir(async (dir) => {
+		const bancadas = mix("lab", 2, spriteLab(4));
+
+		const antes = await observeParallelism(
+			dir,
+			bancadas,
+			{
+				statePath: join(dir, "antes.json"),
+				concurrency: TETO_ANTIGO,
+				weightOf: pesoAntigo,
+			},
+			1,
+		);
+		const depois = await observeParallelism(
+			dir,
+			bancadas,
+			{ statePath: join(dir, "depois.json"), concurrency: DEFAULT_CONCURRENCY },
+			2,
+		);
+
+		assert.equal(antes.peak, 1, "ANTES: create-character-v3 pesava 3 num teto de 4");
+		// 4 + 4 = 8 chamadas create-character-v3 concorrentes. É o dobro da única
+		// medição que existe (4 passam, 5 dão 429), e é aposta deliberada: a
+		// submissão recusada custa US$ 0,00 e volta para a fila.
+		assert.equal(depois.peak, 2, "DEPOIS: as duas bancadas juntas");
+		assert.equal(depois.inFlightWeight, 8, "teto cheio");
+	});
+});
+
+test("aceitação · o outputs do usuário passou a mudar a admissão", async () => {
+	await withDir(async (dir) => {
+		// No modelo antigo o peso de sprite-lab era 3 fizesse ele 1 ou 4
+		// chamadas: escolher `outputs: 1` não comprava simultaneidade nenhuma.
+		const um = await observeParallelism(
+			dir,
+			mix("lab", 8, spriteLab(1)),
+			{ statePath: join(dir, "um.json"), concurrency: DEFAULT_CONCURRENCY },
+			8,
+		);
+		const dois = await observeParallelism(
+			dir,
+			mix("lab", 8, spriteLab(2)),
+			{ statePath: join(dir, "dois.json"), concurrency: DEFAULT_CONCURRENCY },
+			4,
+		);
+		assert.equal(um.peak, 8, "outputs=1 é uma chamada: oito bancadas juntas");
+		assert.equal(dois.peak, 4, "outputs=2 é duas chamadas: quatro bancadas");
+	});
+});
+
+// ------------------------------------------------ peso maior que o teto
+
+test("peso maior que o teto: roda sozinho, e o clamp é logado", async () => {
+	await withDir(async (dir) => {
+		const logs: string[] = [];
+		// PIXELLAB_TIER=free resolve para 1 — o cenário real deste clamp.
+		const { peak, inFlightWeight } = await observeParallelism(
+			dir,
+			mix("lab", 3, spriteLab(4)),
+			{ concurrency: 1, onLog: (m) => logs.push(m) },
+			1,
+		);
+		assert.equal(peak, 1, "um de cada vez, e a fila não trava");
+		assert.equal(inFlightWeight, 1, "o job clampado ocupa o teto INTEIRO");
+		const clampLogs = logs.filter((m) => m.includes("admitido SOZINHO"));
+		// UM log por ADMISSÃO, não por volta do laço: os três jobs entram, um de
+		// cada vez, e o log sai de `#start`. Um `>= 1` frouxo passaria mesmo se o
+		// log voltasse para antes do `acquire`, onde ele afirma uma admissão que
+		// ainda pode não acontecer (recheque de idempotência dispensando o job) e
+		// se repete a cada volta do laço sobre a mesma cabeça de fila.
+		assert.equal(clampLogs.length, 3, "um log por job admitido — três, nem mais");
+		assert.match(clampLogs[0]!, /faz até 4 chamadas simultâneas e o teto é 1/);
+	});
+});
+
+test("o log do clamp não sai quando o job nem chega a ser admitido", async () => {
+	await withDir(async (dir) => {
+		// O peso é calculado no laço, ANTES do `acquire` e antes do recheque de
+		// idempotência. Enquanto o log saía de lá, este job — que o recheque
+		// dispensa de graça, sem executor nenhum — anunciava "admitido SOZINHO"
+		// sem nunca ter sido admitido. É a assertiva que segura o log em
+		// `#start`; sem ela, mover a linha de volta não quebra nada.
+		const logs: string[] = [];
+		const ran: string[] = [];
+		const queue = await openQueue(dir, {
+			concurrency: 1,
+			onLog: (m) => logs.push(m),
+			stillNeeded: (): boolean => false,
+			execute: async (ctx) => {
+				ran.push(ctx.job.key);
+			},
+		});
+		await queue.enqueue({
+			key: "lab",
+			label: "bancada",
+			descriptor: spriteLab(4)(0),
+		});
+		await queue.idle();
+		assert.deepEqual(ran, [], "o recheque dispensou o job: nada executou");
+		assert.equal(queue.get("lab")?.status, "pronto");
+		assert.deepEqual(
+			logs.filter((m) => m.includes("admitido SOZINHO")),
+			[],
+			"ninguém foi admitido — o log não pode afirmar que foi",
+		);
+		await queue.close();
+	});
+});
+
+test("peso maior que o teto: DOIS pesados nunca entram juntos", async () => {
+	await withDir(async (dir) => {
+		// Clampar no teto (e não abaixo dele) é o que garante isso: o job
+		// clampado zera o disponível do semáforo. Se algum dia alguém clampar
+		// para `teto - 1` "por segurança", dois pesados passam a caber e este
+		// teste cai.
+		const { peak, inFlightWeight } = await observeParallelism(
+			dir,
+			mix("lab", 4, spriteLab(4)),
+			{ concurrency: 3 },
+			1,
+		);
+		assert.equal(peak, 1);
+		assert.equal(inFlightWeight, 3, "o clampado ocupa 3 de 3");
+	});
+});
+
+test("peso maior que o teto não impede o job LEVE de esperar a vez", async () => {
+	await withDir(async (dir) => {
+		// A ordem importa: o pesado clampado não pode virar barreira permanente.
+		const ran: string[] = [];
+		const queue = await openQueue(dir, {
+			concurrency: 2,
+			execute: async (ctx) => {
+				ran.push(ctx.job.key);
+			},
+		});
+		await queue.enqueue({
+			key: "lab",
+			label: "bancada",
+			descriptor: spriteLab(4)(0),
+		});
+		await enqueuePose(queue, "leve");
+		await queue.idle();
+		await queue.close();
+		assert.deepEqual(ran, ["lab", "heroi::leve"]);
+	});
+});
+
+// ------------------------------------------------ observabilidade do teto
+
+test("stats publica o teto efetivo, a ocupação e de onde o teto veio", async () => {
+	await withDir(async (dir) => {
+		const gate = deferred();
+		const queue = await openQueue(dir, {
+			concurrency: 8,
+			execute: async () => {
+				await gate.promise;
+			},
+		});
+
+		const vazia = queue.stats();
+		assert.equal(vazia.concurrency, 8);
+		assert.equal(vazia.inFlightWeight, 0);
+		assert.equal(vazia.availableWeight, 8);
+		assert.equal(vazia.concurrencySource, "option");
+
+		// Uma bancada de 4 chamadas + uma pose = 5 ocupados, 3 livres. A
+		// ocupação NÃO é a contagem de jobs: são dois jobs pesando cinco.
+		await queue.enqueue({
+			key: "lab",
+			label: "bancada",
+			descriptor: spriteLab(4)(0),
+		});
+		await enqueuePose(queue, "andar");
+		await waitFor(() => queue.stats().inFlightWeight === 5, "cinco ocupados");
+
+		const cheia = queue.stats();
+		assert.equal(cheia.running, 2, "dois jobs");
+		assert.equal(cheia.inFlightWeight, 5, "cinco chamadas simultâneas");
+		assert.equal(cheia.availableWeight, 3);
+		assert.equal(queue.weightOf(queue.get("lab")!), 4);
+		assert.equal(queue.weightOf(queue.get("heroi::andar")!), 1);
+
+		gate.resolve();
+		await queue.idle();
+		// A ocupação tem de VOLTAR — um vazamento aqui encolheria o teto a cada
+		// job e a fila iria parando sozinha, em silêncio.
+		assert.equal(queue.stats().inFlightWeight, 0, "ocupação devolvida");
+		assert.equal(queue.stats().availableWeight, 8);
+		await queue.close();
+	});
+});
+
+test("a ocupação volta mesmo quando o job falha ou é cancelado", async () => {
+	await withDir(async (dir) => {
+		const gate = deferred();
+		const queue = await openQueue(dir, {
+			concurrency: 8,
+			maxAttempts: 1,
+			execute: async (ctx) => {
+				if (ctx.job.key === "lab") throw new Error("estourou");
+				await gate.promise;
+			},
+		});
+		await queue.enqueue({
+			key: "lab",
+			label: "bancada",
+			descriptor: spriteLab(4)(0),
+		});
+		// A devolução da ocupação acontece no `finally` de `#run`, DEPOIS de
+		// `#handleFailure` ter persistido o status — então esperar por
+		// `'falhou'` e ler a ocupação na linha seguinte é uma corrida, e ela
+		// pega 4 em vez de 0 de vez em quando. A ordem está certa no código (o
+		// permite do semáforo só volta depois da falha registrada); quem tinha
+		// de esperar pelo sinal mais tardio era o teste.
+		await waitFor(
+			() => queue.stats().inFlightWeight === 0,
+			"falha devolve a ocupação",
+		);
+		assert.equal(queue.get("lab")?.status, "falhou");
+
+		await enqueuePose(queue, "andar");
+		await waitFor(() => queue.stats().inFlightWeight === 1, "pose em voo");
+		await queue.cancel("heroi::andar");
+		gate.resolve();
+		await queue.idle();
+		assert.equal(
+			queue.stats().inFlightWeight,
+			0,
+			"cancelamento devolve a ocupação",
+		);
+		await queue.close();
+	});
+});
+
+test("sem teto explícito a fila usa o que o ambiente resolve", async () => {
+	await withDir(async (dir) => {
+		// Sem `concurrency`, o teto e a origem têm de ser exatamente os que
+		// `resolveConcurrencyDecision` devolve para o ambiente deste processo —
+		// é essa fiação que faz PIXELLAB_TIER e CHARACTER_BUILDER_JOB_CONCURRENCY
+		// continuarem valendo.
+		const queue = await JobQueue.open({
+			statePath: join(dir, "job-queue.json"),
+			execute: async () => {},
+			ratePerSecond: 1000,
+			sleep: async (): Promise<void> => {},
+			stillNeeded: (): boolean => true,
+		});
+		const esperado = resolveConcurrencyDecision(process.env);
+		assert.equal(queue.concurrency, esperado.limit);
+		assert.equal(queue.concurrencySource, esperado.source);
+		assert.equal(queue.stats().concurrency, esperado.limit);
+		await queue.close();
+	});
+});
+
 test("resolveConcurrency: override direto, tier e default", () => {
 	assert.equal(resolveConcurrency({ CHARACTER_BUILDER_JOB_CONCURRENCY: "7" }), 7);
 	assert.equal(resolveConcurrency({ PIXELLAB_TIER: "t3" }), 20);
 	assert.equal(resolveConcurrency({ PIXELLAB_TIER: "free" }), 1);
 	assert.equal(resolveConcurrency({ PIXELLAB_TIER: "t1" }), 2);
-	// O default é t2 = 4, e o pedido que originou a fila foi "quero poder rodar
-	// mais gerações simultâneas". A evidência do 4 é `server/sprite-lab.ts`, que
-	// trava `outputs` em 1–4 porque acima disso a v3 responde 429 — observação
-	// desta conta, não medição do tier. As duas variáveis continuam mandando.
-	assert.equal(resolveConcurrency({}), 4, "default t2");
+	// O default deixou de ser um tier. O pedido que originou esta onda foi
+	// "quero poder rodar mais gerações simultâneas", e um default de 4 com os
+	// pesos da COST_TABLE entregava UM sprite-lab por vez — menos que o servidor
+	// sem limite que a fila substitui. Ver DEFAULT_CONCURRENCY para o que é
+	// medido (4 create-character-v3 concorrentes, desta conta) e o que é
+	// inferido (dobrar isso para carga mista).
+	assert.equal(resolveConcurrency({}), 8, "default do editor");
+	assert.equal(DEFAULT_CONCURRENCY, 8);
+	// Declarar o tier DIMINUI o teto, e está certo: é o número da conta contra
+	// o palpite do editor.
 	assert.equal(resolveConcurrency({ PIXELLAB_TIER: "t2" }), 4);
 	assert.equal(
 		resolveConcurrency({ PIXELLAB_TIER: "inventado" }),
-		4,
+		8,
 		"tier desconhecido cai no default em vez de virar NaN",
 	);
 	assert.equal(
 		resolveConcurrency({ CHARACTER_BUILDER_JOB_CONCURRENCY: "0" }),
-		4,
+		8,
 		"zero não é teto válido",
 	);
 	assert.equal(
 		resolveConcurrency({ CHARACTER_BUILDER_JOB_CONCURRENCY: "abc" }),
-		4,
+		8,
 	);
 	assert.equal(
 		resolveConcurrency({ CHARACTER_BUILDER_JOB_CONCURRENCY: "1", PIXELLAB_TIER: "t3" }),
 		1,
 		"o override direto ganha do tier, inclusive para diminuir",
 	);
+});
+
+test("resolveConcurrencyDecision diz de ONDE o teto veio", () => {
+	assert.deepEqual(
+		resolveConcurrencyDecision({ CHARACTER_BUILDER_JOB_CONCURRENCY: "12" }),
+		{ limit: 12, source: "env" },
+	);
+	assert.deepEqual(resolveConcurrencyDecision({ PIXELLAB_TIER: "t3" }), {
+		limit: 20,
+		source: "tier",
+		tier: "t3",
+	});
+	assert.deepEqual(resolveConcurrencyDecision({}), {
+		limit: DEFAULT_CONCURRENCY,
+		source: "default",
+	});
+	// Um tier inválido não é "tier": a origem tem de contar a verdade, senão a
+	// tela vai jurar que o usuário declarou algo que ele não declarou.
+	assert.equal(resolveConcurrencyDecision({ PIXELLAB_TIER: "t9" }).source, "default");
 });
 
 // ---------------------------------------------------------------- cancelamento
@@ -1293,10 +1799,64 @@ test("weightForDescriptor cobre as sete formas e nunca devolve zero", () => {
 		const w = weightForDescriptor(d);
 		assert.ok(Number.isInteger(w) && w >= 1, `${d.kind} devolveu ${w}`);
 	}
-	// A v3 pesa mais que uma imagem solta — a tabela do pipeline é a fonte.
-	assert.ok(
-		weightForDescriptor({ kind: "wizard-directions8", characterId: "h" }) >
-			weightForDescriptor({ kind: "wizard-south", characterId: "h", description: "x" }),
+});
+
+test("o peso é o fan-out de CHAMADAS, não o custo do endpoint", () => {
+	// Uma submissão, um peso — não importa quão cara ela seja. `wardrobe` é o
+	// caso que mais dói: `create-character-state` custa 20–40 gerações e pesava
+	// 6 na COST_TABLE, então rodava SEMPRE sozinho num teto de 4. Ele faz UMA
+	// chamada; o preço dela não ocupa concorrência.
+	const um: JobDescriptor[] = [
+		{ kind: "wizard-south", characterId: "h", description: "x" },
+		{ kind: "wizard-south-edit", characterId: "h", prompt: "x" },
+		{ kind: "wizard-directions8", characterId: "h" },
+		{ kind: "pose", characterId: "h", poseId: "p" },
+		{ kind: "wardrobe", characterId: "h", wardrobeId: "w" },
+	];
+	for (const d of um) assert.equal(weightForDescriptor(d), 1, d.kind);
+
+	// A bancada de sprites dispara `outputs` create-character-v3 num
+	// Promise.all: o peso É o outputs que o usuário escolheu.
+	for (const outputs of [1, 2, 3, 4]) {
+		assert.equal(
+			weightForDescriptor({
+				kind: "sprite-lab",
+				hash: "a",
+				config: { description: "x", size: 64, outputs },
+			}),
+			outputs,
+			`sprite-lab outputs=${outputs}`,
+		);
+	}
+
+	// 'chained' faz a norte sozinha e as TRÊS irmãs em paralelo. 'texture' e
+	// 'rotated' são seriais: uma chamada de cada vez.
+	const block = (config: WorldBlockConfig): number =>
+		weightForDescriptor({ kind: "world-block", hash: "a", config });
+	assert.equal(block({ description: "x" }), 3, "technique ausente é chained");
+	assert.equal(block({ description: "x", technique: "chained" }), 3);
+	assert.equal(block({ description: "x", technique: "texture" }), 1);
+	assert.equal(block({ description: "x", technique: "rotated" }), 1);
+});
+
+test("config adulterada nunca produz peso zero, negativo ou absurdo", () => {
+	// O arquivo de estado é editável à mão e sobrevive a quedas no meio de uma
+	// escrita. Peso 0 admitiria infinitos jobs; peso negativo devolveria
+	// capacidade ao semáforo a cada release e o teto viraria ficção.
+	const lab = (outputs: number): number =>
+		weightForDescriptor({
+			kind: "sprite-lab",
+			hash: "a",
+			config: { description: "x", size: 64, outputs },
+		});
+	assert.equal(lab(0), 1);
+	assert.equal(lab(-3), 1);
+	assert.equal(lab(2.5), 1, "não-inteiro não é fan-out crível");
+	assert.equal(lab(Number.NaN), 1);
+	assert.equal(
+		lab(999),
+		SPRITE_LAB_MAX_PARALLEL_CALLS,
+		"a bancada valida 1–4; peso maior seria invenção",
 	);
 });
 

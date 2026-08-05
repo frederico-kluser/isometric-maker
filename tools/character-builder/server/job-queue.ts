@@ -65,7 +65,6 @@ import {
 	AdaptiveLimiter,
 	WeightedSemaphore,
 	concurrencyFor,
-	weightFor,
 } from "../../pixellab-pipeline/src/queue.ts";
 import { TIER_CONCURRENCY } from "../../pixellab-pipeline/src/cost.ts";
 import type { Tier } from "../../pixellab-pipeline/src/cost.ts";
@@ -266,23 +265,54 @@ export type FailureKind = "fatal" | "retry" | "rate-limited";
 // ---------------------------------------------------------------- configuração
 
 /**
- * Tier assumido quando ninguém disse qual é. `t2` = 4 simultâneos.
+ * Teto de admissão quando ninguém declarou um. **Oito chamadas simultâneas.**
  *
- * A EVIDÊNCIA, e o que ela não é: `server/sprite-lab.ts` trava `outputs` em 1–4
- * com a mensagem `Acima de 4 a v3 responde 429 "Concurrency limit reached"`.
- * Isso é observação empírica registrada no código sobre ESTA conta, e é a melhor
- * evidência que o repositório tem. NÃO é medição do tier — ninguém consultou o
- * fornecedor, e o número pode estar errado para outra conta ou depois de uma
- * mudança de plano. `CHARACTER_BUILDER_JOB_CONCURRENCY` e `PIXELLAB_TIER`
- * continuam mandando sempre que presentes; este valor só decide o silêncio.
+ * O QUE ESTE NÚMERO É, E O QUE ELE NÃO É
  *
- * Errar para 4 é recuperável: o `AdaptiveLimiter` corta a taxa da FILA INTEIRA
- * pela metade a cada 429 (piso 0,2/s), então o excesso vira lentidão, não
- * cobrança. Errar para baixo, ao contrário, seria entregar MENOS simultaneidade
- * do que o servidor de hoje — que não tem limite nenhum — a todo usuário que não
- * exportar variável de ambiente.
+ * A unidade do teto é CHAMADA SIMULTÂNEA À API, não job — ver
+ * `weightForDescriptor`. Um `sprite-lab` com `outputs: 4` conta 4, porque
+ * dispara quatro `create-character-v3` ao mesmo tempo dentro de um job só.
+ *
+ * **MEDIDO (uma única observação, desta conta, gravada no código):**
+ * `server/sprite-lab.ts` trava `outputs` em 1–4 com a mensagem
+ * `Acima de 4 a v3 responde 429 "Concurrency limit reached"`. Ou seja: quatro
+ * `create-character-v3` concorrentes passam, cinco não. É o único número medido
+ * que este repositório tem, e ele fala de UM endpoint — o mais pesado de todos
+ * (2–9 gerações por chamada).
+ *
+ * **DOCUMENTADO PELO FORNECEDOR (e não se aplica a nós sem confirmação):** o
+ * tier de US$ 50/mês declara "até 20 jobs simultâneos". `docs/01-pixellab/
+ * custos-e-limites.md:176` é explícito sobre o resto: *"a concorrência dos
+ * tiers menores não está documentada e precisa ser medida"*. Os valores
+ * `free: 1, t1: 2, t2: 4` de `TIER_CONCURRENCY` são MODELO DO PROJETO, não
+ * número lido do fornecedor. Em qual tier esta conta está **não foi
+ * verificado**.
+ *
+ * **INFERIDO (é daqui que sai o 8):** dobrar a medição da família mais pesada
+ * para uma carga MISTA. O job típico do editor não é `create-character-v3` — é
+ * `animate-character` em `mode='template'` (1 geração por direção) ou
+ * `create-isometric-tile`. Admitir oito chamadas concorrentes de trabalho leve
+ * onde quatro de trabalho pesado passaram é aposta deliberada, não medição, e
+ * 8 é também o tamanho do lote natural do editor: as oito direções, as oito
+ * poses que o usuário dispara de uma vez.
+ *
+ * **POR QUE ERRAR PARA CIMA É O LADO BARATO.** Um 429 na submissão custa
+ * US$ 0,00: a chamada foi RECUSADA, nada foi gerado, nada foi cobrado — o
+ * dinheiro só sai numa submissão aceita. `classifyByStatus` marca 429 como
+ * `rate-limited`, `#handleFailure` devolve o job à fila (ele não está `paid`) e
+ * o `AdaptiveLimiter` corta a taxa da FILA INTEIRA pela metade. O custo de
+ * admitir demais é lentidão e uma retentativa. O custo de admitir de menos é
+ * exatamente a reclamação que originou esta onda: com o `t2` = 4 anterior, e
+ * com os pesos vindos da `COST_TABLE`, um `sprite-lab` admitia UM por vez e um
+ * `wardrobe` rodava sozinho — MENOS simultaneidade que o servidor sem limite
+ * nenhum que ele substitui. Isso é regressão medida, não percebida.
+ *
+ * `CHARACTER_BUILDER_JOB_CONCURRENCY` e `PIXELLAB_TIER` continuam mandando
+ * sempre que presentes: quem sabe o limite da conta declara, e a declaração
+ * substitui esta aposta. Note que declarar `PIXELLAB_TIER=t2` DIMINUI o teto
+ * para 4, e isso está certo — é o número da conta contra o palpite do editor.
  */
-export const DEFAULT_TIER: Tier = "t2";
+export const DEFAULT_CONCURRENCY = 8;
 export const DEFAULT_MAX_ATTEMPTS = 3;
 export const DEFAULT_HISTORY_LIMIT = 200;
 /**
@@ -357,41 +387,79 @@ function isTier(value: string): value is Tier {
 }
 
 /**
+ * De onde veio o teto que está valendo. Existe para a tela: "4 simultâneas"
+ * significa coisas diferentes quando é o palpite do editor e quando é o tier
+ * que o usuário declarou, e a UI da onda seguinte precisa poder dizer qual.
+ */
+export type ConcurrencySource =
+	/** Passado direto em `JobQueueOptions.concurrency` (testes, e a fiação de api.ts). */
+	| "option"
+	/** `CHARACTER_BUILDER_JOB_CONCURRENCY`. */
+	| "env"
+	/** `PIXELLAB_TIER`, resolvido por `TIER_CONCURRENCY`. */
+	| "tier"
+	/** `DEFAULT_CONCURRENCY` — ninguém declarou nada. */
+	| "default";
+
+export interface ConcurrencyDecision {
+	readonly limit: number;
+	readonly source: ConcurrencySource;
+	/** Preenchido só quando `source === 'tier'`. */
+	readonly tier?: Tier;
+}
+
+/**
  * Teto de admissão, em ordem de precedência:
  *
  *   1. `CHARACTER_BUILDER_JOB_CONCURRENCY` — inteiro ≥ 1, override direto.
  *   2. `PIXELLAB_TIER` — free|t1|t2|t3, a mesma variável que o CLI do pipeline
  *      já lê (`pixellab-pipeline/src/cli.ts`), resolvida por `TIER_CONCURRENCY`.
- *   3. `DEFAULT_TIER` = `t2` = 4 — ver a evidência lá, e o que ela não prova.
+ *   3. `DEFAULT_CONCURRENCY` = 8 — ver lá o que é medido e o que é inferido.
  *
  * O teto é DA CONTA PixelLab, não nosso: passar dele rende 429. Só `t3` (20) é
  * número que o fornecedor documenta; os outros três são o modelo do projeto
- * (`pixellab-pipeline/src/cost.ts`).
+ * (`pixellab-pipeline/src/cost.ts`), e `docs/01-pixellab/custos-e-limites.md:176`
+ * diz literalmente que a concorrência dos tiers menores "precisa ser medida".
  */
-export function resolveConcurrency(
+export function resolveConcurrencyDecision(
 	env: Record<string, string | undefined> = process.env,
-): number {
+): ConcurrencyDecision {
 	const raw = env["CHARACTER_BUILDER_JOB_CONCURRENCY"];
 	if (raw !== undefined && raw.trim() !== "") {
 		const n = Number(raw);
-		if (Number.isInteger(n) && n >= 1) return n;
+		if (Number.isInteger(n) && n >= 1) return { limit: n, source: "env" };
 	}
 	const tier = env["PIXELLAB_TIER"];
-	if (tier !== undefined && isTier(tier)) return concurrencyFor(tier);
-	return concurrencyFor(DEFAULT_TIER);
+	if (tier !== undefined && isTier(tier)) {
+		return { limit: concurrencyFor(tier), source: "tier", tier };
+	}
+	return { limit: DEFAULT_CONCURRENCY, source: "default" };
+}
+
+/** O mesmo, quando só o número interessa. */
+export function resolveConcurrency(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	return resolveConcurrencyDecision(env).limit;
 }
 
 /**
- * Endpoint que domina o custo de concorrência de cada tipo de job. É por ele
- * que sai o peso, via `weightFor` do pipeline — uma tabela só de pesos no repo.
+ * Endpoint que domina o custo de cada tipo de job. **Não é mais a fonte do
+ * peso** — ver `weightForDescriptor` logo abaixo.
  *
- * Duas aproximações registradas:
- *   - `wizard-south-edit` chama `edit-image`, que não está na COST_TABLE do
- *     pipeline; `mannequin.ts` já estima esse passo por proxy do
- *     `create-image-bitforge`, e aqui se usa o mesmo proxy.
- *   - `pose` enfileira um job POR DIREÇÃO (oito) sob um peso só. O peso da
- *     tabela (2) subestima a carga real; quem limita as oito é o teto de
- *     admissão da conta, não este número.
+ * POR QUE O EXPORT CONTINUA AQUI, honestamente: hoje ele tem UM consumidor, e é
+ * o teste. `job-queue.test.ts` reconstrói com ele o modelo de peso ANTIGO
+ * (`pesoAntigo = weightFor(ENDPOINT_BY_KIND[kind])`), que é o braço "ANTES" da
+ * comparação de cada critério de aceitação desta onda — assim os números do
+ * "antes" saem da mesma `COST_TABLE` que os produzia, em vez de copiados à mão,
+ * e mudam junto se a tabela do pipeline mudar. `grep -rn ENDPOINT_BY_KIND
+ * tools/` devolve exatamente este arquivo e aquele teste: **nenhuma estimativa
+ * e nenhum relatório o consomem**. Se um dia a comparação antes/depois sair do
+ * teste, este export sai junto.
+ *
+ * Uma aproximação registrada: `wizard-south-edit` chama `edit-image`, que não
+ * está na `COST_TABLE` do pipeline; `mannequin.ts` já estima esse passo por
+ * proxy do `create-image-bitforge`, e aqui se usa o mesmo proxy.
  */
 export const ENDPOINT_BY_KIND: Readonly<Record<JobKind, EndpointId>> = {
 	"wizard-south": "create-image-bitforge",
@@ -403,8 +471,93 @@ export const ENDPOINT_BY_KIND: Readonly<Record<JobKind, EndpointId>> = {
 	"world-block": "create-isometric-tile",
 };
 
+/**
+ * Teto de candidatos paralelos da bancada de sprites. `sprite-lab.ts` valida
+ * `outputs` em 1–4 e a mensagem diz por quê: *"Acima de 4 a v3 responde 429
+ * Concurrency limit reached"*. O peso clampa no mesmo número para que um
+ * arquivo de estado editado à mão não invente um peso de 99.
+ */
+export const SPRITE_LAB_MAX_PARALLEL_CALLS = 4;
+
+/**
+ * Chamadas simultâneas da técnica `chained` do bloco de mundo: a face NORTE sai
+ * primeiro, sozinha, e as três irmãs saem juntas num `Promise.all`
+ * (`server/world-block.ts`, "As outras três em paralelo"). O pico é 3.
+ */
+export const WORLD_BLOCK_CHAINED_PARALLEL_CALLS = 3;
+
+/**
+ * **Peso de admissão = pico de CHAMADAS SIMULTÂNEAS que o job faz à API.**
+ *
+ * POR QUE MUDOU. O peso vinha de `COST_TABLE[...].concurrencyWeight` via
+ * `weightFor`, e aquela coluna foi calibrada para o CLI do pipeline, cujo
+ * padrão de fan-out é outro: lá um item do catálogo é UMA chamada, e o peso
+ * expressa "quanto de servidor esta chamada consome" (`create-character-pro`
+ * pesa 6 porque custa 20–40 gerações). Aqui um job pode ser QUATRO chamadas —
+ * e o semáforo contava jobs enquanto a PixelLab conta chamadas. As duas
+ * consequências, ambas erradas na mesma direção:
+ *
+ *   - `wardrobe` pesava 6 num teto de 4: clampado, rodava SEMPRE sozinho,
+ *     mesmo fazendo uma única chamada;
+ *   - `sprite-lab` pesava 3 num teto de 4: um por vez, fizesse ele 1 ou 4
+ *     chamadas — o `outputs` do usuário não mudava nada.
+ *
+ * O DESCRITOR CARREGA O CONFIG, então onde o fan-out é conhecido o peso é
+ * função dele:
+ *
+ * | kind                 | peso                    | de onde sai o número |
+ * |----------------------|-------------------------|----------------------|
+ * | `sprite-lab`         | `config.outputs` (1–4)  | `Promise.all` sobre `outputs` candidatos, cada um um `create-character-v3` |
+ * | `world-block`        | 3 em `chained`, 1 nas outras | `chained` faz norte + `Promise.all` das 3 irmãs; `texture` e `rotated` são seriais |
+ * | `pose`               | 1                       | UMA submissão `animate-character` |
+ * | `wardrobe`           | 1                       | UMA submissão `create-character-state` |
+ * | `wizard-south`       | 1                       | UMA submissão |
+ * | `wizard-south-edit`  | 1                       | UMA submissão |
+ * | `wizard-directions8` | 1                       | UMA submissão `create-character-v3` |
+ *
+ * AS APROXIMAÇÕES, E O ERRO QUE ELAS PODEM TER — as duas são declaradas porque
+ * nenhuma foi verificada contra o fornecedor:
+ *
+ * 1. **`pose` pode valer muito mais que 1, e não temos como saber.** Uma
+ *    submissão de `animate-character` cria um background job POR DIREÇÃO (até
+ *    oito) do lado do servidor, e `server/api.ts` faz um `pollJob` por direção
+ *    em paralelo. Se o teto da conta contar JOBS DO SERVIDOR em vez de
+ *    submissões nossas, oito poses concorrentes são 64 jobs e o 429 é certo.
+ *    Contamos submissões porque é a unidade em que a única evidência medida
+ *    fala (4 `create-character-v3` concorrentes passam) e porque o servidor de
+ *    hoje já dispara essas poses sem limite nenhum: adotar o outro modelo
+ *    entregaria MENOS que o estado atual. **Erro possível: subestimar `pose`
+ *    por um fator de até 8.** O sintoma é 429 com o `AdaptiveLimiter`
+ *    derrubando a taxa da fila — e não custa dinheiro, porque submissão
+ *    recusada não gera nada.
+ * 2. **`sprite-lab` e `world-block` contam o pico, não o instante.** Um
+ *    candidato que já está em disco resolve sem chamada (`sprite-lab.ts` checa
+ *    o PNG antes de submeter), então um job de peso 4 pode fazer zero chamadas.
+ *    **Erro: superestimar em até o peso inteiro**, o que só desperdiça vaga —
+ *    o lado barato.
+ *
+ * O peso nunca é zero: um job desconhecido, ou com config adulterada, vale 1.
+ */
 export function weightForDescriptor(descriptor: JobDescriptor): number {
-	return weightFor(ENDPOINT_BY_KIND[descriptor.kind]);
+	switch (descriptor.kind) {
+		case "sprite-lab": {
+			const outputs = descriptor.config.outputs;
+			if (!Number.isInteger(outputs) || outputs < 1) return 1;
+			return Math.min(outputs, SPRITE_LAB_MAX_PARALLEL_CALLS);
+		}
+		case "world-block":
+			// `technique` ausente é 'chained' — o mesmo default de
+			// `runWorldBlock`, e o único caminho com fan-out.
+			return (descriptor.config.technique ?? "chained") === "chained"
+				? WORLD_BLOCK_CHAINED_PARALLEL_CALLS
+				: 1;
+		case "wizard-south":
+		case "wizard-south-edit":
+		case "wizard-directions8":
+		case "pose":
+		case "wardrobe":
+			return 1;
+	}
 }
 
 /**
@@ -470,7 +623,26 @@ export interface QueueStats {
 	readonly done: number;
 	readonly failed: number;
 	readonly cancelled: number;
+	/**
+	 * Teto EFETIVO de chamadas simultâneas, já resolvido — não o default, não o
+	 * tier: o número que o semáforo está usando agora.
+	 */
 	readonly concurrency: number;
+	/** De onde esse número veio. Ver `ConcurrencySource`. */
+	readonly concurrencySource: ConcurrencySource;
+	/**
+	 * Ocupação: soma dos pesos dos jobs em voo. É esta a fração que enche o
+	 * teto, e ela NÃO é `running` — um `sprite-lab` de `outputs: 4` conta 4.
+	 */
+	readonly inFlightWeight: number;
+	/**
+	 * `concurrency - inFlightWeight`, nunca negativo. É uma **estimativa
+	 * otimista** de vaga livre, não o disponível real do semáforo: entre o
+	 * permite ser adquirido e o job de fato começar existe uma janela em que o
+	 * semáforo já está mais cheio do que este número diz. Ver `#inFlightWeight`
+	 * para a medição e o porquê de não haver número exato.
+	 */
+	readonly availableWeight: number;
 	/** Taxa corrente do limitador — cai pela metade a cada 429. */
 	readonly ratePerSecond: number;
 }
@@ -510,6 +682,7 @@ export class JobQueue {
 	readonly #maxAttempts: number;
 	readonly #historyLimit: number;
 	readonly #concurrency: number;
+	readonly #concurrencySource: ConcurrencySource;
 	readonly #semaphore: WeightedSemaphore;
 	readonly #limiter: AdaptiveLimiter;
 	readonly #controllers = new Map<string, AbortController>();
@@ -521,6 +694,31 @@ export class JobQueue {
 	#writeChain: Promise<void> = Promise.resolve();
 	#loopActive = false;
 	#closed = false;
+	/**
+	 * Soma dos pesos **confirmadamente** em voo — ou seja, de jobs que `#start`
+	 * já admitiu e que ainda estão executando. É a ocupação que `stats()`
+	 * publica. Sobe em `#start`, o único ponto que admite, e desce no `finally`
+	 * de `#run`, no mesmo lugar que devolve o permite.
+	 *
+	 * ELE NÃO É O OCUPADO DO SEMÁFORO, E A DIFERENÇA É OBSERVÁVEL. O permite é
+	 * adquirido lá no laço (`#loop`), e entre esse `acquire` e o `#start` há dois
+	 * pontos de suspensão: a espera do limitador e o recheque de idempotência,
+	 * que LÊ DISCO. Nessa janela o semáforo já está ocupado e este contador ainda
+	 * está em zero — uma sonda com o recheque travado num portão mede
+	 * `running=0 inFlightWeight=0 availableWeight=4` com o semáforo sem NENHUMA
+	 * vaga livre. Não é vazamento (o caminho de recusa devolve o permite sem
+	 * nunca ter incrementado aqui) e não custa dinheiro, mas é a razão de
+	 * `availableWeight` ser uma **estimativa otimista**, e não o número exato de
+	 * vagas: ele pode anunciar folga que o semáforo não tem.
+	 *
+	 * Contabilizado aqui, e não perguntado ao `WeightedSemaphore`, porque ele não
+	 * expõe o disponível dele. Publicar o número exato exigiria mudar aquela
+	 * classe (`pixellab-pipeline/src/queue.ts`), que é compartilhada com o CLI;
+	 * a limitação fica REGISTRADA em vez de contornada com API inventada. Quem
+	 * for pôr o teto na tela precisa saber que a barra pode mostrar vaga durante
+	 * a janela de admissão.
+	 */
+	#inFlightWeight = 0;
 
 	private constructor(options: JobQueueOptions, state: PersistedState) {
 		this.#statePath = options.statePath;
@@ -536,7 +734,12 @@ export class JobQueue {
 		this.#onChange = options.onChange ?? (() => {});
 		this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 		this.#historyLimit = options.historyLimit ?? DEFAULT_HISTORY_LIMIT;
-		this.#concurrency = Math.max(1, options.concurrency ?? resolveConcurrency());
+		// Um teto declarado ganha do ambiente; sem ele, o ambiente decide e a
+		// origem vem junto para a tela poder dizer de onde saiu o número.
+		const decided = resolveConcurrencyDecision();
+		this.#concurrency = Math.max(1, options.concurrency ?? decided.limit);
+		this.#concurrencySource =
+			options.concurrency !== undefined ? "option" : decided.source;
 		this.#semaphore = new WeightedSemaphore(this.#concurrency);
 		this.#limiter = new AdaptiveLimiter(
 			options.ratePerSecond ?? DEFAULT_RATE_PER_SECOND,
@@ -560,6 +763,19 @@ export class JobQueue {
 
 	get concurrency(): number {
 		return this.#concurrency;
+	}
+
+	/** De onde o teto veio: opção explícita, env, tier ou o default. */
+	get concurrencySource(): ConcurrencySource {
+		return this.#concurrencySource;
+	}
+
+	/**
+	 * Peso de admissão que ESTE job ocuparia, já clampado no teto. Público
+	 * porque a tela precisa explicar por que um job sozinho encheu a fila.
+	 */
+	weightOf(job: Readonly<QueuedJob>): number {
+		return this.#admissionWeight(job);
 	}
 
 	get statePath(): string {
@@ -602,6 +818,9 @@ export class JobQueue {
 			failed: jobs.filter((j) => j.status === "falhou").length,
 			cancelled: jobs.filter((j) => j.status === "cancelado").length,
 			concurrency: this.#concurrency,
+			concurrencySource: this.#concurrencySource,
+			inFlightWeight: this.#inFlightWeight,
+			availableWeight: Math.max(0, this.#concurrency - this.#inFlightWeight),
 			ratePerSecond: this.#limiter.rate,
 		};
 	}
@@ -900,7 +1119,7 @@ export class JobQueue {
 			const job = this.pending()[0];
 			if (!job) return;
 
-			const weight = this.#admissionWeight(job);
+			const { wanted, weight } = this.#weighJob(job);
 			await this.#semaphore.acquire(weight);
 
 			// Tudo abaixo pode ter mudado enquanto esperávamos capacidade.
@@ -962,7 +1181,7 @@ export class JobQueue {
 			// `#start` é quem decide, e pode recusar: ele reconfere o estado no
 			// mesmo bloco síncrono em que faria a transição. Recusou, o permite
 			// volta para o semáforo e o laço segue para o próximo da fila.
-			if (!this.#start(job, weight)) {
+			if (!this.#start(job, weight, wanted)) {
 				this.#semaphore.release(weight);
 				if (this.#closed) return;
 				continue;
@@ -977,8 +1196,36 @@ export class JobQueue {
 	 * que nunca vem — trava eterna. O teste do pipeline só cobre o caso em que
 	 * um release chega depois. Clampar aqui é a diferença entre "job pesado roda
 	 * sozinho" e "a fila morre".
+	 *
+	 * O CLAMP É UMA DECISÃO, NÃO UM ACIDENTE, e ela tem duas metades:
+	 *
+	 *   1. **Rodar sozinho é melhor que travar.** Um `sprite-lab` de 4 chamadas
+	 *      sob `PIXELLAB_TIER=free` (teto 1) vai estourar o limite da conta de
+	 *      qualquer jeito — a fila não controla o que acontece DENTRO do job.
+	 *      Recusá-lo seria transformar excesso de concorrência (429 grátis,
+	 *      retentável) em funcionalidade indisponível.
+	 *   2. **Clampar no teto, e não no teto menos um, é o que garante que dois
+	 *      pesados nunca entrem juntos.** O peso clampado é exatamente a
+	 *      capacidade do semáforo, então enquanto ele estiver em voo o
+	 *      disponível é zero e NADA mais é admitido — nem outro clampado, nem um
+	 *      job de peso 1. É essa igualdade que faz o isolamento; um clamp para
+	 *      qualquer valor menor abriria fresta para um segundo job pesado.
+	 *
+	 * O log NÃO sai daqui, e isso é deliberado: este método é chamado no laço,
+	 * ANTES do `acquire`, do limitador e do recheque de idempotência — um job que
+	 * o recheque dispensa nunca chega a ser admitido, e cada volta do laço sobre
+	 * a mesma cabeça de fila recalcularia o peso. Logar aqui afirmaria uma
+	 * admissão que pode não acontecer, e repetiria a afirmação. Quem loga é
+	 * `#start`, que é onde a admissão de fato acontece; o texto continua dizendo
+	 * o que a fila não consegue impedir, senão a próxima pessoa a ver 429 vai
+	 * procurar o defeito na fila, que é o único lugar onde ele não está.
 	 */
-	#admissionWeight(job: QueuedJob): number {
+	#weighJob(job: Readonly<QueuedJob>): {
+		/** O que o job pediu, já normalizado — antes do clamp. */
+		readonly wanted: number;
+		/** O que ele ocupa de fato: `wanted` clampado no teto. */
+		readonly weight: number;
+	} {
 		let raw: number;
 		try {
 			raw = this.#weightOf(job.descriptor);
@@ -986,7 +1233,12 @@ export class JobQueue {
 			raw = 1;
 		}
 		if (!Number.isFinite(raw) || raw < 1) raw = 1;
-		return Math.min(Math.floor(raw), this.#concurrency);
+		const wanted = Math.floor(raw);
+		return { wanted, weight: Math.min(wanted, this.#concurrency) };
+	}
+
+	#admissionWeight(job: Readonly<QueuedJob>): number {
+		return this.#weighJob(job).weight;
 	}
 
 	/**
@@ -1018,12 +1270,33 @@ export class JobQueue {
 	 *
 	 * Devolve `false` quando recusa; o chamador ainda segura o permite do
 	 * semáforo e é quem o devolve.
+	 *
+	 * `wanted` é o peso ANTES do clamp, e serve só para o log do clamp sair
+	 * daqui — depois da guarda, quando a admissão já é fato consumado — em vez
+	 * de sair do laço, onde ainda podia não acontecer. Ver `#weighJob`.
 	 */
-	#start(job: QueuedJob, weight: number): boolean {
+	#start(job: QueuedJob, weight: number, wanted: number): boolean {
 		if (this.#closed || job.status !== "na-fila") return false;
+
+		// Daqui para baixo não há ponto de suspensão até a transição: o job ESTÁ
+		// admitido, e só agora a frase "admitido SOZINHO" é verdadeira. O clamp
+		// corta exatamente quando `weight < wanted`, e nesse caso `weight` é o
+		// teto inteiro — por construção, `Math.min(wanted, concurrency)`.
+		if (weight < wanted) {
+			this.#log(
+				`[fila] "${job.key}" faz até ${wanted} chamadas simultâneas e o teto é ` +
+					`${this.#concurrency} — admitido SOZINHO, ocupando o teto inteiro. ` +
+					"O fan-out acontece DENTRO do job e a fila não o divide: se a conta " +
+					"recusar, o 429 não custa nada e o limitador desacelera a fila.",
+			);
+		}
 
 		const controller = new AbortController();
 		this.#controllers.set(job.key, controller);
+		// Ocupação sobe junto com a admissão, no mesmo bloco síncrono: um
+		// `stats()` lido entre as duas linhas mostraria job em voo com teto
+		// vazio, e é justamente essa leitura que a onda seguinte vai pôr na tela.
+		this.#inFlightWeight += weight;
 		job.status = "gerando";
 		job.attempts += 1;
 		job.startedAt = this.#now();
@@ -1099,6 +1372,7 @@ export class JobQueue {
 			}
 		} finally {
 			this.#controllers.delete(job.key);
+			this.#inFlightWeight = Math.max(0, this.#inFlightWeight - weight);
 			this.#semaphore.release(weight);
 			this.#kick();
 			this.#settle();
