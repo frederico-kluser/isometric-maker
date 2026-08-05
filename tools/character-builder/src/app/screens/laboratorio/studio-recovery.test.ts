@@ -484,3 +484,175 @@ test('tela vazia recuperada do disco continua exportável quando há config', ()
 	assert.equal(bodyExportado(t)?.size, 256);
 	assert.equal(resumoNaTela(t), '256 px · low top-down · 2 saídas');
 });
+
+// ------------------------------------------------------------------ bordas
+//
+// O que segue são os casos que os testes acima não visitam: mais de um job em
+// voo, chave malformada convivendo com chave válida, catálogo que responde sem
+// candidato, e a diferença entre "descritor de outra corrida" e "corrida sem
+// config". São bordas de decisão pura — nenhuma delas precisa de DOM nem rede.
+
+const HASH_TERCEIRA = 'cccccccccccccccc';
+
+test('planReattach: com DOIS jobs em voo, quem manda é a ordem de inserção do mapa', () => {
+	// `Object.entries(...).find(...)` pega o PRIMEIRO. Não existe critério de
+	// "mais recente" aqui — `studio.jobs` é um objeto JSON e a ordem dele é a de
+	// inserção do servidor. Isto está escrito para que uma mudança de critério
+	// (pegar o mais novo, por exemplo) apareça como teste vermelho, e não como
+	// tela recolada à corrida errada.
+	const dois: Record<string, JobSnapshot> = {
+		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'gerando' },
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+	};
+	const plano = planReattach(dois, null);
+	assert.equal(plano.kind, 'reattach');
+	if (plano.kind !== 'reattach') return;
+	assert.equal(plano.pending.hash, HASH_ANTIGA, 'o primeiro da ordem de inserção');
+
+	// Invertida a ordem, muda a escolha — é a prova de que o critério é esse.
+	const invertido: Record<string, JobSnapshot> = {
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+		[`sprite-lab::${HASH_ANTIGA}`]: { status: 'gerando' },
+	};
+	const outro = planReattach(invertido, null);
+	assert.equal(outro.kind === 'reattach' && outro.pending.hash, HASH_NOVA);
+});
+
+/**
+ * **Comportamento a corrigir (studio-recovery.ts:233-239).** O `find` para no
+ * primeiro job de sprite-lab em voo; se a chave DELE não tiver hash válido, a
+ * função devolve `'none'` sem olhar os demais. Um job válido que venha depois
+ * some: a tela não se recola, e a corrida paga fica rodando sem ninguém
+ * sondando. A chave malformada não é hipótese remota — basta uma chave
+ * escrita à mão em `studio.json` ou um formato de hash futuro.
+ */
+test('planReattach: chave malformada em voo ESCONDE um job válido que veio depois', () => {
+	const comLixoNaFrente: Record<string, JobSnapshot> = {
+		'sprite-lab::naoehash': { status: 'gerando' },
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+	};
+	assert.equal(
+		planReattach(comLixoNaFrente, null).kind,
+		'none',
+		'comportamento de HOJE: o job válido não é encontrado',
+	);
+
+	// Com o válido na frente, a recolagem acontece — o que confirma que o
+	// problema é a parada no primeiro, não o job em si.
+	const comLixoAtras: Record<string, JobSnapshot> = {
+		[`sprite-lab::${HASH_NOVA}`]: { status: 'gerando' },
+		'sprite-lab::naoehash': { status: 'gerando' },
+	};
+	assert.equal(planReattach(comLixoAtras, null).kind, 'reattach');
+});
+
+test('planReattach: só "gerando" é recolagem — na-fila, falhou e cancelado não são', () => {
+	for (const status of ['na-fila', 'falhou', 'cancelado', 'vazio', '']) {
+		assert.equal(
+			planReattach({ [`sprite-lab::${HASH_NOVA}`]: { status } }, HASH_ANTIGA).kind,
+			'none',
+			`status "${status}" não pode recolar a tela a um job que não está rodando`,
+		);
+	}
+});
+
+test('planDiskRecovery: corrida terminada SEM candidato nenhum aplica com selectedIndex null', () => {
+	// O manifesto existe e o status é 'pronto', mas o resultado veio sem
+	// candidatos. Escolher o índice 0 aqui apontaria para o que não existe.
+	const vazio: SpriteLabResult = { hash: HASH_ANTIGA, fromCache: true, candidates: [] };
+	const plano = planDiskRecovery({
+		runs: [run(HASH_ANTIGA, config())],
+		newestStatus: 'pronto',
+		newestResult: vazio,
+		owned: null,
+	});
+	assert.equal(plano.kind, 'apply');
+	assert.equal(plano.kind === 'apply' && plano.selectedIndex, null);
+});
+
+test('planDiskRecovery: o selecionado é o índice do PRIMEIRO candidato, não o zero', () => {
+	// Apagar `cand0` do disco é o caminho normal para isto: `listSpriteLabRuns`
+	// exige TODO PNG do manifesto, então o que chega aqui é um manifesto cujo
+	// primeiro candidato tem índice 2.
+	const deslocado: SpriteLabResult = {
+		hash: HASH_ANTIGA,
+		fromCache: true,
+		candidates: [
+			{ index: 2, seed: 703, southB64: 'iVBORw0KGgo=' },
+			{ index: 3, seed: 704, southB64: 'iVBORw0KGgo=' },
+		],
+	};
+	const plano = planDiskRecovery({
+		runs: [run(HASH_ANTIGA, config())],
+		newestStatus: 'pronto',
+		newestResult: deslocado,
+		owned: null,
+	});
+	assert.equal(plano.kind === 'apply' && plano.selectedIndex, 2);
+});
+
+test('planDiskRecovery: status que não é "pronto" nunca aplica, seja qual for', () => {
+	const base = {
+		runs: [run(HASH_ANTIGA, config())],
+		newestResult: result(HASH_ANTIGA),
+		owned: null,
+	} as const;
+	for (const status of ['gerando', 'falhou', 'desconhecido', '']) {
+		assert.equal(planDiskRecovery({ ...base, newestStatus: status }).kind, 'skip', status);
+	}
+	// `undefined` é o caso do GET que nem respondeu — o mais comum no mount.
+	assert.equal(planDiskRecovery({ ...base, newestStatus: undefined }).kind, 'skip');
+	// E 'pronto' sem os bytes também não aplica: o resultado é o que a tela mostra.
+	assert.equal(
+		planDiskRecovery({ ...base, newestStatus: 'pronto', newestResult: undefined }).kind,
+		'skip',
+	);
+});
+
+test('bodyForRun devolve null por DOIS motivos diferentes, e só o descritor os separa', () => {
+	// (1) descritor de outra corrida; (2) corrida certa, sem config em disco.
+	const deOutra = describeRun(run(HASH_NOVA, config()));
+	const semConfig = describeRun(run(HASH_ANTIGA));
+	assert.equal(bodyForRun(deOutra, HASH_ANTIGA), null);
+	assert.equal(bodyForRun(semConfig, HASH_ANTIGA), null);
+	// A tela precisa distinguir os dois para explicar por que "Baixar JSON" está
+	// desabilitado, e a distinção está no descritor, não no retorno.
+	assert.notEqual(deOutra.hash, HASH_ANTIGA);
+	assert.equal(semConfig.hash, HASH_ANTIGA);
+	assert.equal(semConfig.body, null);
+});
+
+test('summaryForRun e activeRunHash nos extremos: sem descritor, sem hash, só em voo', () => {
+	assert.equal(summaryForRun(null, HASH_ANTIGA), '');
+	assert.equal(summaryForRun(describeLiveRun(HASH_ANTIGA), null), '');
+	assert.equal(activeRunHash(HASH_NOVA, null), HASH_NOVA, 'em voo sem resultado');
+	assert.equal(activeRunHash(HASH_NOVA, HASH_NOVA), HASH_NOVA);
+});
+
+test('job em voo cuja corrida JÁ está no catálogo: a recolagem nasce sem body assim mesmo', () => {
+	// O catálogo pode conhecer a corrida (um manifesto de execução anterior com
+	// o MESMO hash, isto é, um cache hit) enquanto o job está em voo. A
+	// recolagem não consulta o catálogo — ela só tem a chave —, então o body
+	// chega no terceiro efeito, pelo refresh.
+	const catalogo = [run(HASH_NOVA, config({ size: 32 })), run(HASH_ANTIGA, config())];
+	const t = telaVazia();
+
+	aplicarRecolagem(t, gerando(HASH_NOVA));
+	assert.equal(t.pending?.hash, HASH_NOVA);
+	assert.equal(bodyExportado(t), null, 'a recolagem não inventa body, nem tendo catálogo');
+	assert.equal(resumoNaTela(t), `corrida ${HASH_NOVA}`);
+
+	// A sondagem entrega e o refresh acha a corrida ATIVA no catálogo.
+	aplicarEntregaDaSondagem(t, result(HASH_NOVA));
+	aplicarRefrescoDoDescritor(t, catalogo);
+	assert.equal(bodyExportado(t)?.size, 32, 'o body que volta é o da corrida em voo');
+	assert.equal(resumoNaTela(t), '32 px · low top-down · 2 saídas');
+});
+
+test('planDescriptorRefresh: catálogo vazio e corrida ausente dele devolvem null', () => {
+	assert.equal(planDescriptorRefresh({ runs: [], activeHash: HASH_ANTIGA }), null);
+	assert.equal(
+		planDescriptorRefresh({ runs: [run(HASH_NOVA, config())], activeHash: HASH_TERCEIRA }),
+		null,
+	);
+});

@@ -17,6 +17,7 @@ import { weightFor } from "../../pixellab-pipeline/src/queue.ts";
 import {
 	DEFAULT_CONCURRENCY,
 	ENDPOINT_BY_KIND,
+	JOB_KINDS,
 	JobQueue,
 	SPRITE_LAB_MAX_PARALLEL_CALLS,
 	cellStatusFor,
@@ -1984,4 +1985,310 @@ test("sem onLog nada é impresso — o runner do node não pode ser poluído", a
 		}
 		assert.deepEqual(capturado, [], "o default de onLog é no-op");
 	});
+});
+
+// ------------------------------------------------- estado em disco: adulteração
+//
+// O arquivo é editável à mão e sobrevive a quedas no meio de uma escrita.
+// `readState` não pode acreditar em nada dele — e as escolhas que ela faz têm
+// consequência de dinheiro, porque um registro descartado é uma trilha de
+// cobrança a menos.
+
+/** Escreve um estado cru, do jeito que estiver, no caminho que a fila lê. */
+async function writeRawState(dir: string, state: unknown): Promise<void> {
+	await writeFile(join(dir, "job-queue.json"), JSON.stringify(state));
+}
+
+/** Um registro terminal e PAGO — a trilha do dinheiro que saiu sem artefato. */
+function pagoSemArtefato(seq: number) {
+	return {
+		key: "heroi::pago",
+		label: "pago",
+		seq,
+		enqueuedAt: new Date(0).toISOString(),
+		descriptor: { kind: "pose", characterId: "heroi", poseId: "pago" },
+		cellKeys: [],
+		status: "falhou",
+		attempts: 1,
+		paid: true,
+		remote: { characterId: "char-perdido" },
+	};
+}
+
+test("estado com version diferente de 1 é descartado INTEIRO, inclusive o job pago", async () => {
+	// `readState` compara `parsed.version !== STATE_VERSION` e devolve estado
+	// vazio. É a escolha declarada — não derrubar o editor por causa de um
+	// arquivo que não entende —, mas o preço dela merece estar escrito: uma
+	// futura versão 2 apaga do registro todo job PAGO sem artefato, que é
+	// exatamente o que `holdsUnclaimedMoney` existe para nunca perder. Migrar,
+	// e não descartar, é o que fecharia isso.
+	await withDir(async (dir) => {
+		await writeRawState(dir, {
+			version: 2,
+			nextSeq: 9,
+			updatedAt: new Date(0).toISOString(),
+			jobs: [pagoSemArtefato(7)],
+		});
+		const queue = await openQueue(dir);
+		assert.deepEqual(queue.list(), [], "versão desconhecida vira estado vazio");
+		assert.deepEqual(
+			queue.paidUnfinished(),
+			[],
+			"e a trilha do dinheiro que saiu vai junto",
+		);
+		// A fila segue funcionando, que é o motivo da escolha.
+		const novo = await enqueuePose(queue, "depois");
+		assert.ok(novo.accepted);
+		assert.equal(novo.accepted && novo.job.seq, 0, "a numeração recomeça do zero");
+		await queue.idle();
+		await queue.close();
+	});
+});
+
+test("`jobs` que não é array devolve estado vazio em vez de explodir", async () => {
+	for (const jobs of [{}, null, "nenhum", 3] as const) {
+		await withDir(async (dir) => {
+			await writeRawState(dir, {
+				version: 1,
+				nextSeq: 4,
+				updatedAt: new Date(0).toISOString(),
+				jobs,
+			});
+			const queue = await openQueue(dir);
+			assert.deepEqual(queue.list(), [], `jobs=${JSON.stringify(jobs)}`);
+			const r = await enqueuePose(queue, "a");
+			assert.ok(r.accepted);
+			await queue.idle();
+			await queue.close();
+		});
+	}
+});
+
+test("nextSeq ausente ou de tipo errado não faz dois jobs nascerem com o mesmo número", async () => {
+	// `readState` cai para 0 quando `nextSeq` não é número finito, e a
+	// reconciliação sobe para maxSeq+1. Sem essa segunda metade, o job novo
+	// nasceria com seq 0 empatando com o que está em disco, e o FIFO — que é
+	// ordenação POR SEQ — viraria empate não determinístico.
+	for (const nextSeq of [undefined, "12", null, true] as const) {
+		await withDir(async (dir) => {
+			await writeRawState(dir, {
+				version: 1,
+				...(nextSeq !== undefined ? { nextSeq } : {}),
+				updatedAt: new Date(0).toISOString(),
+				jobs: [
+					{
+						key: "heroi::antigo",
+						label: "antigo",
+						seq: 12,
+						enqueuedAt: new Date(0).toISOString(),
+						descriptor: { kind: "pose", characterId: "heroi", poseId: "antigo" },
+						cellKeys: [],
+						status: "pronto",
+						attempts: 1,
+						paid: false,
+					},
+				],
+			});
+			const queue = await openQueue(dir);
+			const novo = await enqueuePose(queue, "novo");
+			assert.ok(novo.accepted, `nextSeq=${String(nextSeq)}`);
+			assert.equal(
+				novo.accepted && novo.job.seq,
+				13,
+				`nextSeq=${String(nextSeq)} tinha que render 13, e não empatar com 12`,
+			);
+			await queue.idle();
+			await queue.close();
+		});
+	}
+});
+
+test("registro sem chave, sem seq ou com seq não-finito é descartado na leitura", async () => {
+	await withDir(async (dir) => {
+		const base = {
+			label: "x",
+			enqueuedAt: new Date(0).toISOString(),
+			cellKeys: [],
+			status: "na-fila",
+			attempts: 0,
+			paid: false,
+			descriptor: { kind: "pose", characterId: "heroi", poseId: "p" },
+		};
+		await writeRawState(dir, {
+			version: 1,
+			nextSeq: 20,
+			updatedAt: new Date(0).toISOString(),
+			jobs: [
+				{ ...base, seq: 1 }, // sem key
+				{ ...base, key: "", seq: 2 }, // key vazia
+				{ ...base, key: "heroi::sem-seq" }, // sem seq
+				{ ...base, key: "heroi::seq-texto", seq: "3" }, // seq não é número
+				null,
+				"nem objeto é",
+				{
+					...base,
+					key: "heroi::valido",
+					seq: 5,
+					descriptor: { kind: "pose", characterId: "heroi", poseId: "valido" },
+				},
+			],
+		});
+		const ran: string[] = [];
+		const queue = await openQueue(dir, {
+			execute: async (ctx) => {
+				ran.push(ctx.job.key);
+			},
+		});
+		await queue.idle();
+		await queue.close();
+		assert.deepEqual(
+			queue.list().map((j) => j.key),
+			["heroi::valido"],
+			"só o registro redespachável sobrevive",
+		);
+		assert.deepEqual(ran, ["heroi::valido"]);
+	});
+});
+
+// ---------------------------------------------------------------- ociosidade
+
+test("idle() com a fila vazia resolve na hora, sem esperar nada", async () => {
+	await withDir(async (dir) => {
+		const queue = await openQueue(dir);
+		let timer: NodeJS.Timeout | undefined;
+		const estourou = new Promise<"estourou">((resolve) => {
+			timer = setTimeout(() => resolve("estourou"), 5_000);
+		});
+		try {
+			const quem = await Promise.race([
+				queue.idle().then(() => "idle" as const),
+				estourou,
+			]);
+			assert.equal(quem, "idle", "idle() numa fila vazia não pode ficar pendurada");
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
+		// E de novo depois de um job ter passado — o waiter não pode ficar preso.
+		await enqueuePose(queue, "a");
+		await queue.idle();
+		await queue.idle();
+		assert.equal(queue.stats().queued, 0);
+		await queue.close();
+	});
+});
+
+test("enqueue DURANTE o close é recusado — `closed` vale a partir da primeira linha", async () => {
+	await withDir(async (dir) => {
+		const solta = deferred();
+		const queue = await openQueue(dir, {
+			execute: async () => {
+				await solta.promise;
+			},
+		});
+		await enqueuePose(queue, "em-voo");
+		await waitFor(() => queue.running().length === 1, "o job entrou em execução");
+
+		// `close({abortRunning})` AGUARDA os executores desenrolarem; o que
+		// interessa aqui é que a admissão fecha antes da espera terminar.
+		const fechando = queue.close({ abortRunning: true });
+		const r = await queue.enqueue({
+			key: "heroi::tarde",
+			label: "tarde",
+			descriptor: pose("tarde"),
+		});
+		assert.equal(r.accepted, false);
+		assert.equal(r.accepted === false && r.reason, "closed");
+		solta.resolve();
+		await fechando;
+		assert.equal(queue.get("heroi::tarde"), undefined, "nem registro fica");
+	});
+});
+
+// ---------------------------------------------------------------- projeções
+
+test("stats() conta os cinco estados e publica o teto de admissão", async () => {
+	await withDir(async (dir) => {
+		const base = {
+			label: "x",
+			enqueuedAt: new Date(0).toISOString(),
+			cellKeys: [],
+			attempts: 0,
+			paid: false,
+		};
+		const job = (key: string, seq: number, status: string) => ({
+			...base,
+			key,
+			seq,
+			status,
+			descriptor: { kind: "pose", characterId: "heroi", poseId: key },
+		});
+		await writeRawState(dir, {
+			version: 1,
+			nextSeq: 10,
+			updatedAt: new Date(0).toISOString(),
+			jobs: [
+				job("heroi::pronto", 1, "pronto"),
+				job("heroi::falhou", 2, "falhou"),
+				job("heroi::cancelado", 3, "cancelado"),
+				job("heroi::outro-pronto", 4, "pronto"),
+			],
+		});
+		const solta = deferred();
+		const queue = await openQueue(dir, {
+			concurrency: 1,
+			ratePerSecond: 7,
+			execute: async () => {
+				await solta.promise;
+			},
+		});
+		await enqueuePose(queue, "rodando");
+		await enqueuePose(queue, "esperando");
+		await waitFor(() => queue.running().length === 1, "um job em execução");
+
+		const s = queue.stats();
+		assert.equal(s.running, 1);
+		assert.equal(s.queued, 1, "o segundo espera o teto de 1");
+		assert.equal(s.done, 2);
+		assert.equal(s.failed, 1);
+		assert.equal(s.cancelled, 1);
+		assert.equal(s.concurrency, 1);
+		assert.equal(s.ratePerSecond, 7, "a taxa corrente é observável — ela cai a cada 429");
+
+		solta.resolve();
+		await queue.idle();
+		await queue.close();
+	});
+});
+
+test("ENDPOINT_BY_KIND cobre TODO JOB_KINDS — um kind novo sem endpoint não passa", () => {
+	// Este teste nasceu quando `weightForDescriptor` indexava
+	// `ENDPOINT_BY_KIND[descriptor.kind]` para achar o peso de admissão. Não é
+	// mais assim: o peso passou a ser o pico de chamadas simultâneas, num
+	// `switch` exaustivo sobre `JobKind` que o compilador já cobre.
+	//
+	// A tabela continua carregando dinheiro, e por isso o teste continua. Ela é
+	// a ÚNICA ponte deste módulo para a `COST_TABLE` do pipeline, e quem a
+	// consome hoje é `pesoAntigo` — o lado "antes" da comparação de admissão,
+	// que faz `weightFor(ENDPOINT_BY_KIND[d.kind])`. Um kind novo sem entrada
+	// aqui passaria `undefined` para `weightFor`, que faz
+	// `COST_TABLE[endpoint].concurrencyWeight` e estoura com TypeError dentro do
+	// teste de aceitação — longe da causa. Falhar aqui nomeia o kind.
+	assert.ok(JOB_KINDS.length >= 7, `JOB_KINDS tem ${JOB_KINDS.length}`);
+	assert.equal(
+		new Set(JOB_KINDS).size,
+		JOB_KINDS.length,
+		"nenhum kind repetido",
+	);
+	for (const kind of JOB_KINDS) {
+		const endpoint = ENDPOINT_BY_KIND[kind];
+		assert.ok(
+			typeof endpoint === "string" && endpoint.length > 0,
+			`kind "${kind}" sem endpoint de custo`,
+		);
+	}
+	assert.equal(
+		Object.keys(ENDPOINT_BY_KIND).length,
+		JOB_KINDS.length,
+		"e nenhum endpoint sobrando para um kind que não existe",
+	);
 });

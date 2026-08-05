@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { PixelLabClient, PixelLabError, type ApiResult } from '../../pixellab-pipeline/src/api.ts';
+import { COST_TABLE, estimateByArea } from '../../pixellab-pipeline/src/cost.ts';
 import { apiImageSize, mouldBase64, BLOCK_GEOMETRY } from './cube-mould.ts';
 import { decodePngToRgba, encodePngFromRgba, readPngHeader } from './png.ts';
 import { DIRECTIONS } from './model.ts';
@@ -2053,6 +2054,619 @@ test('remoção parcial não deixa o catálogo mostrando bloco sem PNG', async (
     // Chamar a remoção de novo termina o serviço: sobra nada.
     await deleteWorldBlock(join(dir, 'assets'), hash);
     assert.equal(existsSync(join(dir, 'assets', 'world-blocks', hash)), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// Regressão dos DOIS BLOCOS PAGOS que existem em disco
+// ============================================================================
+//
+// `tools/character-builder/assets/world-blocks/` guarda dois blocos comprados
+// com dinheiro real, e o `block.json` de cada um É a prova do defeito que a
+// onda 1 consertou. Os valores abaixo foram COPIADOS de lá em 2026-08-04 e
+// estão escritos como literais de propósito: `assets/` é gitignored e pode
+// sumir, e um teste de regressão que dependa dele deixa de regredir em
+// silêncio no dia em que a pasta não existir.
+//
+//   df00c6479810988c → description "quero um cubo de ossos"
+//                      action      "subtle ambient motion with gentle light
+//                                   variations and soft texture shimmer"
+//                      (a string-CORINGA — o fallback que TODO bloco recebia,
+//                      porque as 14 regexes de ACTION_FALLBACK são inglesas e
+//                      nenhuma casa "quero um cubo de ossos")
+//   a880b32d82456c4e → description "bloco de gero"
+//                      action      "gotas de agua escorrendo"
+//                      (português cru indo para um endpoint que só lê inglês)
+//
+// O `enhancedPrompt` gravado no primeiro fecha o argumento: a API devolveu
+// "The cubic stone structure remains stationary…" para um cubo de OSSOS. Ela
+// expandiu o que recebeu, e o que recebeu não dizia osso em lugar nenhum.
+
+/** A ação-coringa exata gravada em `df00c6479810988c/block.json`. */
+const ACAO_CORINGA =
+  'subtle ambient motion with gentle light variations and soft texture shimmer';
+
+/** A ação em português crua gravada em `a880b32d82456c4e/block.json`. */
+const ACAO_EM_PORTUGUES = 'gotas de agua escorrendo';
+
+test('regressão do bloco pago df00c6479810988c: "quero um cubo de ossos" não recebe mais a ação-coringa', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: WorldBlockConfig = {
+      ...textureConfig(),
+      description: 'quero um cubo de ossos',
+    };
+    const result = await withFallbackAction(() => runWorldBlock(client, config, opts(dir)));
+
+    // 1. A ação que vai ao /animate-with-text-v3 deixou de ser a coringa.
+    const acao = String(client.animBodies[0]!['action']);
+    assert.notEqual(
+      acao,
+      ACAO_CORINGA,
+      'esta é a string literal que o bloco pago recebeu; ela não pode voltar',
+    );
+    assert.doesNotMatch(acao, /gentle light variations/, 'nem em pedaço');
+    assert.match(acao, /\bbone\b/, 'a ação agora nomeia o material — é o único texto que ela vê');
+
+    // 2. O prompt do cubo deixou de carregar o PEDIDO e o português.
+    const enviado = String(client.tileBodies[0]!['description']);
+    assert.doesNotMatch(enviado, /quero/i);
+    assert.doesNotMatch(enviado, /ossos/i);
+    assert.match(enviado, /\bbone\b/);
+
+    // 3. O manifesto guarda os dois textos, e a ação gravada também mudou —
+    //    é o campo do block.json que denunciava o defeito.
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['description'], 'quero um cubo de ossos');
+    assert.equal(manifest['material'], 'bone');
+    assert.notEqual(manifest['action'], ACAO_CORINGA);
+    const sidecar = JSON.parse(
+      readFileSync(blockFile(dir, result.hash, 'animation.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    assert.notEqual(sidecar['action'], ACAO_CORINGA);
+    assert.equal(sidecar['material'], 'bone');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('regressão do bloco pago a880b32d82456c4e: "bloco de gero" não manda mais o rodeio ao fornecedor', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: WorldBlockConfig = { ...textureConfig(), description: 'bloco de gero' };
+    const result = await withFallbackAction(() => runWorldBlock(client, config, opts(dir)));
+
+    // "bloco de" era mandado inteiro ao /create-isometric-tile. Hoje o que sai
+    // é só o que sobrou do pedido depois de removida a palavra da forma.
+    const enviado = String(client.tileBodies[0]!['description']);
+    assert.doesNotMatch(enviado, /bloco/i, 'a palavra da FORMA não é material');
+    assert.equal(enviado, cubePrompt('gero', { hasReference: true }));
+
+    // O manifesto separa o que foi digitado do que foi de fato pedido — dado
+    // que, até 2026-08-04, não existia em lugar nenhum.
+    const manifest = readManifest(dir, result.hash);
+    assert.equal(manifest['description'], 'bloco de gero');
+    assert.equal(manifest['material'], 'gero');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A ação que o usuário digita NÃO passa pela normalização — só a descrição
+ * passa. Este teste não denuncia bug: fixa a fronteira, que é fácil de supor
+ * no lugar errado. O bloco pago `a880b32d82456c4e` tem `action` em português
+ * porque alguém a digitou assim, e continuaria assim hoje; o que mudou é que
+ * o MATERIAL viaja junto, dentro da mesma string.
+ */
+test('regressão: `action` digitada pelo usuário passa intacta — só a descrição é normalizada', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    const config: WorldBlockConfig = {
+      ...textureConfig(),
+      description: 'bloco de gero',
+      action: ACAO_EM_PORTUGUES,
+    };
+    await withFallbackAction(() => runWorldBlock(client, config, opts(dir)));
+
+    const acao = String(client.animBodies[0]!['action']);
+    assert.ok(
+      acao.startsWith(ACAO_EM_PORTUGUES),
+      `a ação digitada é preservada, veio "${acao}"`,
+    );
+    assert.equal(acao, actionWithMaterial(ACAO_EM_PORTUGUES, 'gero'));
+    assert.match(acao, /on a pixel art cube made of gero/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Honestidade sobre o alcance da correção: a coringa não sumiu, ela ganhou o
+ * material. Para os 14 materiais da tabela de `ACTION_FALLBACK` a ação passa a
+ * ser específica; para qualquer outro (aqui "gero", que não está no glossário
+ * nem na tabela) o texto continua sendo a coringa — com o material costurado
+ * no fim, o que é o mínimo que o endpoint precisa para saber o que anima.
+ */
+test('regressão: material fora da tabela ainda cai na coringa, mas AGORA carrega o material', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClient();
+    await withFallbackAction(() =>
+      runWorldBlock(
+        client,
+        { ...textureConfig(), description: 'bloco de gero' },
+        opts(dir),
+      ),
+    );
+    const acao = String(client.animBodies[0]!['action']);
+    assert.notEqual(acao, ACAO_CORINGA, 'a coringa NUA é o que não pode mais sair');
+    assert.equal(acao, `${ACAO_CORINGA}, on a pixel art cube made of gero`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * **Limitação conhecida, não bug.** Com DOIS adjetivos o conectivo português
+ * fica órfão no fim da frase: `frontAdjectives` move para a frente só as
+ * palavras que ESTE módulo produziu, e o "e" não é uma delas. O fallback é o
+ * piso de quem não tem `ANTHROPIC_API_KEY`, não um tradutor.
+ */
+test('fallbackMaterial: limitação conhecida — dois adjetivos deixam o conectivo órfão', () => {
+  assert.equal(fallbackMaterial('pedra rachada e escura'), 'cracked dark stone e');
+  // Com UM adjetivo a frase sai correta — é o caso que o mecanismo cobre.
+  assert.equal(fallbackMaterial('pedra rachada'), 'cracked stone');
+});
+
+// ============================================================================
+// packSpritesheet — o quadro sai do frame decodificado, nunca de um 48 fixo
+// ============================================================================
+//
+// Até 2026-08-04 o empacotador assumia 48×48. O `first_frame` que ele mesmo
+// manda é o cubo canônico 48×53, e os dois blocos pagos em disco têm folhas
+// 432×48 e 240×48: as cinco linhas da base do cubo, já pagas, foram cortadas.
+// Pior seria um frame de largura diferente — o laço copiava com passo
+// `y * 48 * 4` sobre um buffer de outra largura e CISALHARIA a folha inteira.
+//
+// O que se prova aqui, para cada forma de frame: (1) a folha tem o quadro real,
+// (2) o atlas JSON declara o que os PNGs realmente têm, e (3) cada quadro da
+// folha é byte a byte o frame correspondente — que é o teste de cisalhamento
+// de verdade, porque um passo errado produz uma folha do tamanho CERTO com os
+// pixels no lugar errado.
+
+/** Lê a spritesheet e devolve o retângulo do frame `i`, como RGBA cru. */
+function tileDaFolha(
+  sheet: Buffer,
+  i: number,
+  frameW: number,
+  frameH: number,
+): Buffer {
+  const img = decodePngToRgba(sheet);
+  const out = Buffer.alloc(frameW * frameH * 4);
+  for (let y = 0; y < frameH; y += 1) {
+    const src = (y * img.width + i * frameW) * 4;
+    img.data.copy(out, y * frameW * 4, src, src + frameW * 4);
+  }
+  return out;
+}
+
+/**
+ * Roda a técnica 'texture' com frames do quadro pedido e confere folha, atlas
+ * e conteúdo. Devolve o hash para quem quiser olhar mais.
+ */
+async function assertFolhaCoerente(
+  dir: string,
+  frameW: number,
+  frameH: number,
+): Promise<string> {
+  const client = new FakeClient();
+  client.animFrameWidth = frameW;
+  client.animFrameHeight = frameH;
+  const result = await withFallbackAction(() =>
+    runWorldBlock(client, textureConfig(), opts(dir)),
+  );
+
+  // 1. A folha tem o quadro REAL do frame, não um número fixo.
+  const sheetBytes = readFileSync(blockFile(dir, result.hash, 'spritesheet.png'));
+  const sheet = readPngHeader(sheetBytes);
+  assert.equal(sheet.width, frameW * 4, `largura da folha para ${frameW}×${frameH}`);
+  assert.equal(sheet.height, frameH, `altura da folha para ${frameW}×${frameH}`);
+
+  // 2. O atlas declara o que os PNGs têm — e os PNGs em frames/ conferem.
+  const atlas = JSON.parse(
+    readFileSync(blockFile(dir, result.hash, 'spritesheet.json'), 'utf-8'),
+  ) as {
+    frames: Record<string, { frame: { x: number; y: number; w: number; h: number } }>;
+    meta: { size: { w: number; h: number } };
+    animations: { anim: string[] };
+  };
+  assert.equal(atlas.meta.size.w, sheet.width, 'meta.size mente sobre a folha');
+  assert.equal(atlas.meta.size.h, sheet.height);
+  assert.equal(atlas.animations.anim.length, 4);
+  for (let i = 0; i < 4; i += 1) {
+    const nome = `frame_00${i}`;
+    const decl = atlas.frames[nome]!.frame;
+    assert.equal(decl.w, frameW, `${nome}.w`);
+    assert.equal(decl.h, frameH, `${nome}.h`);
+    assert.equal(decl.x, i * frameW, `${nome}.x`);
+    assert.equal(decl.y, 0);
+    const png = readPngHeader(readFileSync(blockFile(dir, result.hash, 'frames', `${nome}.png`)));
+    assert.equal(png.width, frameW, `o PNG de ${nome} tem que ter o que o atlas declara`);
+    assert.equal(png.height, frameH);
+  }
+
+  // 3. Cada quadro da folha É o frame correspondente, byte a byte. É aqui que
+  //    o cisalhamento apareceria: passo errado dá folha do tamanho certo com
+  //    os pixels deslocados uma linha a cada linha.
+  for (let i = 0; i < 4; i += 1) {
+    const frame = decodePngToRgba(
+      readFileSync(blockFile(dir, result.hash, 'frames', `frame_00${i}.png`)),
+    );
+    assert.deepEqual(
+      tileDaFolha(sheetBytes, i, frameW, frameH),
+      frame.data,
+      `o quadro ${i} da folha não é o frame ${i} — a folha cisalhou`,
+    );
+  }
+  return result.hash;
+}
+
+test('packSpritesheet: quadro CANÔNICO 48×53 — folha, atlas e pixels conferem', async () => {
+  const dir = tmpDir();
+  try {
+    await assertFolhaCoerente(dir, BLOCK_GEOMETRY.spriteWidth, BLOCK_GEOMETRY.spriteHeight);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('packSpritesheet: quadro LEGADO 48×48 continua aceito e não cisalha', async () => {
+  // 48×48 era a única forma aceita até 2026-08-04, e blocos gerados antes disso
+  // existem em disco. Estreitar o aceite sem prova transformaria em exceção um
+  // frame JÁ PAGO que hoje é gravado sem reclamação.
+  const dir = tmpDir();
+  try {
+    await assertFolhaCoerente(dir, 48, 48);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('packSpritesheet: forma INESPERADA 37×61 (ímpar, fora de qualquer múltiplo) não cisalha', async () => {
+  // Nem 48, nem quadrado, nem múltiplo de 4: exatamente o frame que o laço
+  // antigo, com passo `y * 48 * 4`, destruiria em silêncio.
+  const dir = tmpDir();
+  try {
+    await assertFolhaCoerente(dir, 37, 61);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Frames de tamanhos DIFERENTES entre si. A folha usa o quadro do primeiro e
+ * recorta o resto — nada cisalha, mas pode faltar borda, e o aviso tem de sair
+ * no log para que a perda não seja silenciosa.
+ */
+class FakeClientFramesIrregulares extends FakeClient {
+  override async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<ApiResult<T>> {
+    if (method === 'GET' && path.startsWith('/background-jobs/animjob-')) {
+      const id = path.slice('/background-jobs/'.length);
+      // Frame 0 no quadro canônico; os outros MENORES em largura e MAIORES em
+      // altura, para exercer os dois lados do `Math.min`.
+      const shapes: ReadonlyArray<readonly [number, number]> = [
+        [48, 53],
+        [40, 60],
+        [40, 60],
+        [40, 60],
+      ];
+      return {
+        data: {
+          id,
+          status: 'completed',
+          created_at: '2026-08-01T00:00:00Z',
+          last_response: {
+            images: shapes.map(([w, h], i) => ({
+              base64: makePNGRect(w, h, i + 1).toString('base64'),
+            })),
+          },
+        } as T,
+        status: 200,
+        raw: '{}',
+      };
+    }
+    return super.request<T>(method, path, body);
+  }
+}
+
+test('packSpritesheet: frames de tamanhos diferentes entre si — recorte pelo primeiro, com aviso', async () => {
+  const dir = tmpDir();
+  const logs: string[] = [];
+  try {
+    const client = new FakeClientFramesIrregulares();
+    const result = await withFallbackAction(() =>
+      runWorldBlock(client, textureConfig(), opts(dir, logs)),
+    );
+
+    const sheetBytes = readFileSync(blockFile(dir, result.hash, 'spritesheet.png'));
+    const sheet = readPngHeader(sheetBytes);
+    assert.equal(sheet.width, 48 * 4, 'o quadro é o do PRIMEIRO frame');
+    assert.equal(sheet.height, 53);
+    assert.ok(
+      logs.some((l) => l.includes('não têm todos') && l.includes('AVISO')),
+      'faltar borda em frame pago não pode ser silencioso',
+    );
+
+    // O frame 0 entra inteiro.
+    assert.deepEqual(
+      tileDaFolha(sheetBytes, 0, 48, 53),
+      decodePngToRgba(readFileSync(blockFile(dir, result.hash, 'frames', 'frame_000.png'))).data,
+    );
+
+    // Os menores entram nas 40 primeiras colunas e nas 53 primeiras linhas, sem
+    // deslocamento: a linha `y` da folha é a linha `y` do frame. Um passo errado
+    // aqui apareceria como diagonal.
+    const folha = decodePngToRgba(sheetBytes);
+    for (const i of [1, 2, 3]) {
+      const frame = decodePngToRgba(
+        readFileSync(blockFile(dir, result.hash, 'frames', `frame_00${i}.png`)),
+      );
+      assert.equal(frame.width, 40);
+      assert.equal(frame.height, 60);
+      for (const y of [0, 1, 26, 52]) {
+        const naFolha = folha.data.subarray(
+          (y * folha.width + i * 48) * 4,
+          (y * folha.width + i * 48 + 40) * 4,
+        );
+        const noFrame = frame.data.subarray(y * 40 * 4, y * 40 * 4 + 40 * 4);
+        assert.deepEqual(naFolha, noFrame, `linha ${y} do frame ${i} saiu deslocada`);
+      }
+      // A coluna 40..47 do quadro fica transparente — o frame era mais estreito.
+      const sobra = folha.data.subarray(
+        (0 * folha.width + i * 48 + 40) * 4,
+        (0 * folha.width + i * 48 + 48) * 4,
+      );
+      assert.deepEqual(sobra, Buffer.alloc(8 * 4), 'o que o frame não cobre fica vazio');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Devolve os frames da animação como RGBA CRU (sem PNG), como o tile faz. */
+class FakeClientFramesCrus extends FakeClient {
+  /** Bytes por frame. 48×53×4 e 48×48×4 são as duas formas aceitas. */
+  rawWidth = BLOCK_GEOMETRY.spriteWidth;
+  rawHeight = BLOCK_GEOMETRY.spriteHeight;
+
+  override async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<ApiResult<T>> {
+    if (method === 'GET' && path.startsWith('/background-jobs/animjob-')) {
+      const id = path.slice('/background-jobs/'.length);
+      const images = [1, 2, 3, 4].map((fill) => {
+        const rgba = Buffer.alloc(this.rawWidth * this.rawHeight * 4);
+        for (let i = 0; i < rgba.length; i += 1) rgba[i] = (fill * 31 + i) & 0xff;
+        return { base64: rgba.toString('base64') };
+      });
+      return {
+        data: {
+          id,
+          status: 'completed',
+          created_at: '2026-08-01T00:00:00Z',
+          last_response: { images },
+        } as T,
+        status: 200,
+        raw: '{}',
+      };
+    }
+    return super.request<T>(method, path, body);
+  }
+}
+
+test('packSpritesheet: frame em RGBA CRU nas duas formas conhecidas é empacotado', async () => {
+  for (const [w, h] of [
+    [BLOCK_GEOMETRY.spriteWidth, BLOCK_GEOMETRY.spriteHeight],
+    [BLOCK_GEOMETRY.spriteWidth, BLOCK_GEOMETRY.spriteWidth],
+  ] as const) {
+    const dir = tmpDir();
+    try {
+      const client = new FakeClientFramesCrus();
+      client.rawWidth = w;
+      client.rawHeight = h;
+      const result = await withFallbackAction(() =>
+        runWorldBlock(client, textureConfig(), opts(dir)),
+      );
+      const sheet = readPngHeader(readFileSync(blockFile(dir, result.hash, 'spritesheet.png')));
+      assert.equal(sheet.width, w * 4, `RGBA cru ${w}×${h}: largura da folha`);
+      assert.equal(sheet.height, h, `RGBA cru ${w}×${h}: altura da folha`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('packSpritesheet: RGBA cru de forma DESCONHECIDA é erro nomeado, não folha silenciosamente errada', async () => {
+  const dir = tmpDir();
+  try {
+    const client = new FakeClientFramesCrus();
+    client.rawWidth = 50;
+    client.rawHeight = 50;
+    await assert.rejects(
+      withFallbackAction(() => runWorldBlock(client, textureConfig(), opts(dir))),
+      /não é PNG nem RGBA cru/,
+      'bytes que não casam nenhuma forma têm de parar a execução',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// BUGS CONHECIDOS — estes testes DOCUMENTAM o comportamento de hoje
+// ============================================================================
+
+/**
+ * **Comportamento conhecido a corrigir (world-block.ts:2745-2748).** O guard da
+ * animação chama `estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48)`
+ * — literal, com o quadro errado (o canônico é 48×53) e sem o `frame_count`.
+ *
+ * Duas coisas, e só uma delas aparece no número:
+ *
+ * 1. O 48×48 literal HOJE não muda o valor: 2304 e 2544 caem os dois ABAIXO do
+ *    primeiro ponto medido da tabela (64×64 = 4096), e `estimateByArea` prende
+ *    no piso. O literal errado está mascarado pelo clamp — e volta a importar
+ *    no dia em que a tabela ganhar um ponto menor.
+ * 2. O que de fato subestima é ignorar o `frame_count`: o orçamento do endpoint
+ *    é `width × height × frame_count`, e a estimativa é de UM quadro. A conta
+ *    sai idêntica para 4, 8 e 16 frames.
+ *
+ * Num repositório cuja regra dura é "nada de custo surpresa", uma estimativa
+ * que não se move com o único parâmetro que multiplica o trabalho merece ficar
+ * escrita. Este teste NÃO conserta nada: ele tranca o valor atual para que a
+ * correção seja visível quando vier.
+ */
+test('[bug conhecido] o guard da animação estima 48×48 e ignora o frame_count', async () => {
+  const doQuadroErrado = estimateByArea(COST_TABLE['animate-with-text-v3'], 48 * 48);
+  const doQuadroCerto = estimateByArea(
+    COST_TABLE['animate-with-text-v3'],
+    BLOCK_GEOMETRY.spriteWidth * BLOCK_GEOMETRY.spriteHeight,
+  );
+  // O literal errado está mascarado: os dois caem no piso da tabela.
+  assert.equal(
+    doQuadroErrado.point,
+    doQuadroCerto.point,
+    'hoje 48×48 e 48×53 dão o MESMO ponto — o clamp esconde o literal errado',
+  );
+
+  const pontos: string[] = [];
+  for (const frameCount of [4, 8, 16] as const) {
+    const dir = tmpDir();
+    const logs: string[] = [];
+    try {
+      await withFallbackAction(() =>
+        runWorldBlock(new FakeClient(), { ...textureConfig(), frameCount }, opts(dir, logs)),
+      );
+      const linha = logs.find((l) => l.includes('animate-with-text-v3'));
+      assert.ok(linha, `o guard da animação tem que logar para ${frameCount} frames`);
+      const m = /: ([0-9.]+) USD/.exec(linha);
+      assert.ok(m?.[1], `não achei o valor em "${linha}"`);
+      pontos.push(m[1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  assert.equal(
+    new Set(pontos).size,
+    1,
+    `a estimativa não se move com o frame_count: ${pontos.join(', ')}`,
+  );
+  assert.equal(pontos[0], doQuadroErrado.point.toFixed(4), 'é o valor de um quadro só');
+
+  // E o que a área REAL do trabalho renderia, se o frame_count entrasse.
+  const comFrames = estimateByArea(
+    COST_TABLE['animate-with-text-v3'],
+    BLOCK_GEOMETRY.spriteWidth * BLOCK_GEOMETRY.spriteHeight * 8,
+  );
+  assert.ok(
+    comFrames.point > doQuadroErrado.point,
+    'a estimativa de hoje é a MENOR das duas — ela subestima, nunca superestima',
+  );
+});
+
+/**
+ * **Comportamento conhecido a corrigir (world-block.ts:1420 e 1444).** No ramo
+ * `texture` de `listWorldBlocks` a geometria publicada é a constante
+ * `MANIFEST_GEOMETRY`, e não a que está GRAVADA no manifesto — enquanto o ramo
+ * `views` (linha 1464) e o v2 (linha 1481) leem `manifest.geometry ??
+ * MANIFEST_GEOMETRY`.
+ *
+ * Hoje é invisível porque a constante coincide com o que os blocos em disco
+ * têm. Deixa de ser no dia em que a geometria do projeto mudar: os blocos
+ * PAGOS com a geometria antiga passam a ser publicados com a nova, e o editor
+ * desenha arte comprada na projeção errada sem nada reclamar.
+ */
+test('[bug conhecido] o catálogo ignora a geometria gravada no manifesto de TEXTURA', async () => {
+  const dir = tmpDir();
+  try {
+    const assets = join(dir, 'assets');
+    const geometriaGravada = {
+      tileWidth: 64,
+      tileHeight: 32,
+      cubeHeight: 40,
+      spriteWidth: 64,
+      spriteHeight: 72,
+    };
+
+    // Um bloco de TEXTURA cuja geometria em disco NÃO é a constante.
+    const hashTextura = 'dddddddddddddddd';
+    const dirTextura = join(assets, 'world-blocks', hashTextura);
+    mkdirSync(dirTextura, { recursive: true });
+    writeFileSync(
+      join(dirTextura, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash: hashTextura,
+        technique: 'texture',
+        description: 'bloco pago com geometria antiga',
+        geometry: geometriaGravada,
+        action: 'x',
+        animated: true,
+        frameCount: 4,
+        fps: 8,
+      }),
+    );
+    writeFileSync(join(dirTextura, 'spritesheet.png'), 'png');
+
+    // O MESMO manifesto de geometria, num bloco de VISTAS — o ramo que lê o
+    // manifesto. É o contraste que prova que a divergência é do ramo texture.
+    const hashVistas = 'eeeeeeeeeeeeeeee';
+    const dirVistas = join(assets, 'world-blocks', hashVistas);
+    mkdirSync(dirVistas, { recursive: true });
+    writeFileSync(
+      join(dirVistas, 'block.json'),
+      JSON.stringify({
+        version: 3,
+        hash: hashVistas,
+        technique: 'rotate8-mould',
+        description: 'bloco pago com geometria antiga, em vistas',
+        geometry: geometriaGravada,
+        views: 1,
+      }),
+    );
+    writeFileSync(join(dirVistas, 'view-0.png'), 'png');
+
+    const list = await listWorldBlocks(assets);
+    const textura = list.find((b) => b.hash === hashTextura);
+    const vistas = list.find((b) => b.hash === hashVistas);
+    assert.ok(textura && vistas);
+
+    // O ramo `views` respeita o que está gravado…
+    assert.deepEqual(vistas.geometry, geometriaGravada);
+    // …e o ramo `texture` SOBRESCREVE com a constante do módulo.
+    assert.equal(
+      textura.geometry.spriteHeight,
+      BLOCK_GEOMETRY.spriteHeight,
+      'comportamento de hoje: a constante ganha do manifesto',
+    );
+    assert.notDeepEqual(
+      textura.geometry,
+      geometriaGravada,
+      'este assert é a DOCUMENTAÇÃO do bug — quando ele falhar, o bug foi corrigido',
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
