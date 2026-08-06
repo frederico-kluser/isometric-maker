@@ -21,7 +21,7 @@ export interface RuntimeProject {
   readonly projectDir: string;
   /** Caminhos ABSOLUTOS para os sidecars `.pixellab.json`. */
   readonly atlasSidecars: readonly string[];
-  /** Caminhos ABSOLUTOS para os spritesheets `.json` (formato PixiJS). */
+  /** Caminhos ABSOLUTOS para os spritesheets `.json` (TexturePacker JSON Hash). */
   readonly atlasSheets: readonly string[];
 }
 
@@ -62,7 +62,7 @@ export async function loadRuntimeProject(
     }
     atlasSidecars.push(sidecarAbs);
 
-    // O spritesheet PixiJS está no mesmo directório, com extensão .json
+    // O spritesheet está no mesmo directório, com extensão .json
     // em vez de .pixellab.json.  Ex.: criatura.pixellab.json → criatura.json
     const sheetRel = atlasRel.replace(/\.pixellab\.json$/i, '.json');
     const sheetAbs = resolve(projectDir, sheetRel);

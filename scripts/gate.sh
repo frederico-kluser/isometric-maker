@@ -117,23 +117,19 @@ stage "scripts/check-docs.sh" \
 header "skills"
 
 auxiliar_stage "lint-skills.mjs" \
-	"node .agents/skills/scripts/lint-skills.mjs"
+	"NODE_OPTIONS=--experimental-strip-types node .agents/skills/scripts/lint-skills.mjs"
 
 auxiliar_stage "run-skill-evals.mjs" \
-	"node .agents/skills/scripts/run-skill-evals.mjs"
+	"NODE_OPTIONS=--experimental-strip-types node .agents/skills/scripts/run-skill-evals.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════
-header "PixiJS pin"
+header "renderizador único"
 
-stage "check-pixi-pin" \
-	"node scripts/check-pixi-pin.mjs" \
-	"F0-05"
-
-# ═══════════════════════════════════════════════════════════════════════
-header "PixiJS vendor"
-
-auxiliar_stage "vendor-types.mjs --check" \
-	"node tools/pixi-reference/scripts/vendor-types.mjs --check"
+# O pin do PixiJS e a integridade do vendor saíram daqui com a ADR 0041: não há
+# mais o que pinar. No lugar entrou a guarda de que ele não volta.
+stage "check-no-pixi" \
+	"bash scripts/check-no-pixi.sh" \
+	"-"
 
 # ═══════════════════════════════════════════════════════════════════════
 header "runtime"

@@ -33,3 +33,5 @@ TASK_PLAN.md
 # runtime do Claude Code: worktrees, sessões, cache — não versionar
 .claude/worktrees/
 .claude/scheduled_tasks.json
+
+.deep-orchestrator/

@@ -1,12 +1,14 @@
 /**
- * Spritesheet packing for PixiJS 8.
+ * Spritesheet packing — engine-neutral by construction.
  *
  * Emits two files per family, deliberately:
- *   <name>.json          strictly TexturePacker JSON Hash — what Pixi parses
+ *   <name>.json          strictly TexturePacker JSON Hash — a data format, not
+ *                        a renderer's format
  *   <name>.pixellab.json our sidecar: fps, provenance, logical anchors
  *
- * Never extend the Pixi JSON with game semantics. The parser owns that shape and
- * a future major version will fight you for it.
+ * Never extend the atlas JSON with game semantics. TexturePacker JSON Hash is
+ * read by every engine there is precisely because it says nothing about any of
+ * them; adding fields to it trades that reach for nothing.
  *
  * Pixel-perfect depends on three things done here and two done in the client:
  *   here    1. no resampling, ever
@@ -15,7 +17,7 @@
  *   client  4. scaleMode 'nearest', mipmaps off
  *           5. render at logical resolution, then ONE integer nearest upscale
  *
- * On premultiplied alpha: Pixi 8 premultiplies on upload and that is correct —
+ * On premultiplied alpha: WebGL premultiplies on upload and that is correct —
  * do not disable it. The classic dark halo comes from *filtering* between an
  * opaque pixel and a transparent one whose RGB is black. With nearest sampling,
  * extrusion and integer transforms there is no interpolation, so it cannot
@@ -46,7 +48,7 @@ export interface PackOptions {
   readonly anchor?: { readonly x: number; readonly y: number };
 }
 
-export interface PixiFrame {
+export interface AtlasFrame {
   readonly frame: { x: number; y: number; w: number; h: number };
   readonly rotated: false;
   readonly trimmed: false;
@@ -55,8 +57,8 @@ export interface PixiFrame {
   readonly anchor?: { x: number; y: number };
 }
 
-export interface PixiSpritesheet {
-  readonly frames: Record<string, PixiFrame>;
+export interface AtlasSheet {
+  readonly frames: Record<string, AtlasFrame>;
   readonly animations: Record<string, string[]>;
   readonly meta: {
     readonly app: string;
@@ -254,9 +256,9 @@ export async function measureAnchor(
  * — which is what lets `postHash` cache the atlas and keeps git diffs empty
  * when nothing changed.
  *
- * Tight NPOT sizing, not power-of-two: PixiJS 8 requires WebGL2 or WebGPU, both
- * of which handle NPOT, and pixel art never uses mipmaps. POT would waste up to
- * 72% of the texture.
+ * Tight NPOT sizing, not power-of-two: WebGL2 handles NPOT textures natively
+ * (the POT restriction died with WebGL1), and pixel art never uses mipmaps.
+ * POT would waste up to 72% of the texture.
  */
 export async function packGrid(
   frames: readonly FrameInput[],
@@ -320,7 +322,7 @@ export async function packGrid(
   }
 
   const composites: sharp.OverlayOptions[] = [];
-  const pixiFrames: Record<string, PixiFrame> = {};
+  const atlasFrames: Record<string, AtlasFrame> = {};
   const animations: Record<string, string[]> = {};
 
   prepared.forEach((p, i) => {
@@ -328,8 +330,8 @@ export async function packGrid(
     const row = Math.floor(i / cols);
     const cellX = col * cellW;
     const cellY = row * cellH;
-    // The frame rect excludes the extrusion ring: Pixi must sample the real
-    // sprite, with the extruded ring sitting just outside it.
+    // The frame rect excludes the extrusion ring: the client must sample the
+    // real sprite, with the extruded ring sitting just outside it.
     const fx = cellX + extrude;
     const fy = cellY + extrude;
 
@@ -340,7 +342,7 @@ export async function packGrid(
       top: cellY,
     });
 
-    pixiFrames[p.input.name] = {
+    atlasFrames[p.input.name] = {
       frame: { x: fx, y: fy, w: p.img.srcW, h: p.img.srcH },
       rotated: false,
       trimmed: false,
@@ -370,8 +372,8 @@ export async function packGrid(
     .png({ compressionLevel: 9, palette: false })
     .toFile(pngPath);
 
-  const sheet: PixiSpritesheet = {
-    frames: pixiFrames,
+  const sheet: AtlasSheet = {
+    frames: atlasFrames,
     animations,
     meta: {
       app: 'isometric-maker/pixellab-pipeline',
@@ -394,8 +396,9 @@ export async function packGrid(
     fps: Object.fromEntries(Object.keys(animations).map((a) => [a, 8])),
     specHashes: {},
     note:
-      'O .json ao lado é estritamente formato PixiJS. Semântica de jogo (fps, ' +
-      'hitbox, âncora lógica) vive aqui, para não brigar com o parser do Pixi.',
+      'O .json ao lado é estritamente TexturePacker JSON Hash. Semântica de ' +
+      'jogo (fps, hitbox, âncora lógica) vive aqui, para o atlas continuar ' +
+      'legível por qualquer leitor do formato.',
   };
   const sidecarPath = join(outDir, `${name}.pixellab.json`);
   await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`);
@@ -408,18 +411,21 @@ export async function packGrid(
 }
 
 /** The client-side half of pixel-perfect, as copyable code. */
-export const PIXI_CLIENT_SNIPPET = `
-// Antes de QUALQUER Assets.load — o global cobre o caso comum.
-import { TextureSource, Assets } from 'pixi.js';
-TextureSource.defaultOptions.scaleMode = 'nearest';
-TextureSource.defaultOptions.autoGenerateMipmaps = false;
+export const CLIENT_SNIPPET = `
+// tools/runtime/src/atlas.ts lê o TexturePacker JSON Hash sem biblioteca de
+// atlas nenhuma: cada quadro é um clone da textura da folha com repeat/offset.
+import { loadAtlas } from './atlas.ts';
 
-const sheet = await Assets.load('atlas/creatures/lobo-esfomeado.json');
-// E explicitamente na folha, para o caso de algo ter pré-carregado com o default.
-sheet.textureSource.style.scaleMode = 'nearest';
+const atlas = await loadAtlas('atlas/creatures/lobo-esfomeado.json');
+const frames = atlas.animations.get('lobo_walk_S')!;
 
-const sprite = new AnimatedSprite(sheet.animations['lobo_walk_S']);
-sprite.animationSpeed = 8 / 60; // fps do sidecar / 60
+// Filtro nearest e mipmaps desligados já vêm de loadAtlas — é o que faz o
+// pixel-perfect sobreviver ao upload para a GPU.
+const material = new THREE.SpriteMaterial({ map: frames[0], transparent: true });
+const sprite = new THREE.Sprite(material);
+
+// Avanço por RELÓGIO, com o fps do sidecar — nunca por quadro desenhado.
+const step = 1000 / 8; // fps do sidecar
 `.trim();
 
 export function atlasNameFor(assetOut: string): string {

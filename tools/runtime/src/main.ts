@@ -1,31 +1,42 @@
 /**
- * Ponto de entrada do browser — F4-02.
+ * Ponto de entrada do browser — runtime Three.js.
  *
- * Inicializa o PixiJS, carrega o projecto via `/__project__.json`, e
- * arranca o loop de jogo com passo fixo de lógica e interpolação visual.
+ * Inicializa o renderizador 3D, carrega o projeto via `/__project__.json`, e
+ * arranca o laço de jogo com passo fixo de lógica e interpolação visual.
+ *
+ * ## O personagem colide com os cubos
+ *
+ * Até 2026-08-05 o runtime chamava `step`, que **não tem mapa**: o personagem
+ * atravessava paredes e andava sobre o vazio, porque a função sem mapa não
+ * tem a quem perguntar "posso entrar aqui?". Agora chama `stepWithMap` com um
+ * `CollisionMap` construído do mapa do projeto — a mesma colisão varrida que
+ * o modo teste do editor usa, vinda do mesmo `iso-core`.
  */
-import { Application } from 'pixi.js';
 import type { ProjectV1 } from '@isometric-maker/iso-core/project';
 import type { MapData } from '@isometric-maker/iso-core/map';
 import {
   createMovementState,
-  step,
   DEFAULT_CONFIG,
   type MovementState,
   type MovementInput,
 } from '@isometric-maker/iso-core/movement';
+import { stepWithMap } from '@isometric-maker/iso-core/simulate';
+import {
+  buildCollisionMap,
+  spawnZAt,
+} from '@isometric-maker/iso-core/collision-map';
 import {
   createRenderContext,
-  drawMap,
   createCharacterRender,
-  updateCharacterAnim,
-  positionCharacter,
   createFpsCounter,
+  drawMap,
+  followCamera,
+  positionCharacter,
+  resizeRenderer,
+  updateCharacterAnim,
   updateFps,
-  type RenderContext,
   type CharacterRender,
-  type FpsCounter,
-} from './render';
+} from './render.ts';
 
 // ------------------------------------------------------------------ tipos da resposta do servidor
 
@@ -49,106 +60,86 @@ const MOVEMENT_CONFIG = {
 // ------------------------------------------------------------------ main
 
 async function main(): Promise<void> {
-  // 1. Busca os dados do projecto injectados pelo play.ts.
+  // 1. Busca os dados do projeto injetados pelo play.ts.
   const resp = await fetch('/__project__.json');
   if (!resp.ok) {
     document.body.textContent =
-      'Erro: não foi possível carregar o projecto. ' +
+      'Erro: não foi possível carregar o projeto. ' +
       'Execute o runtime via "npm run play -- <project.json>".';
     return;
   }
   const payload: ProjectPayload = await resp.json();
   const { project, sidecars, atlasSheets } = payload;
-  const geom = project.geometria;
 
-  // 2. Cria a aplicação PixiJS.
-  const app = new Application();
-  await app.init({
-    resizeTo: window,
-    backgroundColor: 0x1a1a2e,
-    antialias: false,
-    resolution: 1,
-    autoDensity: false,
+  // 2. Cria o canvas e o renderizador Three.js.
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  const ctx = createRenderContext(canvas, project.geometria);
+  resizeRenderer(ctx, window.innerWidth, window.innerHeight);
+  window.addEventListener('resize', () => {
+    resizeRenderer(ctx, window.innerWidth, window.innerHeight);
   });
-  document.body.appendChild(app.canvas);
 
-  // 3. Inicializa o contexto de renderização.
-  const ctx = createRenderContext(app, geom);
-
-  // 4. Desenha o mapa.
+  // 3. Desenha o mapa e monta o índice de colisão a partir dele.
   const mapa: MapData = project.mapa ?? { blocks: {}, edges: [] };
   drawMap(ctx, mapa);
+  const colisao = buildCollisionMap(mapa);
 
-  // 5. Carrega o personagem (primeiro atlas disponível).
+  // 4. Carrega o personagem (primeiro atlas disponível).
   let char: CharacterRender | undefined;
   const sheetKeys = Object.keys(sidecars);
   if (atlasSheets.length > 0 && sheetKeys.length > 0) {
     const sheetUrl = atlasSheets[0]!;
     const sidecar = sidecars[sheetKeys[0]!]!;
-    char = await createCharacterRender(sheetUrl, sidecar);
-    ctx.entityLayer.addChild(char.sprite);
+    char = await createCharacterRender(ctx, sheetUrl, sidecar);
   }
 
-  // 6. Configura o estado de movimento do personagem.
-  //    Posição inicial: centro do mapa ou (0,0,0).
-  let movementState = createMovementState(0, 0, 0);
+  // 5. Estado de movimento. O z inicial é o topo livre da coluna (0,0): pôr o
+  //    personagem em z=0 dentro de um mapa com chão o enterraria no primeiro
+  //    bloco.
+  let movementState = createMovementState(0, 0, spawnZAt(colisao, 0, 0));
 
-  // 7. Configura a câmara: desloca o stage para centrar o personagem.
-  positionStage(ctx, movementState.pos.x, movementState.pos.y);
-
-  // 8. Entrada de teclado.
   const input = createKeyboardInput();
-
-  // 9. Contador de FPS.
   const fpsCounter = createFpsCounter();
 
-  // 10. Loop de jogo.
+  // 6. Laço de jogo.
   let prevState = movementState;
-  app.ticker.add(() => {
-    const dt = app.ticker.deltaMS / 1000;
+  let lastTime = performance.now();
 
-    // Passo fixo de lógica (F3-01)
-    movementState = step(movementState, input.getInput(), dt, MOVEMENT_CONFIG);
+  const frame = (now: number): void => {
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
 
-    // Interpolação visual (apenas no desenho)
+    // Passo fixo de lógica, agora COM mapa — o personagem bate nos cubos.
+    movementState = stepWithMap(
+      movementState,
+      input.getInput(),
+      dt,
+      MOVEMENT_CONFIG,
+      colisao,
+    );
+
+    // Interpolação visual (apenas no desenho).
     const alpha = movementState.accumulator / MOVEMENT_CONFIG.fixedDt;
     const renderX =
       prevState.pos.x + (movementState.pos.x - prevState.pos.x) * alpha;
     const renderY =
       prevState.pos.y + (movementState.pos.y - prevState.pos.y) * alpha;
 
-    // Posiciona o personagem
     if (char) {
-      positionCharacter(char.sprite, renderX, renderY, movementState.z, geom);
-      updateCharacterAnim(char, movementState);
+      positionCharacter(char.sprite, renderX, renderY, movementState.z);
+      updateCharacterAnim(char, movementState, now);
     }
 
-    // Ajusta a câmara
-    positionStage(ctx, renderX, renderY);
-
-    // FPS
-    updateFps(fpsCounter, app.renderer);
+    followCamera(ctx, renderX, renderY, movementState.z);
+    ctx.renderer.render(ctx.scene, ctx.camera);
+    updateFps(fpsCounter, ctx.renderer);
 
     prevState = movementState;
-  });
-}
+    requestAnimationFrame(frame);
+  };
 
-// ------------------------------------------------------------------ câmara
-
-function positionStage(
-  ctx: RenderContext,
-  x: number,
-  y: number,
-): void {
-  const geom = ctx.geom;
-  const hw = geom.tileWidth / 2;
-  const hh = geom.tileHeight / 2;
-  const sx = (x - y) * hw;
-  const sy = (x + y) * hh;
-
-  // Centra o personagem no ecrã.
-  ctx.app.stage.x = ctx.app.screen.width / 2 - sx;
-  ctx.app.stage.y = ctx.app.screen.height / 3 - sy;
+  requestAnimationFrame(frame);
 }
 
 // ------------------------------------------------------------------ teclado
@@ -191,7 +182,7 @@ function createKeyboardInput(): KeyboardInputState {
       const stepUp = keys.has('e') || keys.has('E');
       const stepDown = keys.has('q') || keys.has('Q');
 
-      // Normaliza a direcção.
+      // Normaliza a direção.
       const len = Math.sqrt(dx * dx + dy * dy);
       if (len > 0) {
         dx /= len;

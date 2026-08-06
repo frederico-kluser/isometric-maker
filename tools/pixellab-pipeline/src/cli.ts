@@ -11,7 +11,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PixelLabClient } from "./api.ts";
 import { runGenerate, runResume } from "./generate.ts";
-import { packGrid, PIXI_CLIENT_SNIPPET, type FrameInput } from "./atlas.ts";
+import { packGrid, CLIENT_SNIPPET, type FrameInput } from "./atlas.ts";
 import { QueueStore } from "./queue.ts";
 import {
 	buildPlan,
@@ -501,9 +501,9 @@ async function cmdAtlas(): Promise<number> {
 	}
 
 	console.log(`\n${packed} atlas em ${ATLAS_OUT}`);
-	console.log("\nNo cliente (PixiJS 8):");
+	console.log("\nNo cliente (Three.js):");
 	console.log(
-		PIXI_CLIENT_SNIPPET.split("\n")
+		CLIENT_SNIPPET.split("\n")
 			.map((l) => `  ${l}`)
 			.join("\n"),
 	);
@@ -527,7 +527,7 @@ pixellab — pipeline de assets do isometric-maker
   rescue      Baixa recursos efêmeros (map-objects, 8 h) antes do prazo.
               É o PRIMEIRO comando depois de qualquer queda.
 
-  atlas       Empacota spritesheet + JSON do PixiJS. Custo zero de API.
+  atlas       Empacota spritesheet + JSON TexturePacker. Custo zero de API.
   verify      Confere que todo artefato do lockfile existe em disco.
 
 Variáveis: PIXELLAB_SECRET (obrigatório) · PIXELLAB_TIER=free|t1|t2|t3

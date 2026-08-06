@@ -8,7 +8,7 @@
  *   - the frame rect excludes the extrusion ring (otherwise sprites show a seam)
  *   - the extruded ring copies the border colour (otherwise a 1px halo)
  *   - packing is deterministic (otherwise the atlas cannot be cached by postHash)
- *   - the emitted JSON is exactly what PixiJS 8 parses
+ *   - the emitted JSON is exactly TexturePacker JSON Hash
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,7 +56,7 @@ async function makePartialFrame(
   return path;
 }
 
-test('packGrid emits a PixiJS-shaped spritesheet with correct frame rects', async () => {
+test('packGrid emits a TexturePacker JSON Hash spritesheet with correct frame rects', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'atlas-test-'));
   try {
     const frames: FrameInput[] = [];
@@ -72,7 +72,7 @@ test('packGrid emits a PixiJS-shaped spritesheet with correct frame rects', asyn
     const res = await packGrid(frames, join(dir, 'out'), 'wolf', { extrude: 1, padding: 2 });
     const sheet = JSON.parse(await readFile(res.jsonPath, 'utf8'));
 
-    // Shape Pixi requires.
+    // Shape the TexturePacker JSON Hash format requires.
     assert.equal(sheet.meta.image, 'wolf.png');
     assert.equal(sheet.meta.format, 'RGBA8888');
     assert.equal(sheet.meta.scale, 1);
@@ -86,7 +86,7 @@ test('packGrid emits a PixiJS-shaped spritesheet with correct frame rects', asyn
     assert.equal(f.frame.h, 16);
     assert.equal(f.rotated, false);
     assert.equal(f.trimmed, false);
-    // Offset by the extrusion, so Pixi samples inside the real sprite.
+    // Offset by the extrusion, so the client samples inside the real sprite.
     assert.equal(f.frame.x, 1);
     assert.equal(f.frame.y, 1);
 

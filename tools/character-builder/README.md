@@ -30,7 +30,7 @@ Três telas, um Vite só, roteamento por hash ([ADR 0034](../../docs/adr/0034-ap
 O `tools/map-builder` foi fundido aqui em 2026-08-02: a geometria, o
 autoladrilhamento e a exportação do mapa moram em `src/map/`, e a fundação do
 personagem jogável (direção, entrada, colisão) em `src/map/actor.ts` e
-`src/map/collision-map.ts`. A tela inativa é **desmontada**, não escondida —
+`packages/iso-core/src/collision-map.ts`. A tela inativa é **desmontada**, não escondida —
 com as duas montadas, o editor de mapa continuaria sondando `api/world-blocks`
 a cada 3 s enquanto o usuário desenha no estúdio.
 

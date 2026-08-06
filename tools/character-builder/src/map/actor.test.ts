@@ -23,7 +23,7 @@ import {
   worldDirectionFromKeys,
   type ActorFrames,
 } from './actor.ts';
-import { buildCollisionMap, spawnZAt } from './collision-map.ts';
+import { buildCollisionMap, spawnZAt } from '../../../../packages/iso-core/src/collision-map.ts';
 import {
   DEFAULT_CONFIG,
   createMovementState,
