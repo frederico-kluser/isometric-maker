@@ -45,7 +45,7 @@
   ],
   "invariants": [
     {
-      "must_contain": "face normal decides the adjacent cell",
+      "must_contain": "face normal decide the adjacent cell",
       "why": "sprite hit-testing and the 2D diagonal walk are retired with the PixiJS editor; the 3D editor picks with the raycaster and the face normal decides the adjacent cell"
     },
     {
