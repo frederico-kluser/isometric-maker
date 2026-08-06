@@ -45,7 +45,7 @@
   ],
   "invariants": [
     {
-      "must_contain": "Raycast, never walk the diagonal",
+      "must_contain": "face normal decides the adjacent cell",
       "why": "sprite hit-testing and the 2D diagonal walk are retired with the PixiJS editor; the 3D editor picks with the raycaster and the face normal decides the adjacent cell"
     },
     {
@@ -53,7 +53,7 @@
       "why": "the Minecraft-style placement contract: face normal maps to the adjacent cell, ground plane falls to z=0"
     },
     {
-      "must_contain": "the first hit is the nearest surface",
+      "must_contain": "DDA walks the MapData",
       "why": "intersections are sorted by distance; the first hit is the cell the camera actually sees"
     },
     {

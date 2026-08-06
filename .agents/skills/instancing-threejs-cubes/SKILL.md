@@ -83,8 +83,7 @@ of solid blocks, it eliminates the vast majority of instances.
 `setInstanceMatrix` (`tools/character-builder/src/map/3d/block-instancing.ts:534@a7139cdb`) composes
 a world matrix per instance: translation to the cell's position in world space (with the half-cube
 offset so the base sits on the integer grid), rotation around the Y axis for the cube's yaw, and
-unit scale. After calling `mesh.setMatrixAt(index, matrix)`, **`mesh.instanceMatrix.needsUpdate =
-true` is mandatory** -- without it the GPU never sees the change.
+unit scale. After calling `mesh.setMatrixAt(index, matrix)`, **`mesh.instanceMatrix.needsUpdate = true` is mandatory** -- without it the GPU never sees the change.
 
 `applyYaw` (`tools/character-builder/src/map/3d/block-instancing.ts:329@a7139cdb`) rotates every
 active instance to match the camera's yaw. The cubes are symmetric under 90-degree rotation in Y, so
