@@ -70,10 +70,9 @@ top face. Any other Z value, or a lateral axis → side face
 
 ## The adjacent cell
 
-The placement cell is simply `hit cell + normal` in map coordinates
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:236-240`). No half-cube
-offset math — DDA operates in map (integer) coordinates, not in Three.js world space.
-The coordinate conversion happens once at the boundary.
+The placement cell is simply `hit cell + normal` in map coordinates, not world space
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:236-240`). DDA operates in map
+(integer) coordinates — no half-cube offset math, no Three.js world-space transforms.
 
 ## Coordinate mapping
 

@@ -15,20 +15,20 @@
       "why": "forgetting the negated Y flips picking vertically with no error to search for"
     },
     {
-      "must_contain": "transformDirection(mesh.matrixWorld)",
-      "why": "face.normal is local space; skipping the world transform breaks placement the day a mesh rotates"
+      "must_contain": "DDA, not Raycaster",
+      "why": "after InstancedMesh there are no individual meshes to intersect; the new approach must be documented as the canonical one"
     },
     {
-      "must_contain": "the half-cube offset",
-      "why": "block positions carry the y + 0.5 centering offset; the raycaster must subtract it back"
+      "must_contain": "map coordinates, not world space",
+      "why": "DDA operates in integer map coordinates; the coordinate conversion happens once at the boundary, eliminating half-cube offset bugs"
     },
     {
-      "must_contain": "readonly Object3D[]",
-      "why": "intersectObjects takes a mutable array; the cast is the documented trap"
+      "must_contain": "ddaRaycast",
+      "why": "the function name that replaced intersectObjects; a search for the old name should find nothing"
     },
     {
-      "must_contain": "ground-plane",
-      "why": "the plane is found by name; renaming it silently breaks empty-space placement"
+      "must_contain": "adjacent cell = hit cell + normal",
+      "why": "the placement rule in map coordinates; losing this loses the Minecraft-style contract"
     }
   ],
   "check_provenance": true

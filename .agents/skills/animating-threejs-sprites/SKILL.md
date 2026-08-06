@@ -24,7 +24,10 @@ The pipeline exports two files per creature or object family
 | `<name>.json` | TexturePacker JSON Hash | Frame rectangles, sprite source sizes, anchor per frame |
 | `<name>.pixellab.json` | Sidecar (project-specific) | FPS per animation, anchor source (measured vs default), provenance, spec hashes |
 
-The `.json` is strictly TexturePacker JSON Hash format. It was NEVER specific to any renderer,
+The `.json` is strictly TexturePacker JSON Hash format. O formato TexturePacker JSON Hash was NEVER PixiJS-specific — é um formato aberto
+usado por dezenas de engines; tratá-lo como "formato do PixiJS" leva a usar o
+parser errado e perder metadados que o TexturePacker escreve mas o PixiJS ignora.
+It was NEVER specific to any renderer,
 despite the historical type names `AtlasFrame` and `AtlasSheet` (formerly `PixiFrame` and
 `PixiSpritesheet` before the [ADR 0047](../../docs/adr/0047-renderizador-unico-threejs.md)
 rename) in the exporter (`tools/pixellab-pipeline/src/atlas.ts:49,58@615de6e5`). The runtime

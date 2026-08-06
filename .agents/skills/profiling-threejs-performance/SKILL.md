@@ -1,6 +1,6 @@
 ---
 name: profiling-threejs-performance
-description: Ensina como medir desempenho do Three.js neste codebase — renderer.info como o unico numero honesto (nao FPS, que o render-on-demand torna inutil), draw calls vs contagem de objetos, como o laco unico coalesce e para quando nada anima (ADR 0040), o que InstancedMesh e hidden-cell culling fazem ao orcamento de draw calls, e os dois numeros que importam: render.calls e render.triangles. Use whenever investigating slowness in the 3D editor or runtime, suspecting a performance regression, adding new geometry, or seeing an FPS number — including Portuguese phrasings like "o editor esta lento", "quantos draw calls", "por que o FPS caiu", "desempenho do render", "medir GPU". Triggers on renderer.info, render.calls, FPS, draw call, performance, profiling, shadowMap.autoUpdate, needsUpdate.
+description: Ensina como medir desempenho do Three.js neste codebase — renderer.info como o unico numero honesto (nao FPS, que o render-on-demand torna inutil), draw calls vs contagem de objetos, como o laco unico coalesce e para quando nada anima (ADR 0040), o que InstancedMesh e hidden-cell culling fazem ao orcamento de draw calls, e os dois numeros que importam: render.calls e render.triangles. Use whenever investigating slowness in the 3D editor or runtime, suspecting a performance regression, adding new geometry, or seeing an FPS number — including Portuguese phrasings like "o editor esta lento", "o zoom esta travando", "a ultima mudanca deixou lento", "muitos blocos no mapa", "quantos draw calls", "por que o FPS caiu", "desempenho do render", "medir GPU". Triggers on renderer.info, render.calls, FPS, draw call, performance, profiling, shadowMap.autoUpdate, needsUpdate, zoom, travando, regressão, muitos blocos.
 metadata:
   type: knowledge
   verification_signal: cd tools/character-builder && npm run typecheck && npm test
@@ -84,7 +84,7 @@ pass for the scene. With `renderer.shadowMap.autoUpdate = false`
 map changes -- not when the camera pans, zooms, or rotates. This is what makes zoom continuous: the
 2048x2048 depth render is skipped on every frame where only the camera moved.
 
-`needsUpdate` is a one-shot flag consumed by the renderer after one frame. Setting it is a request,
+`needsUpdate` is a one shot flag consumed by the renderer after one frame. Setting it is a request,
 not a mode. `syncBlocks` sets it only when the map actually changed
 (`tools/character-builder/src/map/3d/scene3d.ts:682@7389adc7`). Any code that changes what casts a
 shadow (adding or removing blocks, swapping materials, resizing the frustum) must set it again.
@@ -121,7 +121,8 @@ But if you read after multiple draws without resetting, the value is the sum of 
 
 ## What is not verified
 
-- No automated performance baseline exists in this repository. ADR 0040
+- No automated performance baseline exists in this repository. Nao ha baseline de desempenho neste repositorio.
+  ADR 0040
   (`docs/adr/0040-zoom-continuo-e-desenho-sob-demanda.md`@5706fe27) explicitly notes this: "Nao ha
   baseline de desempenho neste repositorio, e esta ADR nao cria um."
 - The 2048x2048 shadow map size was never profiled against 1024x1024.

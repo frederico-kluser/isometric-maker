@@ -49,7 +49,7 @@ The loop must not outlive the component: it is cancelled both by `exitTestMode`
 ## The collision index is a derived document, rebuilt on change
 
 `buildCollisionMap(map)` turns the RLE column store into the `hasBlock`/`hasEdge` pair the model asks
-for, indexed for O(1) (`tools/character-builder/src/map/collision-map.ts:52@9b9aeb65`). It is
+for, indexed for O(1) (`packages/iso-core/src/collision-map.ts:52@9b9aeb65`). It is
 rebuilt when the map changes during a test, never per frame
 (`tools/character-builder/src/map/3d/map-editor-3d.tsx:341@3073b710`).
 
@@ -59,7 +59,7 @@ Treating `''` as a block makes the character walk on air.
 
 `spawnZAt(map, x, y)` picks the drop-in height by the same support rule `canEnter` uses, so a
 character placed there is never inside stone nor floating
-(`tools/character-builder/src/map/collision-map.ts:92@9b9aeb65`).
+(`packages/iso-core/src/collision-map.ts:92@9b9aeb65`).
 
 ## The two conversions, in opposite directions
 
@@ -142,14 +142,14 @@ input always produces the same output, regardless of frame rate.
 - The rules the model enforces are covered by `iso-core`'s suite; **this wiring is not**. No test
   drives the rAF loop, the ref plumbing or the push-out through the editor.
 - `hasEdge` receives no type, so every edge blocks equally — a door blocks like a wall. Recorded as a
-  known limitation (`tools/character-builder/src/map/collision-map.ts:17@9b9aeb65`); the editor has
+  known limitation (`packages/iso-core/src/collision-map.ts:17@9b9aeb65`); the editor has
   no edge tool today, so `edges` is empty in practice.
 - The actor's on-screen height (1.6 world units) is a visual choice, unrelated to the collision box.
 
 ## References
 
 - `packages/iso-core/src/simulate.ts` — `stepWithMap`, the one live door
-- `tools/character-builder/src/map/collision-map.ts` — the document→physics bridge
+- `packages/iso-core/src/collision-map.ts` — the document→physics bridge
 - `tools/character-builder/src/map/actor.ts` — directions, shadow and arrow data
 - `simulating-isometric-physics` — the rules themselves
 - `rotating-isometric-camera` — where the turn value comes from

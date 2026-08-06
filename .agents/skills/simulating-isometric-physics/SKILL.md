@@ -264,7 +264,7 @@ All four functions are pure and tested in iso-core — no DOM, no Three.js, no r
   in `packages/iso-core/src/dda-raycast.ts` (Amanatides-Woo algorithm) and
   `packages/iso-core/src/physics-query.ts` (`raycast`, `overlap`, `overlapMap`, `sweep`).
   The editor picking uses DDA instead of Three.js Raycaster. `trace.ts` remains an input
-  replay (for deterministic verification), not a raycast.
+  replay (for deterministic verification), not a DDA raycast.
 - **No multi-cell footprint.** The map format forbids it
   (`packages/iso-core/src/map.ts:34@0a012d80`). This is why the classic grid-traversal correctness
   trap — an occupant listed in a voxel whose geometry extends past it, so the first non-empty voxel
