@@ -27,14 +27,18 @@ import {
   Layers2Icon,
   Maximize2Icon,
   PaintBucketIcon,
+  PauseIcon,
   PencilIcon,
   PlayIcon,
   RedoIcon,
   RotateCwIcon,
+  StepForwardIcon,
   Trash2Icon,
   UndoIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  CheckIcon,
+  XIcon,
 } from 'lucide-react';
 import type { CollisionMap } from '../../../../../packages/iso-core/src/collision.ts';
 import {
@@ -67,6 +71,14 @@ import {
   pushPlayerOutOfCell,
   type PlayerCell,
 } from '../../../../../packages/iso-core/src/collision-box.ts';
+import {
+  initBlockPhysics,
+  resolveMapAfterSimulation,
+  stepBlockPhysics,
+  DEFAULT_BLOCK_PHYSICS_CONFIG,
+  type BlockWorld,
+  type FallingBlock,
+} from '../../../../../packages/iso-core/src/block-physics.ts';
 import {
   DEFAULT_BLOCKS,
   makeCatalog,
@@ -196,9 +208,30 @@ export function MapEditor3D() {
   const [, setTestPlayer] = useState<PlayerCell | null>(null);
   const lastPlayerCellRef = useRef<PlayerCell | null>(null);
 
-  // Modo teste: 'editar' edita o mapa; 'testar' roda o personagem com WASD.
-  const [mode, setMode] = useState<'editar' | 'testar'>('editar');
+  // Modo do editor: 'editar' edita o mapa; 'testar' roda o personagem com WASD;
+  // 'simular' roda a simulação de física de blocos (queda por falta de suporte).
+  const [mode, setMode] = useState<'editar' | 'testar' | 'simular'>('editar');
   const [actorState, setActorState] = useState<MovementState | null>(null);
+
+  // ─── simulação de física de blocos ───
+  // Estado da simulação: 'running' | 'paused'.
+  const [simState, setSimState] = useState<'running' | 'paused'>('running');
+  // Mapa original (snapshot ao entrar no modo simular) — para "Descartar".
+  const simOriginalMapRef = useRef<MapData | null>(null);
+  // Blocos que estão a cair neste instante.
+  const [simFalling, setSimFalling] = useState<readonly FallingBlock[]>([]);
+  // Blocos que aterraram (acumulado).
+  const simLandedRef = useRef<FallingBlock[]>([]);
+  // Acumulador de passos desde a última descida.
+  const simAccumulatorRef = useRef(0);
+  // Referência ao mapa de colisão da simulação.
+  const simCollisionRef = useRef<CollisionMap | null>(null);
+  // Blocos ocupados do mundo (snapshot do MapData ao entrar).
+  const simOccupiedRef = useRef<readonly { x: number; y: number; z: number; blockType: string }[]>([]);
+  // rAF ref da simulação (separado do modo teste).
+  const simRafRef = useRef<number | null>(null);
+  // Último timestamp do laço de simulação.
+  const simLastTimeRef = useRef(0);
 
   // Refs do ticker: o laço roda fora do React (requestAnimationFrame) e lê o
   // valor atual destes refs — reconciliar a árvore 60×/s por causa da posição
@@ -321,8 +354,8 @@ export function MapEditor3D() {
   useEffect(() => {
     const s3d = scene3dRef.current;
     if (!s3d || !ready) return;
-    // No modo teste o ticker desenha a cada quadro — este efeito não compete.
-    if (mode === 'testar') return;
+    // No modo teste e simular o ticker desenha a cada quadro — este efeito não compete.
+    if (mode === 'testar' || mode === 'simular') return;
 
     let previewCell: Pick3DCell | null = null;
     let previewInvalid = false;
@@ -468,8 +501,8 @@ export function MapEditor3D() {
         s3d.pan(-dx, dy, host.clientWidth, host.clientHeight);
         return;
       }
-      // No modo teste o ponteiro não edita — só o pan (já tratado acima).
-      if (stateRef.current.mode === 'testar') return;
+      // No modo teste e simular o ponteiro não edita — só o pan (já tratado acima).
+      if (stateRef.current.mode === 'testar' || stateRef.current.mode === 'simular') return;
       const result = pickAt(e.clientX, e.clientY);
       setPickState((prev) => (samePick(prev, result) ? prev : result));
       if (dragging.current && result) applyTool(result);
@@ -480,8 +513,8 @@ export function MapEditor3D() {
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
-      // No modo teste o ponteiro não edita: botão esquerdo e do meio pan.
-      if (stateRef.current.mode === 'testar') {
+      // No modo teste e simular o ponteiro não edita: botão esquerdo e do meio pan.
+      if (stateRef.current.mode === 'testar' || stateRef.current.mode === 'simular') {
         if (e.button === 0 || e.button === 1) {
           panning.current = { x: e.clientX, y: e.clientY };
         }
@@ -814,11 +847,241 @@ export function MapEditor3D() {
     });
   }, []);
 
-  // O laço do modo teste não pode sobreviver ao desmonte do editor.
+  // ──────────────────────────────────────────────────────────────── modo simular
+
+  /**
+   * Constrói um {@link BlockWorld} a partir do mapa actual.
+   *
+   * Extrai todas as células ocupadas e o índice de colisão — o que a função
+   * {@link stepBlockPhysics} precisa para avançar a simulação.
+   */
+  const buildBlockWorld = useCallback((map: MapData): BlockWorld => {
+    const colisao = buildCollisionMap(map);
+    const occupied: { x: number; y: number; z: number; blockType: string }[] = [];
+    for (const [chave, runs] of Object.entries(map.blocks)) {
+      const [xs, ys] = chave.split(':');
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      let z = 0;
+      for (const run of runs) {
+        if (run.block !== '') {
+          for (let i = 0; i < run.count; i += 1) {
+            occupied.push({ x, y, z: z + i, blockType: run.block });
+          }
+        }
+        z += run.count;
+      }
+    }
+    return { occupied, collisionMap: colisao };
+  }, []);
+
+  /** Entra no modo de simulação de física de blocos. */
+  const enterSimulateMode = useCallback(() => {
+    const currentMap = stateRef.current.map;
+    simOriginalMapRef.current = currentMap;
+    const world = buildBlockWorld(currentMap);
+    simOccupiedRef.current = world.occupied;
+    simCollisionRef.current = world.collisionMap;
+    simLandedRef.current = [];
+    simAccumulatorRef.current = 0;
+
+    const init = initBlockPhysics(world);
+    setSimFalling(init.falling);
+    setSimState('running');
+    setMode('simular');
+    setPickState(null);
+    simLastTimeRef.current = performance.now();
+
+    // Laço de simulação: tick a cada 100ms (~10 quadros/s para visualização).
+    const tick = (): void => {
+      if (simRafRef.current === null) return; // cancelado
+      simRafRef.current = requestAnimationFrame(tick);
+
+      if (simStateRef.current !== 'running') return;
+
+      const now = performance.now();
+      const dt = now - simLastTimeRef.current;
+      simLastTimeRef.current = now;
+      // Tick a cada ~100ms. Acumula passos se o delta for maior.
+      const tickInterval = 100; // ms entre passos de simulação
+      const stepsToRun = Math.min(Math.floor(dt / tickInterval), 10); // cap de segurança
+      // Se dt < tickInterval, não avança — espera acumular.
+      if (stepsToRun === 0) return;
+
+      const world = { occupied: simOccupiedRef.current, collisionMap: simCollisionRef.current! };
+      let falling: readonly FallingBlock[] = simFallingRef.current;
+      let acc = simAccumulatorRef.current;
+      let landed = simLandedRef.current;
+
+      for (let i = 0; i < stepsToRun; i++) {
+        acc = (acc + 1) % DEFAULT_BLOCK_PHYSICS_CONFIG.fallInterval;
+        const result = stepBlockPhysics(
+          world,
+          falling,
+          acc === 0 ? DEFAULT_BLOCK_PHYSICS_CONFIG.fallInterval - 1 : acc - 1,
+          null,
+          DEFAULT_BLOCK_PHYSICS_CONFIG,
+        );
+        falling = result.falling;
+        landed = [...landed, ...result.landed];
+        if (falling.length === 0) {
+          setSimState('paused');
+          break;
+        }
+      }
+
+      simFallingRef.current = falling;
+      simLandedRef.current = landed;
+      simAccumulatorRef.current = acc;
+      setSimFalling(falling);
+
+      // Redesenha a cena com os blocos em queda visíveis.
+      const s3d = scene3dRef.current;
+      if (s3d) {
+        // Constrói um MapData virtual com as posições atuais dos blocos.
+        const resolved = resolveMapAfterSimulation(world, falling, landed);
+        const virtualBlocks: Record<string, typeof currentMap.blocks[string]> = {};
+        for (const cell of resolved) {
+          const key = `${cell.x}:${cell.y}`;
+          if (!virtualBlocks[key]) virtualBlocks[key] = [];
+          (virtualBlocks[key] as { block: string; count: number }[]).push({ block: cell.blockType, count: 1 });
+        }
+        // Simplificação: usa o RLE real para os blocos que não caíram e
+        // sobrepõe as posições dos blocos que estão a cair/aterraram.
+        // Na prática, reconstruímos o mapa virtual para renderização.
+        const virtualMap: MapData = { blocks: {}, edges: currentMap.edges };
+        // Agrupa por coluna e ordena por z.
+        const byColumn = new Map<string, { x: number; y: number; cells: { z: number; blockType: string }[] }>();
+        for (const cell of resolved) {
+          const cKey = `${cell.x}:${cell.y}`;
+          let col = byColumn.get(cKey);
+          if (!col) { col = { x: cell.x, y: cell.y, cells: [] }; byColumn.set(cKey, col); }
+          col.cells.push({ z: cell.z, blockType: cell.blockType });
+        }
+        for (const col of byColumn.values()) {
+          col.cells.sort((a, b) => a.z - b.z);
+          const runs: { block: string; count: number }[] = [];
+          for (const c of col.cells) {
+            // Preenche gaps com ar
+            while (runs.length > 0 ? (runs.reduce((s, r) => s + r.count, 0)) < c.z : c.z > 0) {
+              const currentZ = runs.reduce((s, r) => s + r.count, 0);
+              if (currentZ < c.z) runs.push({ block: '', count: c.z - currentZ });
+              else break;
+            }
+            runs.push({ block: c.blockType, count: 1 });
+          }
+          virtualMap.blocks[`${col.x}:${col.y}`] = runs;
+        }
+
+        s3d.render({
+          map: virtualMap,
+          rotation: stateRef.current.rotation,
+          preview: null,
+          highlight: null,
+        });
+      }
+    };
+
+    simRafRef.current = requestAnimationFrame(tick);
+  }, [buildBlockWorld]);
+
+  const exitSimulateMode = useCallback((apply: boolean) => {
+    if (simRafRef.current !== null) cancelAnimationFrame(simRafRef.current);
+    simRafRef.current = null;
+
+    if (apply) {
+      // Aplica as mudanças: constrói um MapData com as posições finais dos
+      // blocos (aterrados + ainda a cair).
+      const world = { occupied: simOccupiedRef.current, collisionMap: simCollisionRef.current! };
+      const resolved = resolveMapAfterSimulation(world, simFallingRef.current, simLandedRef.current);
+
+      // Reconstrói o MapData a partir das posições resolvidas.
+      const newBlocks: Record<string, MapData['blocks'][string]> = {};
+      const byColumn = new Map<string, { z: number; blockType: string }[]>();
+      for (const cell of resolved) {
+        const cKey = `${cell.x}:${cell.y}`;
+        let col = byColumn.get(cKey);
+        if (!col) { col = []; byColumn.set(cKey, col); }
+        col.push({ z: cell.z, blockType: cell.blockType });
+      }
+      for (const [key, cells] of byColumn) {
+        cells.sort((a, b) => a.z - b.z);
+        const runs: { block: string; count: number }[] = [];
+        let currentZ = 0;
+        for (const c of cells) {
+          if (c.z < currentZ) continue; // bloco duplicado ou abaixo do anterior
+          if (c.z > currentZ) {
+            // Preenche gap com ar.
+            // Para simplificar, não escrevemos ar no meio — só empilhamos.
+          }
+          runs.push({ block: c.blockType, count: 1 });
+          currentZ = c.z + 1;
+        }
+        if (runs.length > 0) newBlocks[key] = runs;
+      }
+
+      const newMap: MapData = { blocks: newBlocks, edges: stateRef.current.map.edges };
+      setHistory((h) => pushHistory(h, newMap));
+    }
+
+    // Limpa o estado da simulação.
+    simFallingRef.current = [];
+    simLandedRef.current = [];
+    simOccupiedRef.current = [];
+    simCollisionRef.current = null;
+    simOriginalMapRef.current = null;
+    setSimFalling([]);
+    setMode('editar');
+
+    // Redesenha o mapa original (ou aplicado).
+    scene3dRef.current?.render({
+      map: stateRef.current.map,
+      rotation: stateRef.current.rotation,
+      preview: null,
+      highlight: null,
+    });
+  }, []);
+
+  // Ref espelho do estado de simulação para o laço rAF ler sem reconciliação.
+  const simStateRef = useRef(simState);
+  simStateRef.current = simState;
+  const simFallingRef = useRef<readonly FallingBlock[]>(simFalling);
+  simFallingRef.current = simFalling;
+
+  // Avança um passo na simulação.
+  const simStep = useCallback(() => {
+    const world = { occupied: simOccupiedRef.current, collisionMap: simCollisionRef.current! };
+    let falling: readonly FallingBlock[] = simFallingRef.current;
+    let acc = simAccumulatorRef.current;
+    let landed = simLandedRef.current;
+
+    acc = (acc + 1) % DEFAULT_BLOCK_PHYSICS_CONFIG.fallInterval;
+    const result = stepBlockPhysics(
+      world,
+      falling,
+      acc === 0 ? DEFAULT_BLOCK_PHYSICS_CONFIG.fallInterval - 1 : acc - 1,
+      null,
+      DEFAULT_BLOCK_PHYSICS_CONFIG,
+    );
+    falling = result.falling;
+    landed = [...landed, ...result.landed];
+
+    simFallingRef.current = falling;
+    simLandedRef.current = landed;
+    simAccumulatorRef.current = acc;
+    setSimFalling(falling);
+
+    if (falling.length === 0) setSimState('paused');
+  }, []);
+
+  // Os laços de teste e simulação não podem sobreviver ao desmonte do editor.
   useEffect(
     () => () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+      if (simRafRef.current !== null) cancelAnimationFrame(simRafRef.current);
+      simRafRef.current = null;
     },
     [],
   );
@@ -831,9 +1094,15 @@ export function MapEditor3D() {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
-      if (e.key === 'Escape' && stateRef.current.mode === 'testar') {
-        exitTestMode();
-        return;
+      if (e.key === 'Escape') {
+        if (stateRef.current.mode === 'testar') {
+          exitTestMode();
+          return;
+        }
+        if (stateRef.current.mode === 'simular') {
+          exitSimulateMode(false); // descarta mudanças
+          return;
+        }
       }
       if (e.key === 'r' || e.key === 'R') {
         rotateTo(turn(stateRef.current.rotation, e.shiftKey ? -1 : 1));
@@ -869,7 +1138,7 @@ export function MapEditor3D() {
           }
         }
       }
-      if (stateRef.current.mode === 'testar') return;
+      if (stateRef.current.mode === 'testar' || stateRef.current.mode === 'simular') return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         setHistory((h) => (e.shiftKey ? redo(h) : undo(h)));
@@ -1010,18 +1279,63 @@ export function MapEditor3D() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
-          {mode === 'editar' ? (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => void enterTestMode()}
-              disabled={!ready}
-              aria-label={T.modo.botaoTestar}
-            >
-              <PlayIcon className="size-4" />
-              <span className="ml-1.5">{T.modo.botaoTestar}</span>
-            </Button>
-          ) : (
+          {mode === 'simular' ? (
+            <>
+              {/* Simulação: Play/Pause */}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() =>
+                  setSimState((s) => {
+                    const next = s === 'running' ? 'paused' : 'running';
+                    if (next === 'running') simLastTimeRef.current = performance.now();
+                    return next;
+                  })
+                }
+                aria-label={simState === 'running' ? 'Pausar' : 'Continuar'}
+              >
+                {simState === 'running' ? (
+                  <PauseIcon className="size-4" />
+                ) : (
+                  <PlayIcon className="size-4" />
+                )}
+                <span className="ml-1.5">
+                  {simState === 'running' ? 'Pausar' : 'Continuar'}
+                </span>
+              </Button>
+              {/* Simulação: Step */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={simStep}
+                aria-label="Avançar um passo"
+              >
+                <StepForwardIcon className="size-4" />
+                <span className="ml-1.5">Passo</span>
+              </Button>
+              <Separator orientation="vertical" className="h-6" />
+              {/* Aplicar mudanças */}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => exitSimulateMode(true)}
+                aria-label="Aplicar física"
+              >
+                <CheckIcon className="size-4" />
+                <span className="ml-1.5">Aplicar</span>
+              </Button>
+              {/* Descartar mudanças */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => exitSimulateMode(false)}
+                aria-label="Descartar física"
+              >
+                <XIcon className="size-4" />
+                <span className="ml-1.5">Descartar</span>
+              </Button>
+            </>
+          ) : mode === 'testar' ? (
             <Button
               variant="secondary"
               size="sm"
@@ -1031,6 +1345,29 @@ export function MapEditor3D() {
               <PencilIcon className="size-4" />
               <span className="ml-1.5">{T.modo.botaoEditar}</span>
             </Button>
+          ) : (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => void enterTestMode()}
+                disabled={!ready}
+                aria-label={T.modo.botaoTestar}
+              >
+                <PlayIcon className="size-4" />
+                <span className="ml-1.5">{T.modo.botaoTestar}</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={enterSimulateMode}
+                disabled={!ready}
+                aria-label="Simular física"
+              >
+                <PlayIcon className="size-4" />
+                <span className="ml-1.5">Simular</span>
+              </Button>
+            </>
           )}
           <Button
             variant="ghost"
@@ -1149,6 +1486,13 @@ export function MapEditor3D() {
                   {actorState.z}
                 </strong>
               </span>
+            ) : mode === 'simular' ? (
+              <span>
+                Simulação{' '}
+                <strong>
+                  {simState === 'running' ? 'rodando' : 'pausada'} · {simFalling.length} caindo · {simLandedRef.current.length} aterrados
+                </strong>
+              </span>
             ) : (
               <span>
                 {T.status.alvo}{' '}
@@ -1166,7 +1510,11 @@ export function MapEditor3D() {
           </div>
 
           <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg border border-border bg-card/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
-            {mode === 'testar' ? T.modo.atalhos : T.status.atalhos}
+            {mode === 'testar'
+              ? T.modo.atalhos
+              : mode === 'simular'
+                ? 'Play/Pause/Step controla a simulação · Esc descarta e sai'
+                : T.status.atalhos}
           </div>
         </main>
       </div>
