@@ -102,16 +102,16 @@ bash scripts/gate.sh                                # portão de merge completo
 bash scripts/check-docs.sh                          # convenções de doc + endpoints + termos proibidos + links
 node .agents/skills/scripts/lint-skills.mjs         # formato das skills
 node .agents/skills/scripts/run-skill-evals.mjs
-node tools/pixi-reference/scripts/vendor-types.mjs --check  # integridade do vendor do PixiJS
+
 ```
 
 Não há linter, formatter nem CI neste repositório. O compilador e os scripts em `scripts/` são as únicas opiniões automatizadas que existem.
 
 | Script | O que verifica |
 | --- | --- |
-| `scripts/gate.sh` | Portão de merge: typecheck + testes de `pixellab-pipeline`, `character-builder`, `iso-core`, `runtime`; `check-docs.sh`; pin do PixiJS; fronteira do runtime; validadores de plano e ledger |
+| `scripts/gate.sh` | Portão de merge: typecheck + testes de `pixellab-pipeline`, `character-builder`, `iso-core`, `runtime`; `check-docs.sh`; `check-no-pixi.sh`; fronteira do runtime; validadores de plano e ledger |
 | `scripts/check-docs.sh` | Convenções de documentação, termos proibidos, links |
-| `scripts/check-pixi-pin.mjs` | Versão do PixiJS está congelada |
+
 | `scripts/check-runtime-boundary.sh` | Fronteira entre `iso-core` e `runtime` não foi violada |
 | `scripts/validate-plan.mjs` | Integridade do `plan.json` |
 | `scripts/validate-ledger.mjs` | Integridade do ledger de incerteza |

@@ -69,7 +69,7 @@ chases what they wanted to look at with the middle mouse button.
 
 ## Fractional zoom is allowed now — the reason it was banned is gone
 
-The 2D PixiJS editor required an integer stage scale, because pixel art on a fractionally scaled 2D
+The previous 2D editor required an integer stage scale, because pixel art on a fractionally scaled 2D
 stage shimmers and misaligns. That stage no longer exists (ADR 0037). Here the art is a texture on
 geometry, sampled with `NearestFilter`: there is no pixel grid of a stage to misalign, only a
 framebuffer and a projection. What survives of the old problem is sampling shimmer on heavily

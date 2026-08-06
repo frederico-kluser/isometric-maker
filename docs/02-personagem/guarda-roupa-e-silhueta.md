@@ -26,7 +26,7 @@ Conclusão operacional: o `create-character-state` é excelente para **variantes
 
 ## As três soluções que jogos reais usam
 
-Todas verificadas em fonte primária. As três são transplantáveis para um renderizador PixiJS.
+Todas verificadas em fonte primária. As três são transplantáveis para qualquer renderizador.
 
 ### 1. Ultima Online / ClassicUO — reordenar **um** slot por direção
 

@@ -12,7 +12,7 @@
 
 O isometric-maker é a ferramenta que constrói o jogo, não o jogo. Um usuário anexa uma imagem de personagem, o editor a rotaciona nas 8 direções, ele aprova o esqueleto, e sai um personagem que anda, corre e pula. Depois desenha um mapa isométrico com altura — chão, paredes, degraus — e move o personagem por ele. O artefato final é um **projeto em JSON mais os atlas de sprite**, que um runtime simples carrega e executa.
 
-A arte vem da [PixelLab](../01-pixellab/README.md). O desenho na tela vem do PixiJS 8. Tudo roda na máquina do usuário.
+A arte vem da [PixelLab](../01-pixellab/README.md). O desenho na tela vem do Three.js. Tudo roda na máquina do usuário.
 
 ## O que ele não é
 
@@ -57,7 +57,7 @@ Houve um intervalo em que não era assim: a [ADR 0011](../adr/0011-repo-isometri
 
 ## O que não foi verificado
 
-- **Nada neste repositório jamais renderizou um quadro.** PixiJS ainda não está instalado. Toda afirmação sobre desempenho, ordenação de desenho ou culling é hipótese até a primeira tela existir.
+- **Nada neste repositório jamais renderizou um quadro.** Toda afirmação sobre desempenho, ordenação de desenho ou culling é hipótese até a primeira tela existir.
 - **Nenhum asset jamais foi gerado.** O lockfile não existe, o cache está vazio e o ledger está zerado. O formato exato das respostas da API é leitura de spec, não observação.
 - O significado do campo `isometric` nos endpoints de personagem — ver [ADR 0015](../adr/0015-low-top-down-8-direcoes-isometrico.md). É a incógnita de maior aposta do projeto.
 

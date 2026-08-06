@@ -84,21 +84,14 @@ The usual mappings:
 | writing or editing any `.ts` under `tools/` | `writing-repo-typescript` |
 | needing a pass/fail signal, or touching money-critical modules | `testing-repo-code` |
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
-| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | `routing-pixijs-work`, a **sub-router**; hand off, do not enumerate — for the map editor 3D, delegate to the Three.js skills instead |
+| **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | the Three.js family for the map editor; for the runtime, `animating-threejs-sprites` loads the atlas and `bootstrapping-threejs-scene` boots the viewport |
 | **map editor 3D** — renderer, scene, camera, picking, art, shadow, test mode | the Three.js family: `bootstrapping-threejs-scene`, `creating-threejs-cubes`, `mapping-sprites-onto-cubes`, `controlling-threejs-camera`, `raycasting-threejs-blocks`, `casting-threejs-shadows`, `simulating-editor-physics`; hand off, do not enumerate |
 | no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
-
-`routing-pixijs-work` owns ten skills of its own plus the 26 official PixiJS skills vendored in
-`tools/pixi-reference/vendor/skills/`. Delegate the renderer half of a task to it rather than picking
-from that set here — it exists so this table does not have to grow by thirty-six rows.
-
-With the 2D editor removed (ADR 0037), PixiJS in the repo survives only in `tools/runtime` and the
-atlas packer. The `routing-pixijs-work` family has been re-scoped accordingly.
 
 **The isometric skills are the model, not the renderer, and the split matters.** What is *true*
 about the world — which cell a pixel falls in, what may occupy it, what draws before what — belongs
 to them. How it reaches the screen belongs to the renderer half: the Three.js family for the map
-editor, `routing-pixijs-work` for the runtime and the atlas packer. A task about something drawn in
+editor, the Three.js family for the runtime and the atlas packer. A task about something drawn in
 the wrong order needs both: the key comes from `projecting-isometric-geometry`, the sort from the
 renderer side. Loading only the renderer half produces a fix in the wrong layer.
 

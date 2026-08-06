@@ -1,6 +1,6 @@
 # isometric-maker
 
-Um **construtor de jogos isométricos**: monta o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Arte gerada pela PixelLab; o editor de mapa desenha em Three.js desde a [ADR 0037](docs/adr/0037-editor-3d-apenas.md), e o PixiJS 8 sobrou no runtime e no empacotador de atlas. Roda na sua máquina, para você.
+Um **construtor de jogos isométricos**: monta o personagem a partir de uma imagem, desenha um mapa com altura, e roda o resultado. Arte gerada pela PixelLab; o editor e o runtime desenham em Three.js desde as ADRs [0037](docs/adr/0037-editor-3d-apenas.md) e [0047](docs/adr/0047-renderizador-unico-threejs.md). Roda na sua máquina, para você.
 
 > **Quick Start (TL;DR)**
 >
@@ -66,7 +66,7 @@ O guard de orçamento **informa e nunca recusa**: estima o custo, mostra o acumu
 | --- | --- |
 | Pipeline de assets | **funcional** — 9 comandos, idempotente, guard de custo, empacotador de atlas |
 | Sprite Studio (o motor do estúdio de personagem) | **funcional** — gera personagem em 8 direções, poses e guarda-roupa |
-| Conhecimento vendorizado (PixelLab + PixiJS) | **funcional** — dois specs com proveniência, 39 skills verificadas |
+| Conhecimento vendorizado (PixelLab) | **funcional** — dois specs com proveniência, 39 skills verificadas |
 | Documentação | **59 arquivos em `docs/`, 43 ADRs.** O índice não lista arquivo inexistente |
 | Fila de geração | **funcional** — FIFO persistente, sobrevive ao reinício do Vite, retomada sem repagar em seis dos sete ramos ([ADR 0041](docs/adr/0041-fila-fifo-persistente-de-geracao.md), [0043](docs/adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md)) |
 | Aplicativo único (tela inicial + estúdio + editor de mapa) | **funcional** — `tools/character-builder` (459 testes), roteador por hash com 3 rotas (ADR 0034); o `tools/map-builder` foi fundido nele |

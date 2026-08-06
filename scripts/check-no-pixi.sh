@@ -111,7 +111,8 @@ mentions="$(grep -rniE 'pixi\.?js|\bpixi\b' \
   --include='*.md' --include='*.mdx' "${DOC_PATHS[@]}" \
   --exclude-dir=node_modules --exclude-dir=.git 2>/dev/null \
   | grep -vE "$ADR_ALLOW" \
-  | grep -vE "$README_ALLOW" || true)"
+  | grep -vE "$README_ALLOW" \
+  | grep -v "$SELF" || true)"
 if [ -n "$mentions" ]; then
   echo -e "  menção em documentação: ${RED}FAIL${NC}"
   echo "$mentions" | head -20 | sed 's/^/        /'

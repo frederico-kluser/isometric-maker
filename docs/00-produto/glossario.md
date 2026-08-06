@@ -60,8 +60,8 @@ Não é doc especulativa: não descreve infra que não existe, descreve as palav
 | trava, lockfile | `lockfile` | O que já foi gerado e pago. Versionado no git |
 | razão, livro-caixa | `ledger` | O registro append-only de cada gasto. Versionado no git |
 | estimativa | `estimate` | Custo previsto antes de submeter. Sempre **preço estimado** |
-| atlas, folha de sprites | `atlas` | O PNG empacotado mais o JSON que o PixiJS lê |
-| arquivo lateral | `sidecar` | O JSON com a semântica de jogo, que não polui o JSON do PixiJS |
+| atlas, folha de sprites | `atlas` | O PNG empacotado mais o JSON TexturePacker Hash |
+| arquivo lateral | `sidecar` | O JSON com a semântica de jogo, que não polui o JSON do atlas |
 
 ## Editor
 
