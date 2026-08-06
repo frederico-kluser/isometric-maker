@@ -280,7 +280,7 @@ index. The tick only fires when at least one animated block is in the palette.
 - `packages/iso-core/src/geometry.ts` — the projection this pre-transforms into
 - `tools/character-builder/src/map/scene.ts` — the cross-fade and the ticker loop, plus animated texture support
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the unrotated coordinate rules
-- `.agents/skills/composing-pixi-scene/SKILL.md` — where draw order is applied in this renderer
+- `.agents/skills/bootstrapping-threejs-scene/SKILL.md` — where draw order is applied in this renderer
 - OpenRCT2, `src/openrct2/world/Location.hpp` and `src/openrct2/interface/Viewport.cpp` — rotation
   state, the grid transform and the single projection
 - OpenRCT2, `src/openrct2/paint/Paint.cpp` — the per-rotation comparator and the two sort variants

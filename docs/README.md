@@ -8,7 +8,7 @@
 > cd /home/ondokai/Projects/isometric-maker/tools/pixellab-pipeline && node src/cli.ts plan
 > ```
 
-Estado em **2026-08-05**: **59 arquivos em `docs/` — 43 ADRs e 16 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
+Estado em **2026-08-06**: **63 arquivos em `docs/` — 47 ADRs e 16 documentos, contando este índice**. Esta tabela não lista documento que não foi escrito.
 
 As pastas são numeradas na ordem em que o produto é construído: o que ele é, de onde vem a arte, o personagem, o mapa, as mecânicas, o runtime.
 
@@ -72,7 +72,7 @@ Numeração reservada. A convenção 12 diz que doc de infra escrita antes de ex
 | [`tools/pixellab-pipeline`](../tools/pixellab-pipeline/) | Geração em lote, idempotente, com guard de custo e empacotador de atlas | **funcional** |
 | [`tools/character-builder`](../tools/character-builder/README.md) | **O aplicativo inteiro**: tela inicial, estúdio de personagem (Sprite Studio) e editor de mapa — o `tools/map-builder` foi fundido nele | **funcional** |
 | [`tools/runtime`](../tools/runtime/) | Carrega o projeto exportado e roda, sem interface de edição (795 linhas em `src/`, coberto pelo gate) | **funcional** |
-| [`tools/pixi-reference`](../tools/pixi-reference/README.md) | **Não é o cliente.** Fixa o PixiJS 8.19.0 e vendoriza tipos e as 26 skills oficiais, para as skills citarem em vez de lembrar | **funcional** |
+| ~~`tools/pixi-reference`~~ | Vendorizava o PixiJS 8.19.0 com 47.533 linhas de tipos e as 26 skills oficiais | **removida pela [ADR 0047](adr/0047-renderizador-unico-threejs.md)** |
 
 ## ADR — decisões registradas
 
@@ -82,7 +82,7 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 
 | ADR | Decisão | Situação |
 | --- | --- | --- |
-| [`0001`](./adr/0001-pixijs-em-vez-de-cocos.md) | PixiJS 8 + Vite no cliente, divergindo da pesquisa própria que apontava Cocos Creator | substituída por 0014 |
+| [`0001`](./adr/0001-pixijs-em-vez-de-cocos.md) | PixiJS 8 + Vite no cliente, divergindo da pesquisa própria que apontava Cocos Creator | substituída por 0047 |
 | [`0002`](./adr/0002-cliente-rest-gerado-do-openapi.md) | Cliente REST do OpenAPI vendorizado, não o SDK oficial | vigente |
 | `0003` | Permadeath total | apagada — escopo removido pela 0010 |
 | `0004` | Combate travado no alvo com zonas oscilantes | apagada — escopo removido pela 0010 |
@@ -90,12 +90,12 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0006`](./adr/0006-animacao-em-template-mode.md) | Animação em `mode='template'`; `pro` proibido sem decisão explícita | vigente |
 | `0007` | Fase 1 em VM única, com gatilho numérico para GKE | apagada — escopo removido pela 0010 |
 | [`0008`](./adr/0008-idioma-docs-ptbr-codigo-en.md) | Docs em pt-BR; código e commits em inglês | vigente |
-| [`0009`](./adr/0009-conhecimento-pixijs-vendorizado.md) | Tipos e skills oficiais do PixiJS 8.19.0 vendorizados; skills citam, não reescrevem a API | vigente |
+| [`0009`](./adr/0009-conhecimento-pixijs-vendorizado.md) | Tipos e skills oficiais do PixiJS 8.19.0 vendorizados; skills citam, não reescrevem a API | substituída por 0047 |
 | [`0010`](./adr/0010-pivo-para-editor-isometrico.md) | **O produto é um editor isométrico, não um MMORPG** | vigente |
 | [`0011`](./adr/0011-repo-isometric-maker-pasta-power-abuse.md) | Repositório `isometric-maker`, pasta local continua `power-abuse` | substituída por 0017 |
 | [`0012`](./adr/0012-guard-de-orcamento-informativo.md) | O guard de orçamento informa e nunca recusa | vigente |
 | [`0013`](./adr/0013-geometria-isometrica-64x32-z16.md) | Tile 64×32, nível Z de 16 px, Z inteiro e discreto | vigente · consequência corrigida pela 0020 |
-| [`0014`](./adr/0014-pixijs-para-o-editor.md) | PixiJS 8 continua, agora contra o argumento oposto | vigente |
+| [`0014`](./adr/0014-pixijs-para-o-editor.md) | PixiJS 8 continua, agora contra o argumento oposto | substituída por 0047 |
 | [`0015`](./adr/0015-low-top-down-8-direcoes-isometrico.md) | `low top-down`, 8 direções, e o endpoint que o isométrico obriga | substituída por 0019 |
 | [`0016`](./adr/0016-ui-ptbr-strings-centralizadas.md) | UI em pt-BR com strings centralizadas desde o primeiro commit | vigente |
 | [`0017`](./adr/0017-nome-unico-isometric-maker.md) | Um nome só: `isometric-maker` no repositório, na pasta e nos pacotes | vigente |
@@ -128,16 +128,19 @@ Há um segundo caso, mais raro: a decisão está certa e um **fato declarado ao 
 | [`0044`](./adr/0044-bloqueio-do-wizard-por-escopo.md) | O bloqueio do wizard tem escopo: `busy` global sai, o dono do job sai do **prefixo** da chave, e `'na-fila'` conta como ocupado | vigente |
 | [`0045`](./adr/0045-animacao-do-bloco-no-mapa.md) | A sprite animada do bloco passa a ser desenhada no mapa: uma folha, uma textura, `repeat.x`/`offset.x`; o laço continua parando sozinho; o shadow map não é invalidado; folhas legadas re-empacotadas sem chamar a API | vigente |
 | [`0046`](./adr/0046-prompt-do-bloco-respeita-a-descricao.md) | O prompt do bloco passa a respeitar a descrição do usuário (sete defeitos), e a divergência de endpoint com a 0032 fica registrada como dívida de valor conhecido | vigente · corrige 0032 |
+| [`0047`](./adr/0047-renderizador-unico-threejs.md) | Um renderizador só: Three.js no editor e no runtime; o PixiJS sai do repositório inteiro — `tools/pixi-reference`, 11 skills e 3 verificadores removidos | vigente · substitui 0001, 0009, 0014 |
+| [`0048`](./adr/0048-sombra-entre-cubos.md) | Sombra entre cubos: cada cubo ganha um quad `ShadowMaterial` filho sobre a face +Y; `CUBE_SHADOW_OPACITY=0.42` desacoplada da fotometria; um draw call a mais por cubo visível | vigente |
+| [`0049`](./adr/0049-fisica-de-blocos.md) | Física de blocos: queda determinística por falta de suporte, efeito dominó, API de consulta (DDA raycast, overlap, sweep) em iso-core, modo "Simular" com Play/Pause/Step/Apply/Discard | vigente |
+| [`0050`](./adr/0050-controles-de-camera-e-zoom.md) | Controles de câmera expandidos: pan por teclado, pinça/touch (`setZoomAnchored`), gestos Safari, zoom-to-fit (8 vértices, eixo mais restritivo, 10%), coalescência de roda, normalização `deltaMode` | vigente |
+| [`0051`](./adr/0051-instancedmesh-e-dda-picking.md) | Um `InstancedMesh` por tipo de bloco, culling de células cercadas nos 6 lados, lista livre, `instanceColor`; picking por DDA contra `MapData` sem mesh, contrato `{hit, placement, hitFace}` preservado | vigente |
 
 ## Skills
 
-**39 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
+**28 skills** em [`.agents/skills/`](../.agents/skills/), indexadas em [`catalog.md`](../.agents/skills/catalog.md). O caminho `.claude/skills` é symlink para lá, então qualquer agente vê os mesmos arquivos.
 
-Dois roteadores: [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa, e [`routing-pixijs-work`](../.agents/skills/routing-pixijs-work/SKILL.md), para qualquer coisa que toque o renderizador. Dez skills cobrem os 79 endpoints do PixelLab, dez cobrem o PixiJS, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, sete cobrem o editor 3D de mapa em Three.js, e o restante é tarefa e meta.
+O roteador único é [`project-router`](../.agents/skills/project-router/SKILL.md), por onde toda tarefa passa; `routing-pixijs-work` foi removido com o renderizador ([ADR 0047](./adr/0047-renderizador-unico-threejs.md)). Sete skills cobrem os 79 endpoints do PixelLab, **quatro cobrem o modelo isométrico** — geometria, física, edição de mapa e rotação de câmera —, dez cobrem o editor 3D de mapa em Three.js (boot, cubos, sprites, câmera, picking, sombra, instancing, desempenho, física do editor, e o runtime de sprite), e o restante é tarefa e meta.
 
-As quatro do modelo são novas. Três existem porque o modelo isométrico — `packages/iso-core` mais o editor de mapa, hoje dentro do character-builder — tinha 363 testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md) e [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md). A separação entre elas e as do PixiJS é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
-
-A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-camera/SKILL.md), reuniu o material para uma decisão que ainda não tinha sido tomada: girar a câmera em quatro vistas. A decisão foi tomada em 2026-08-01 na [ADR 0021](./adr/0021-rotacao-de-camera-em-quatro-vistas.md), com os números lidos do OpenRCT2 e do Godot — inclusive o que desanima, que é o motor de referência manter duas implementações de ordenação e ainda chamar a correção de oclusão de parcial. A skill continua sendo onde esse material mora.
+As quatro do modelo isométrico — `packages/iso-core` mais o editor de mapa, hoje dentro do character-builder — existem porque o modelo tinha centenas de testes passando e nenhuma skill apontando para eles: [`projecting-isometric-geometry`](../.agents/skills/projecting-isometric-geometry/SKILL.md), [`simulating-isometric-physics`](../.agents/skills/simulating-isometric-physics/SKILL.md), [`editing-isometric-maps`](../.agents/skills/editing-isometric-maps/SKILL.md) e [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-camera/SKILL.md). A separação entre elas e as do Three.js é entre **o que é verdade sobre o mundo** e **como o mundo chega à tela**.
 
 `enforcing-server-authority` foi **retirada com o pivô e não tem sucessora** — o assunto dela deixou de existir.
 
@@ -162,6 +165,9 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 
 | 2026-08-05 | **A geração ganha uma fila** ([ADR 0041](./adr/0041-fila-fifo-persistente-de-geracao.md)): o `Map` volátil e o `spawn` saem, o estado vai a disco por `seq` monótono e o job carrega um descritor serializável; o teto passa a medir **chamadas simultâneas** e não custo de servidor ([ADR 0042](./adr/0042-teto-de-concorrencia-mede-chamadas.md)), com o 8 declarado como inferência; a retomada deixa de repagar por stub em disco e nasce o estado `'interrompido'` ([ADR 0043](./adr/0043-retomada-sem-repagar-e-o-estado-interrompido.md)), que também expõe um bug de dinheiro pré-existente na leitura dos ids de `animate-character`; o bloqueio do wizard ganha escopo ([ADR 0044](./adr/0044-bloqueio-do-wizard-por-escopo.md)); a sprite animada do bloco passa a ser desenhada no mapa ([ADR 0045](./adr/0045-animacao-do-bloco-no-mapa.md)); e o prompt do bloco passa a respeitar a descrição, com a divergência de endpoint da 0032 registrada ([ADR 0046](./adr/0046-prompt-do-bloco-respeita-a-descricao.md)) |
 
+| 2026-08-05 | **O PixiJS sai inteiro** ([ADR 0047](./adr/0047-renderizador-unico-threejs.md)): `tools/runtime` reescrito em Three.js; `tools/pixi-reference` apagado; 11 skills e 3 verificadores removidos; um verificador novo impede a volta |
+| 2026-08-06 | **Sombra entre cubos** ([ADR 0048](./adr/0048-sombra-entre-cubos.md)): cada cubo ganha um quad `ShadowMaterial` filho sobre a face +Y, opacidade desacoplada da fotometria; **física de blocos** ([ADR 0049](./adr/0049-fisica-de-blocos.md)): queda determinística, efeito dominó, API de consulta em iso-core, modo "Simular" com Play/Pause/Step/Apply/Discard; **controles de câmera expandidos** ([ADR 0050](./adr/0050-controles-de-camera-e-zoom.md)): pan por teclado, pinça, gestos Safari, zoom-to-fit, coalescência de roda, normalização `deltaMode`; **InstancedMesh e DDA** ([ADR 0051](./adr/0051-instancedmesh-e-dda-picking.md)): um draw call por tipo de bloco, culling de células escondidas, picking sem mesh |
+
 ## Referências
 
 - [`/home/ondokai/Projects/isometric-maker/README.md`](../README.md) — visão geral do repositório
@@ -169,4 +175,4 @@ A quarta, [`rotating-isometric-camera`](../.agents/skills/rotating-isometric-cam
 - [`/home/ondokai/Projects/isometric-maker/scripts/check-docs.sh`](../scripts/check-docs.sh) — o que é verificado automaticamente nesta pasta
 - [`/home/ondokai/Projects/isometric-maker/.agents/skills/catalog.md`](../.agents/skills/catalog.md) — o índice das skills
 
-**Última atualização:** 2026-08-05
+**Última atualização:** 2026-08-06

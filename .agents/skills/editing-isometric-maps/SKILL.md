@@ -17,7 +17,7 @@ exists and what does not is the load-bearing part.
 ## Picking is DDA voxel raycasting — the face normal is the contract
 
 **DDA walks the MapData, not the meshes.** The 2D editor picked a cell by walking the grid diagonal
-from the top down; that arithmetic is retired with the PixiJS renderer. The 3D editor fires a ray
+from the top down; that arithmetic is retired with the 2D renderer. The 3D editor fires a ray
 from the camera through the cursor and walks the `MapData` RLE columns directly using the
 Amanatides-Woo DDA algorithm (`packages/iso-core/src/dda-raycast.ts:65-210`). No meshes are
 needed — the ray marches through the voxel grid, querying `isOccupied` against the RLE data on
@@ -194,7 +194,7 @@ renders.
 
 Domain knowledge, kept because the rules survive in iso-core even though the editor-side module is
 gone. Autotile was **never wired to the UI**: no brush paints with a neighbour mask, and the 2D
-editor's `autotile.ts` was removed with the rest of the PixiJS editor. The `tile_rules` parser lives
+editor's `autotile.ts` was removed with the rest of the 2D editor. The `tile_rules` parser lives
 on in `packages/iso-core/src/tile-rules.ts`, and any future autotile wiring must respect it.
 
 The neighbour mask is 4 bits — a bit set when the neighbour in that direction carries the **same

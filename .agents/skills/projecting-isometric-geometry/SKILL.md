@@ -155,7 +155,7 @@ horizontal seam without deforming anything (`tools/character-builder/src/map/pla
 - **Never infer the anchor from the bounding box of generated art.** Decoration spilling above the
   top face moves the box and not the cube.
 - **The stage scale must be a whole number.** A 1.5× upscale destroys the 2:1 seam, and no amount of
-  edge extrusion recovers it. `choosing-pixi-renderer` owns why.
+  edge extrusion recovers it. `bootstrapping-threejs-scene` owns why in the Three.js context.
 - **Cell height is derived, never stored.** It is the highest occupied `z` plus one. Storing a height
   map *and* a block map creates two truths about the same terrain.
 - **Screen space is not grid space.** The jump parabola, the camera offset and the anchor all live in
@@ -172,4 +172,4 @@ horizontal seam without deforming anything (`tools/character-builder/src/map/pla
 - `tools/character-builder/src/map/placement.ts` — uniform scale and declared anchor, with tests
 - `packages/iso-core/src/depth.ts` — the key, the half-cell offset, the tie-break
 - `.agents/skills/editing-isometric-maps/SKILL.md` — picking, placement and the diagonal walk
-- `.agents/skills/composing-pixi-scene/SKILL.md` — how this ordering reaches the renderer
+- `.agents/skills/bootstrapping-threejs-scene/SKILL.md` — how this ordering reaches the renderer

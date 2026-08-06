@@ -105,9 +105,9 @@ skipped Step 4 does not fail quietly; it fails loudly.
   — a new file is a reviewable draft — but the first correction to it needs a token, the token needs
   a green suite, and a missing suite is a hard failure. Write `evals/<name>.json` immediately after
   the skill file, before revising anything.
-- **`check-pixi-claims` resolves backticked capitalised identifiers as PixiJS symbols.** Citing a
+- **`check-spec-claims` resolves backticked capitalised identifiers as PixelLab symbols.** Citing a
   third-party source file whose name is also a class name fails the check even though nothing about
-  PixiJS was claimed. Refer to such files in prose, or by a path that is not a bare identifier.
+  the API was claimed. Refer to such files in prose, or by a path that is not a bare identifier.
 
 ### Step 5 — Git commit (the audit trail)
 

@@ -29,7 +29,7 @@ boundary once and collision starts testing a position that does not exist.
 
 The logic clock is fixed at 1/60 s with a time accumulator; real `dt` is accumulated and consumed in
 discrete steps (`packages/iso-core/src/movement.ts:13@cee4bc63`). `step(state, input, dt)` is pure:
-no DOM, no network, no PixiJS. Same input sequence, same result, on any machine — and that is
+no DOM, no network, no renderer dependency. Same input sequence, same result, on any machine — and that is
 verifiable, not aspirational, because `runTrace` exists to verify it
 (`packages/iso-core/src/trace.ts:213@5274631d`).
 

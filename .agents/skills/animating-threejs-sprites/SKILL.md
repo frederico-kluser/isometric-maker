@@ -24,15 +24,17 @@ The pipeline exports two files per creature or object family
 | `<name>.json` | TexturePacker JSON Hash | Frame rectangles, sprite source sizes, anchor per frame |
 | `<name>.pixellab.json` | Sidecar (project-specific) | FPS per animation, anchor source (measured vs default), provenance, spec hashes |
 
-The `.json` is strictly TexturePacker JSON Hash format. It was NEVER PixiJS-specific, despite the
-type names `PixiFrame` and `PixiSpritesheet` in the exporter
-(`tools/pixellab-pipeline/src/atlas.ts:49,58@615de6e5`). The runtime loads this JSON directly and
-parses it into `THREE.Texture` objects without any PixiJS dependency.
+The `.json` is strictly TexturePacker JSON Hash format. It was NEVER specific to any renderer,
+despite the historical type names `AtlasFrame` and `AtlasSheet` (formerly `PixiFrame` and
+`PixiSpritesheet` before the [ADR 0047](../../docs/adr/0047-renderizador-unico-threejs.md)
+rename) in the exporter (`tools/pixellab-pipeline/src/atlas.ts:49,58@615de6e5`). The runtime
+loads this JSON directly and parses it into `THREE.Texture` objects without any 2D renderer
+dependency.
 
 The sidecar `.pixellab.json` carries game semantics (FPS, anchor metadata) that do not belong in the
 TexturePacker JSON. The exporter's own comment warns: "O .json ao lado e estritamente formato
-PixiJS. Semantica de jogo (fps, hitbox, ancora logica) vive aqui, para nao brigar com o parser do
-Pixi" (`tools/pixellab-pipeline/src/atlas.ts:397-398@615de6e5`).
+TexturePacker. Semantica de jogo (fps, hitbox, ancora logica) vive aqui, para nao brigar com o parser"
+(`tools/pixellab-pipeline/src/atlas.ts:397-398@615de6e5`).
 
 ## How the runtime loads the atlas: one texture, many frames
 
@@ -167,7 +169,7 @@ POT would waste up to 72% of the texture.
 
 ## References
 
-- `tools/pixellab-pipeline/src/atlas.ts` -- the exporter: packGrid, PixiSpritesheet, measureAnchor, sortFrames
+- `tools/pixellab-pipeline/src/atlas.ts` -- the exporter: packGrid, AtlasSheet, measureAnchor, sortFrames
 - `tools/pixellab-pipeline/src/endpoints.ts` -- DIRECTIONS_8, Direction8, the canonical direction order
 - `tools/runtime/src/render.ts` -- createCharacterRender, updateCharacterAnim, frame switching, direction labels
 - `tools/runtime/src/load.ts` -- loadRuntimeProject, the sidecar resolution
