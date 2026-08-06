@@ -115,7 +115,7 @@ const CUBE_SHADOW_OPACITY = 0.42;
  * Altura do quad de sombra acima da face +Y. Suficiente para evitar z-fighting
  * sem descolar visualmente do topo do cubo.
  */
-const SHADOW_QUAD_EPS = 0.001;
+export const SHADOW_QUAD_EPS = 0.001;
 
 // ------------------------------------------------------------------ quad de sombra por cubo
 
@@ -133,7 +133,7 @@ let _sharedShadowQuadMat: THREE.ShadowMaterial | null = null;
  * para amostrar o shadow map, e a posição world-space de cada um é dada pela
  * hierarquia do grafo de cena (o quad é filho do mesh do cubo).
  */
-function createCubeShadowQuad(): THREE.Mesh {
+export function createCubeShadowQuad(): THREE.Mesh {
   if (!_sharedShadowQuadGeom) {
     _sharedShadowQuadGeom = new THREE.PlaneGeometry(1, 1);
   }

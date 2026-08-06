@@ -55,7 +55,7 @@ import {
   turn,
   type Rotation,
 } from '../../../../../packages/iso-core/src/rotation.ts';
-import { buildCollisionMap, spawnZAt } from '../collision-map.ts';
+import { buildCollisionMap, spawnZAt } from '@isometric-maker/iso-core/collision-map';
 import {
   actionFor,
   directionNameFor,

@@ -39,13 +39,13 @@ import type { Rotation } from '../../../../../packages/iso-core/src/rotation.ts'
 import type { BlockDef, Cell3D } from './block-def.ts';
 import {
   createCubeArt,
-  createCubeMesh,
   createPreviewMesh,
   createHighlightMesh,
   disposeCubeCache,
   prefersReducedMotion,
   type CubeArt,
 } from './cube3d.ts';
+import { BlockInstancing, computeHiddenCells } from './block-instancing.ts';
 import { BlockAnimator } from './block-animation.ts';
 import {
   createGroundRig,
@@ -253,11 +253,8 @@ export async function createIsoScene3D(
    */
   const animator = new BlockAnimator();
   animator.setEnabled(!prefersReducedMotion());
-  /** Meshes dos blocos no mapa. Key = "x:z:y". */
-  const meshes = new Map<string, THREE.Mesh>();
-  /** A mesma coleção em array, para o raycaster não varrer a cena. */
-  let meshList: THREE.Mesh[] = [];
-  let meshListStale = true;
+  /** Gerenciador de instâncias — um InstancedMesh por tipo de bloco. */
+  const instancing = new BlockInstancing(scene);
 
   // Preview e realce são criados UMA vez e reposicionados. Recriar por quadro
   // significava alocar geometria e material a cada movimento do mouse.
@@ -413,14 +410,7 @@ export async function createIsoScene3D(
    * trás.
    */
   const applyCubeYaw = (): void => {
-    const angle = yaw - BASE_YAW;
-    for (const mesh of meshes.values()) {
-      mesh.rotation.y = angle;
-      // O raycaster lê `matrixWorld` e NÃO a atualiza. Sem isto, um clique
-      // entre o giro e o quadro seguinte usaria a orientação anterior e a
-      // normal da face apontaria para a célula errada.
-      mesh.updateMatrixWorld();
-    }
+    instancing.applyYaw(yaw - BASE_YAW);
   };
 
   // ---------------------------------------------------------------- ator
@@ -553,22 +543,18 @@ export async function createIsoScene3D(
     for (const [, art] of artByBlock) {
       if (art.hasSprite) art.material.dispose();
     }
+    // Remove do gerenciador de instâncias antes de limpar o mapa local.
+    for (const id of artByBlock.keys()) {
+      instancing.removeArt(id);
+    }
     artByBlock.clear();
     // A paleta trocou: os clipes antigos apontam para texturas que acabaram de
     // ser descartadas. Registrar de novo, do zero.
     animator.clear();
     for (const [id, art] of entries) {
       artByBlock.set(id, art);
+      instancing.setArt(id, art);
       if (art.animation) animator.register(id, art.animation.clip, art.animation.show);
-    }
-    // Blocos já na cena podem ter ficado com material velho.
-    for (const mesh of meshes.values()) {
-      const id = (mesh.userData as { blockId?: string }).blockId;
-      const art = id === undefined ? undefined : artByBlock.get(id);
-      if (art) {
-        mesh.material = art.material;
-        mesh.geometry = art.geometry;
-      }
     }
     // Invalida o atalho de `syncBlocks`. A paleta chega DEPOIS do primeiro
     // desenho: aquele desenho não criou mesh nenhum (não havia arte) e já
@@ -595,6 +581,9 @@ export async function createIsoScene3D(
   const syncBlocks = (map: MapData): boolean => {
     if (map === lastMap) return false;
     lastMap = map;
+
+    // Pré-passo: células completamente cercadas nos 6 lados não são visíveis.
+    const hidden = computeHiddenCells(map.blocks);
 
     const seen = new Set<string>();
     /**
@@ -629,30 +618,26 @@ export async function createIsoScene3D(
             const blockY = y + i;
             const meshKey = `${x}:${z}:${blockY}`;
             seen.add(meshKey);
-            const existing = meshes.get(meshKey);
-            if (existing) {
-              // Pintar troca o bloco da célula sem mexer na posição. Sem esta
-              // comparação o mesh antigo ficava e a pintura não aparecia.
-              const data = existing.userData as { blockId?: string };
-              if (data.blockId !== run.block) {
-                const art = artByBlock.get(run.block);
-                if (art) {
-                  existing.material = art.material;
-                  existing.geometry = art.geometry;
-                  data.blockId = run.block;
-                  changed = true;
-                }
+
+            // Célula cercada nos 6 lados — invisível, não instanciar.
+            if (hidden.has(meshKey)) continue;
+
+            const art = artByBlock.get(run.block);
+            if (!art) continue;
+
+            if (instancing.hasCell(meshKey)) {
+              // Pintar troca o bloco da célula sem mexer na posição.
+              const existing = instancing.getCellInfo(meshKey);
+              if (existing && existing.blockId !== run.block) {
+                instancing.updateCellBlockId(meshKey, run.block);
+                changed = true;
               }
               continue;
             }
-            const art = artByBlock.get(run.block);
-            if (!art) continue;
-            const mesh = createCubeMesh(art);
-            mesh.position.set(x, blockY + HALF_CUBE, z);
-            mesh.rotation.y = cubeAngle;
-            mesh.userData = { blockId: run.block, cellX: x, cellY: z, cellZ: blockY };
-            scene.add(mesh);
-            meshes.set(meshKey, mesh);
+
+            instancing.setCell(
+              meshKey, run.block, x, z, blockY, cubeAngle,
+            );
             changed = true;
           }
         }
@@ -660,15 +645,8 @@ export async function createIsoScene3D(
       }
     }
 
-    for (const [key, mesh] of meshes) {
-      if (seen.has(key)) continue;
-      scene.remove(mesh);
-      // Geometria e material vêm do cache por bloco — nunca são do mesh.
-      meshes.delete(key);
-      changed = true;
-    }
-
-    if (changed) meshListStale = true;
+    // Remove células que saíram do mapa.
+    instancing.removeUnseen(seen);
 
     // Sempre, não só quando `changed`: o mapa pode ter mudado para OUTRO objeto
     // com o mesmo conteúdo (o histórico devolve snapshots), e o conjunto ativo
@@ -679,10 +657,7 @@ export async function createIsoScene3D(
     let maxHeight = 0;
     if (Number.isFinite(minX)) {
       // maxHeight: varre todas as colunas e pega o maior y
-      for (const [key, runs] of Object.entries(map.blocks)) {
-        const [, , ys = '0'] = key.split(':');
-        const yTop = Number(ys);
-        if (Number.isFinite(yTop) && yTop > maxHeight) maxHeight = yTop;
+      for (const [, runs] of Object.entries(map.blocks)) {
         let top = 0;
         for (const run of runs) top += run.count;
         if (top > maxHeight) maxHeight = top;
@@ -820,11 +795,7 @@ export async function createIsoScene3D(
   };
 
   const blockMeshes = (): readonly THREE.Mesh[] => {
-    if (meshListStale) {
-      meshList = [...meshes.values()];
-      meshListStale = false;
-    }
-    return meshList;
+    return instancing.getAllMeshes() as readonly THREE.Mesh[];
   };
 
   // ---------------------------------------------------------------- resize
@@ -851,9 +822,7 @@ export async function createIsoScene3D(
     }
     for (const tex of actorTextures.values()) tex.dispose();
     actorTextures.clear();
-    for (const mesh of meshes.values()) scene.remove(mesh);
-    meshes.clear();
-    meshList = [];
+    instancing.dispose();
     // Antes de descartar os materiais: os clipes seguram closures sobre as
     // texturas que estão prestes a sumir.
     animator.clear();
@@ -950,11 +919,7 @@ function sharedArrowGeometry(): THREE.BufferGeometry {
 export function collectBlockMeshes(scene: THREE.Scene): THREE.Mesh[] {
   const found: THREE.Mesh[] = [];
   scene.traverse((obj: THREE.Object3D) => {
-    if (
-      obj instanceof THREE.Mesh &&
-      obj.userData &&
-      typeof (obj.userData as Record<string, unknown>).blockId === 'string'
-    ) {
+    if (obj instanceof THREE.InstancedMesh && obj.name.startsWith('instanced-')) {
       found.push(obj);
     }
   });
