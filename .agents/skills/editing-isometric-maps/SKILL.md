@@ -14,15 +14,16 @@ Before wiring any tool that changes the map, before writing mouse-to-cell code, 
 an editing feature. Read the second half first if the request is about brushes, undo or layers: what
 exists and what does not is the load-bearing part.
 
-## Picking is raycasting, not arithmetic — the face normal is the contract
+## Picking is DDA voxel raycasting — the face normal is the contract
 
-**Raycast, never walk the diagonal.** The 2D editor picked a cell by walking the grid diagonal from
-the top down; that arithmetic is retired with the PixiJS renderer. The 3D editor fires a ray from the
-camera through the cursor and intersects real meshes. Intersections come back sorted by distance, so
-**the first hit is the nearest surface** — the cell the camera actually sees, not whichever sprite the
-scene graph happens to reach first.
+**DDA walks the MapData, not the meshes.** The 2D editor picked a cell by walking the grid diagonal
+from the top down; that arithmetic is retired with the PixiJS renderer. The 3D editor fires a ray
+from the camera through the cursor and walks the `MapData` RLE columns directly using the
+Amanatides-Woo DDA algorithm (`packages/iso-core/src/dda-raycast.ts:65-210`). No meshes are
+needed — the ray marches through the voxel grid, querying `isOccupied` against the RLE data on
+every step.
 
-The contract (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:31@7382effa`):
+The contract (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:44-56`):
 
 - `hit` — the **occupied** cell under the cursor: the target of `remover` and `pintar`. `null` when
   the cursor is over empty space.
@@ -31,32 +32,28 @@ The contract (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:31@7382eff
 - `hitFace` — `'top' | 'side' | 'ground' | null`: what the ray actually hit, and the input the stack
   tool uses to decide where a piece lands.
 
-Two rules follow from the face normal (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:108@7382effa`):
+Two rules follow from the face normal (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:197-280`):
 
-1. **Clicking the face of a cube places in the adjacent cell.** The hit's face normal — transformed
-   to world space and rounded to a cardinal direction — is added to the cube's cell. This is the
-   Minecraft-style contract: clicking the side of a block lands the new block *next to* it, not on it.
-2. **Clicking the ground plane places at z = 0.** Empty space falls to the floor, and `hit` stays
-   `null` — "no cell under the cursor" is a real answer, and `pintar` on empty ground places instead
-   of refusing.
+1. **Clicking the face of a cube places in the adjacent cell.** The hit's face normal — derived
+   from the DDA step direction in map coordinates — is added to the cube's cell. This is the
+   Minecraft-style contract: clicking the side of a block lands the new block *next to* it.
+2. **Clicking the ground plane places at z = 0.** Empty space intersects the z=0 plane
+   analytically, and `hit` stays `null` — "no cell under the cursor" is a real answer, and
+   `pintar` on empty ground places instead of refusing.
 
 The `empilhar` tool gets a narrower contract. `pickColumnTop`
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:188@7382effa`) keeps the exact placement
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:291-308`) keeps the exact placement
 when the ray hit a side face or the ground, but when the ray hits a **top** face it snaps the
 placement to the top of that column — stacking works even when the user is not aiming at the exact
 top face.
 
 Coordinate mapping: Three.js is Y-up. Map `(x, y, z)` lives in the world as `(x, z, y)` — map `y`
-becomes world `Z`, map `z` (height) becomes world `Y`. `worldToCell` does the inverse with
-`Math.round`, which is exact for unit cubes at integer positions
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:75@7382effa`).
+becomes world `Z`, map `z` (height) becomes world `Y`. The DDA engine operates entirely in map
+coordinates (`worldToMap` at `tools/character-builder/src/map/3d/pick3d-raycaster.ts:89-91`) so
+the coordinate mapping happens once at the boundary, not on every DDA step.
 
-The meshes the ray tests against come from the scene: `collectBlockMeshes`
-(`tools/character-builder/src/map/3d/scene3d.ts:456@dddf5555`) returns every `Mesh` whose
-`userData.blockId` is set — blocks only, never the grid or the preview — and `findGroundPlane`
-(`tools/character-builder/src/map/3d/scene3d.ts:473@dddf5555`) finds the invisible raycast floor by
-name. The raycaster mechanics themselves (NDC conversion, `setFromCamera`, `intersectObjects`) are
-owned by `raycasting-threejs-blocks`; this skill owns what the editor does with the result.
+The picking mechanics themselves (NDC, `setFromCamera`, DDA walk) are owned by
+`raycasting-threejs-blocks`; this skill owns what the editor does with the result.
 
 ## The map model constrains the editor, and that is the point
 
@@ -97,12 +94,28 @@ The camera rotation never appears in the document — `MapData` does not know th
 starter platform so there is always a floor to click
 (`tools/character-builder/src/map/editor/map-state.ts:196@3f5156b0`).
 
+## The three editor modes
+
+The editor has three modes (`tools/character-builder/src/map/3d/map-editor-3d.tsx:213`):
+
+| Mode | Purpose |
+|---|---|
+| `'editar'` | Place, remove, paint blocks |
+| `'testar'` | Run the test character with WASD movement |
+| `'simular'` | Run block physics simulation (falling blocks, domino effect) |
+
+The Escape key handler has three branches (`tools/character-builder/src/map/3d/map-editor-3d.tsx:1095-1104`):
+- In `'testar'`: exits test mode
+- In `'simular'`: exits simular mode (discarding changes)
+- In `'editar'`: no-op (passed to browser)
+
 ## The placement tools that exist — the editor is the tool layer
 
 Four tools, and they are thin: `empilhar`, `colocar`, `pintar`, `remover`
-(`tools/character-builder/src/map/3d/map-editor-3d.tsx:93@e80414d9`). The component resolves the
-pointer to a `Pick3DResult` and feeds it to the map-state operations; nothing mutates in place and
-nothing writes to the screen from the tool layer (`tools/character-builder/src/map/3d/map-editor-3d.tsx:234@e80414d9`):
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:172`). The component resolves the
+pointer to a `Pick3DResult` via DDA and feeds it to the map-state operations; nothing mutates in
+place and nothing writes to the screen from the tool layer
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:417-484`):
 
 - `remover` → `removeBlock(hit)` when the cursor is over a block;
 - `pintar` → `paintBlock(hit)` on an occupied cell, `placeBlock(placement)` on empty ground;
@@ -115,37 +128,64 @@ their semantics now live in map-state.ts and in the picking functions above.
 
 Preview and feedback are tool state, not validity: the preview cube sits on the placement cell and
 turns red only for `remover` (a destructive action), and the highlight marks the occupied cell under
-the cursor (`tools/character-builder/src/map/3d/map-editor-3d.tsx:204@e80414d9`,
-`tools/character-builder/src/map/3d/scene3d.ts:262@dddf5555`).
+the cursor (`tools/character-builder/src/map/3d/map-editor-3d.tsx:204`,
+`tools/character-builder/src/map/3d/scene3d.ts:688`).
 
 Dragging with the button held repeats the single-cell operation per pointer move — that is **not** a
-brush (`tools/character-builder/src/map/3d/map-editor-3d.tsx:300@e80414d9`). Wheel zoom is throttled
-to one step per 80 ms so a scroll burst does not saturate the React cycle
-(`tools/character-builder/src/map/3d/map-editor-3d.tsx:332@e80414d9`); middle button or shift+drag
-pans; `R` rotates, `1`–`4` pick a view, Ctrl+Z/Y undo and redo.
+brush (`tools/character-builder/src/map/3d/map-editor-3d.tsx:506`).
+
+**Keyboard (edit mode):** `R` rotates (shift+R reverses), `1`–`4` pick a discrete view,
+Ctrl+Z/Y undo and redo, arrow keys pan the camera 10% of the viewport per step
+(`tools/character-builder/src/map/3d/map-editor-3d.tsx:1114-1137`). Middle mouse or shift+drag
+pans; wheel zooms with coalesced deltas and continuous damping.
+
+## Simular mode: block physics simulation
+
+The "Simular" button (`tools/character-builder/src/map/3d/map-editor-3d.tsx:1358-1367`) enters
+a simulation mode backed by `packages/iso-core/src/block-physics.ts`. It:
+
+1. Snapshots the map (`simOriginalMapRef`)
+2. Builds a `BlockWorld` from the RLE columns (`buildBlockWorld`)
+3. Runs `initBlockPhysics` to find unsupported blocks
+4. Starts a 100ms-tick rAF loop calling `stepBlockPhysics`
+
+The simulation UI has four controls (`tools/character-builder/src/map/3d/map-editor-3d.tsx:1280-1334`):
+- **Play/Pause** — toggle the simulation loop
+- **Step** — advance one physics step (even when paused)
+- **Aplicar** — apply the simulation result to the document (pushes a new history entry)
+- **Descartar** — discard changes, restore original map
+
+The support rule (`hasSupport` in `packages/iso-core/src/block-physics.ts:80-89`): a block at
+`(x,y,z)` has support if `z === 0` (floor) or a block exists at `(x,y,z-1)`. Unsupported
+blocks fall 1 level per `fallInterval` ticks (6 ticks at 1/60s each = ~100ms per level).
+When a falling block hits a supported position, it lands. Blocks that fell can destabilize
+blocks below them — the domino effect is handled by `findUnsupported` detecting new
+unsupported blocks after each descent.
+
+The entity collision: if a falling block lands on the test character's cell, the character is
+pushed out via MTV (`pushPlayerOutOfCell` in `packages/iso-core/src/block-physics.ts:227-243`).
 
 ## The rendering module does not edit
 
 `scene3d.ts` is the renderer. `createIsoScene3D` builds the WebGLRenderer, the lights, the
 orthographic camera, the grid and the ground plane; the scene lives **outside React**, created once
 in a `useEffect` and updated by imperative calls to `render(state)`
-(`tools/character-builder/src/map/3d/scene3d.ts:127@dddf5555`). `render` takes the whole
-`Scene3DState` — map, preview, highlight, rotation — and draws it in one pass
-(`tools/character-builder/src/map/3d/scene3d.ts:56@dddf5555`).
+(`tools/character-builder/src/map/3d/scene3d.ts:192-868`). `render` takes the whole
+`Scene3DState` — map, preview, highlight, rotation, actor — and draws it in one pass
+(`tools/character-builder/src/map/3d/scene3d.ts:710-714`).
 
-`render` diffs meshes against the RLE map: it iterates the runs, creates a cube for every occupied
-cell that has no mesh yet, and removes meshes whose cells are gone
-(`tools/character-builder/src/map/3d/scene3d.ts:212@dddf5555`). A shared `BoxGeometry` is reused for
-every cube — nothing allocates geometry per block
-(`tools/character-builder/src/map/3d/scene3d.ts:404@dddf5555`) — and textures keep nearest filtering
-with mipmaps off so pixel art stays crisp. Procedural blocks fall back to the iso-core canonical
-cube geometry (`packages/iso-core/src/iso-cube.ts:222@2ad14e9b`).
+`syncBlocks` diffs instanced meshes against the RLE map: it iterates the runs, adds cells to
+`BlockInstancing` for every occupied cell that has no instance yet, and removes instances whose
+cells are gone (`tools/character-builder/src/map/3d/scene3d.ts:581-684`). Hidden cells (fully
+surrounded) are culled by `computeHiddenCells` before instancing. A shared `BoxGeometry` is
+reused for every cube of the same sprite proportion — nothing allocates geometry per block.
+Textures keep nearest filtering with mipmaps off so pixel art stays crisp.
 
 The grid and the ground plane resize to cover the occupied area plus a margin, so there is always a
-clickable floor around the content (`tools/character-builder/src/map/3d/scene3d.ts:414@dddf5555`).
-Camera controls live in `controls3d.ts` — pan, integer zoom, and the four discrete views; the 280 ms
-rotation animation is driven separately from `render` so a state change does not burn an animation in
-flight (`tools/character-builder/src/map/3d/scene3d.ts:83@dddf5555`).
+clickable floor around the content (`tools/character-builder/src/map/3d/scene3d.ts:677-679`).
+Camera controls live in `controls3d.ts` — pan, continuous damped zoom, and the four discrete
+views; the 280 ms rotation animation is driven by the single rAF tick loop
+(`tools/character-builder/src/map/3d/scene3d.ts:318-395`).
 
 **Never add an editing feature to the renderer.** Edits belong to the tool layer, and this module
 renders.
@@ -217,9 +257,15 @@ promise an editor-side absence check; the contract that remains is the instance 
   `simulating-isometric-physics` carries the account of what the model does and does not honour for
   doors and stairs.
 
-Two entries that used to live here are now implemented, and claiming otherwise wastes a task:
-**undo/redo** exists as a snapshot stack (`tools/character-builder/src/map/editor/map-state.ts:141@3f5156b0`),
-and **camera rotation** exists in four views with an animated turn (`rotating-isometric-camera`).
+Entries that are now implemented and must not be claimed as absent:
+- **undo/redo** — snapshot stack (`tools/character-builder/src/map/editor/map-state.ts:141`)
+- **camera rotation** — four views with animated turn (`rotating-isometric-camera`)
+- **block physics simulation** — simular mode with Play/Pause/Step/Apply/Discard (this section)
+- **DDA voxel raycasting** — Amanatides-Woo DDA replaces Three.js Raycaster for picking (`raycasting-threejs-blocks`)
+- **camera pan with arrow keys** — 10% viewport per step in edit mode
+- **touch/pinch zoom** — `setZoomAnchored` with absolute zoom from pinch gestures
+- **zoom-to-fit** — projects 8 bounding box vertices, fits with 10% margin
+- **coalesced wheel zoom** — accumulated per frame, anchored on cursor, continuous damped
 
 These are absences, not defects. **Do not invent a convention to fill one.** Propose it through
 `meta-skill-evolution` as a draft, or ask. A rule invented to make a table look complete is exactly

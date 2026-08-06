@@ -34,21 +34,36 @@ The alternative — a `MeshStandardMaterial` floor with `receiveShadow` — ties
 photometry: change an intensity and the shadow changes with it, and the right constants can only be
 found by trial on screen. Decoupling them is what lets the rest of the scene stay unlit.
 
-## Cubes cast, cubes do not receive — and that is a trade, stated
+## Cubes cast, cubes receive — via the ShadowMaterial decoupling trick
 
 `createCubeMesh` sets `castShadow = true` and `receiveShadow = false`
-(`tools/character-builder/src/map/3d/cube3d.ts:354@51821ec4`). Receiving a shadow requires a lit
-material, and a lit material changes the art. The trade was made in favour of the art.
+(`tools/character-builder/src/map/3d/cube3d.ts:558`). The cube mesh itself still does not
+receive shadow — its material is `MeshBasicMaterial`, which ignores the shadow map. This preserves
+the art exactly as `mapping-sprites-onto-cubes` requires.
 
-The arithmetic behind it, because it is not a tuning problem: for the three visible faces to keep
-identical brightness under a Lambert term, the light must satisfy `N·L` equal for +X, +Y and +Z —
-which forces `L ∝ (1,1,1)`, i.e. a light directly behind the viewer. A light behind the viewer casts
-every shadow **behind** its caster, where the caster hides it. Uniform illumination and visible
-shadows are mutually exclusive; there is no intensity that buys both.
+**What changed (Onda 1):** each cube now carries a child quad with `ShadowMaterial` anchored just
+above its top face (`tools/character-builder/src/map/3d/cube3d.ts:564`,
+`SHADOW_QUAD_EPS = 0.001` at line 118, `CUBE_SHADOW_OPACITY = 0.42` at line 112). The same
+decoupling trick the floor uses (`grid3d.ts`). A cube's shadow quad receives the shadow cast by
+the cube above it — blocks stacked on top of each other now darken the ones below, exactly as
+the floor darkens under a tower.
 
-**What is lost:** a tall structure's shadow stops at the floor and does not darken blocks it falls
-across. **The documented way back**, if it is ever wanted: give each cube a `ShadowMaterial` quad
-sitting just above its top face — the same decoupling trick, at the price of one extra draw per cube.
+The arithmetic for why the art faces themselves are still unlit: for the three visible faces to
+keep identical brightness under a Lambert term, the light must satisfy `N·L` equal for +X, +Y
+and +Z — which forces `L ∝ (1,1,1)`, i.e. a light directly behind the viewer. A light behind the
+viewer casts every shadow **behind** its caster, where the caster hides it. Uniform illumination
+and visible shadows on the art are mutually exclusive; there is no intensity that buys both.
+The `ShadowMaterial` quad decouples the two concerns entirely.
+
+The shadow quad geometry and material are shared across ALL cubes — allocated once in
+`createCubeShadowQuad` (`tools/character-builder/src/map/3d/cube3d.ts:136`). For individual
+meshes (preview, highlight), the quad is a child of the cube mesh. For the `BlockInstancing`
+path (map blocks), shadow quads are placed directly in world space in a separate group
+(`tools/character-builder/src/map/3d/block-instancing.ts:211-213`).
+
+**The documented way back has been taken.** The skill previously recorded "what is lost" (shadows
+stop at the floor). That gap is now closed: shadows cascade from cube to cube through the
+entire stack.
 
 ## The light is fixed in the world, and that is what makes zoom free
 

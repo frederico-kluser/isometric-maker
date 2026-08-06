@@ -82,18 +82,29 @@ the rasterizer already states for procedural cubes — "a luz é presa à CÂMER
 not update it, so without that call a click landing between the turn and the next frame would use
 the previous orientation and place the block in the wrong cell.
 
-## Materials: unlit, alpha-tested, one per block
+## What the mesh actually shows: InstancedMesh shares materials
 
-`MeshBasicMaterial`, not `MeshLambertMaterial` (`tools/character-builder/src/map/3d/cube3d.ts:290@51821ec4`).
-Pixel art already has its shading baked — top light, right medium, left dark. Lighting it again
-darkens the art twice and, worse, makes the same block change color when the camera turns, which
-reads as a bug. Shadows still exist; they land on the floor (`casting-threejs-shadows`).
+Map blocks are drawn by `BlockInstancing` (`tools/character-builder/src/map/3d/block-instancing.ts`) —
+one `InstancedMesh` per block type. All cells of the same type share a single material, a single
+geometry, and a single texture. The UVs still point each face at the correct region of the sprite;
+the difference is that the GPU draws all 200+ copies of "stone brick" in one call.
 
-`alphaTest = 0.5` with `transparent: false` (`tools/character-builder/src/map/3d/cube3d.ts:67@51821ec4`).
-Generated art does not always fill the silhouette; without the cutout those empty pixels render as a
-black fringe. Alpha test keeps the cube in the opaque pass — no depth sorting, no blend cost.
+This has two practical consequences:
 
-One material covers all six faces. The faces differ by UV, not by material.
+1. **Texture offset animation affects ALL instances equally.** An animated block's `texture.offset.x`
+   changes on the shared material, so every stone brick on the map shows the same animation frame
+   at the same instant. This is correct — all blocks of the same type animate in sync.
+
+2. **Per-instance color is multiplicative.** `BlockInstancing.setCellColor()` sets an
+   `instanceColor` on the `InstancedMesh`. The color multiplies with the base material's color:
+   white (1,1,1) = identity, red (1,0,0) = tint the sprite red. This is used for the cursor
+   highlight and could be used for damage flashes or selection. `instanceColor` is
+   lazy-allocated — if no cell ever sets a color, the `InstancedMesh` draws without the
+   multiplication pass.
+
+The underlying sprite-to-UV logic has not changed: one sprite, three faces, exact
+corner-to-corner UV from vertex positions (`tools/character-builder/src/map/3d/cube3d.ts:183-204`).
+Only the draw mechanism changed — from N individual `Mesh` objects to 1 `InstancedMesh` per type.
 
 ## Any sprite size, and the stretch is declared
 
@@ -141,6 +152,7 @@ code path for every block; only the origin of the image differs.
 - `packages/iso-core/src/iso-cube-uv.ts` — the UV math, pure and tested
 - `packages/iso-core/src/iso-cube.ts` — the canonical shape and `silhouetteMatch`
 - `tools/character-builder/src/map/3d/cube3d.ts` — art, materials, geometry cache
+- `tools/character-builder/src/map/3d/block-instancing.ts` — the InstancedMesh renderer that draws map blocks
 - `creating-threejs-cubes` — the mesh-level contract this skill sits on top of
-- `casting-threejs-shadows` — why the cube faces are unlit
+- `casting-threejs-shadows` — why the cube faces are unlit, and how cube-to-cube shadows work
 - `projecting-isometric-geometry` — where the 2:1 projection comes from

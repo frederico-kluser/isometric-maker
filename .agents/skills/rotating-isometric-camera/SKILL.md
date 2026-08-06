@@ -67,6 +67,32 @@ cubic ease remain this project's choice, in a named constant.
 is hidden while the camera moves. Inventing a cell from a fractional rotation puts the piece
 somewhere arbitrary.
 
+### Input methods beyond the four discrete views
+
+The four discrete views (buttons `1`-`4` and `R` to rotate) still exist, but the camera
+now accepts several additional input methods:
+
+- **Keyboard pan** (`tools/character-builder/src/map/3d/map-editor-3d.tsx:1114-1137`):
+  Arrow keys pan the camera in edit mode. Each step moves 10% of the viewport size.
+
+- **Touch/pinch zoom** (`tools/character-builder/src/map/3d/map-editor-3d.tsx:569-613`):
+  Two-finger pinch gestures call `setZoomAnchored(newZoom, ndcX, ndcY)` — absolute zoom
+  derived from the pinch distance ratio times the initial zoom, anchored on the pinch center.
+  A 5px threshold prevents accidental zoom.
+
+- **Gesture events (Safari)** (`tools/character-builder/src/map/3d/map-editor-3d.tsx:617-652`):
+  `gesturestart`/`gesturechange`/`gestureend` handlers catch Safari trackpad gestures.
+  The scale is applied as absolute zoom anchored on screen center (Safari doesn't expose
+  the gesture center).
+
+- **Zoom-to-fit button** (`tools/character-builder/src/map/3d/map-editor-3d.tsx:668-684`):
+  Calls `scene3d.zoomToFit(maxHeight, viewportW, viewportH)`, which projects 8 bounding box
+  corners and calculates the zoom from the most restrictive axis with a 10% margin.
+
+- **Coalesced wheel delta** (`tools/character-builder/src/map/3d/scene3d.ts:291-294`):
+  Wheel events accumulate `deltaY` between frames. The tick loop applies the accumulated
+  delta once per frame anchored on the cursor — no per-event zoom step, no throttling.
+
 ## What is verified, from engines in production
 
 ### Rotation is a discrete integer, not an angle

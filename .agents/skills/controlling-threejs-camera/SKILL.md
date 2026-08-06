@@ -75,6 +75,54 @@ geometry, sampled with `NearestFilter`: there is no pixel grid of a stage to mis
 framebuffer and a projection. What survives of the old problem is sampling shimmer on heavily
 minified textures, and that is the declared price of a fluid zoom.
 
+## Coalesced wheel events
+
+Wheel events fire faster than a single frame (especially on trackpads). Applying each event
+immediately would call `zoomStep` + `anchorZoom` multiple times with the same starting
+`camera.zoom`, producing incorrect anchors. The fix:
+
+- `pendingWheelDeltaY`, `pendingWheelNdcX`, `pendingWheelNdcY` accumulate between frames
+  (`tools/character-builder/src/map/3d/scene3d.ts:291-294`)
+- The tick loop applies the accumulated delta once per frame, anchored on the last cursor position
+  (`tools/character-builder/src/map/3d/scene3d.ts:328-344`)
+
+## normalizeWheel: browser-independent delta
+
+`normalizeWheel(deltaY, deltaMode)` (`tools/character-builder/src/map/3d/controls3d.ts:287-291`)
+converts the `deltaMode`-dependent `deltaY` to pixel-equivalent values:
+
+- `deltaMode === 0` (pixels, Chrome) — returned as-is
+- `deltaMode === 1` (lines, Firefox) — multiplied by 17 (standard CSS line-height)
+- `deltaMode === 2` (pages) — multiplied by 800 (typical viewport height)
+
+Without this, the same gesture is ~17x slower in Firefox than Chrome.
+
+## zoomToFit: fit all blocks in the viewport
+
+`zoomToFit(bounds, maxHeight, viewportW, viewportH, yaw, margin=0.1)`
+(`tools/character-builder/src/map/3d/controls3d.ts:312-379`):
+
+1. Computes camera basis vectors (`right`, `up`) from the yaw and elevation
+2. Projects 8 bounding box corners (floor × 4 + ceiling × 4) into camera space
+3. Calculates the zoom needed for each axis: `zoomX = halfW / extentX`, `zoomY = halfH / extentY`
+4. Takes the minimum (most restrictive) and applies the margin (10% = 0.9 factor)
+5. Centers the target on the bounding box centroid
+
+The editor triggers this from a button (`tools/character-builder/src/map/3d/map-editor-3d.tsx:668-684`).
+It reads `lastBounds` from the last `syncBlocks` run, so it always uses fresh data.
+
+## Touch and pinch: setZoomAnchored
+
+`setZoomAnchored(zoom, ndcX, ndcY)` (`tools/character-builder/src/map/3d/scene3d.ts:748-759`)
+sets an absolute zoom value (not a delta) anchored on a cursor position. Used by:
+
+- **Touch pinch** — distance ratio between two fingers × initial zoom
+- **Safari gesture events** — `gesturechange.scale` × initial zoom
+- **Zoom-to-fit button** — computed zoom, anchored on the target centroid
+
+It discards any pending wheel delta (pinch replaces the wheel) and jumps the zoom goal
+directly — no interpolation, since the gesture is continuous enough on its own.
+
 ## Pan: pixels to world, divided by zoom
 
 `panTarget` converts a pixel delta with the frustum size, the viewport size **and** the current zoom
@@ -101,9 +149,10 @@ is smaller than the configuration that would be needed to suppress the defaults.
 
 ## What is not verified
 
-The 280 ms turn, the cubic ease, `ZOOM_SMOOTHING_TAU` and the wheel sensitivity are visual choices,
-never measured. The claim that OrbitControls would need more configuration is judgment, not a
-benchmark.
+The 280 ms turn, the cubic ease, `ZOOM_SMOOTHING_TAU`, `ZOOM_WHEEL_SENSITIVITY`, and the zoom-to-fit
+10% margin are visual choices, never measured. The claim that OrbitControls would need more
+configuration is judgment, not a benchmark. The `LINE × 17` and `PAGE × 800` constants in
+`normalizeWheel` are conventions from the DOM spec, not measured on actual devices.
 
 ## References
 

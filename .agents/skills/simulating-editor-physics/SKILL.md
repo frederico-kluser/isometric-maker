@@ -98,6 +98,45 @@ Placing or painting a solid block on the character's cell calls `pushPlayerOutOf
 character never leaves them inside the stone. Water, lava and foliage are not solid and do not push —
 the check honours the material catalog, not the mere presence of a block.
 
+## Simular mode: block physics in the editor
+
+A third editor mode, "simular" (`tools/character-builder/src/map/3d/map-editor-3d.tsx:213`),
+runs block physics simulation independent of the test character. The entry point is
+`enterSimulateMode` (`tools/character-builder/src/map/3d/map-editor-3d.tsx:878-985`).
+
+**How it works:**
+
+1. Snapshots the current map (`simOriginalMapRef`)
+2. Builds a `BlockWorld` — extracts all occupied cells from the RLE map and builds a `CollisionMap`
+3. Runs `initBlockPhysics` to detect unsupported blocks
+4. Starts a tick loop at ~10 fps (100ms intervals) calling `stepBlockPhysics`
+5. On each descent, constructs a virtual `MapData` from the falling/landed blocks and renders it
+
+**Controls** (`tools/character-builder/src/map/3d/map-editor-3d.tsx:1280-1334`):
+- **Play/Pause** — starts/stops the simulation tick
+- **Step** — advances one physics step (single call to `stepBlockPhysics`)
+- **Aplicar** — resolves final positions via `resolveMapAfterSimulation`, constructs a new `MapData`,
+  and pushes it to the undo history (`tools/character-builder/src/map/3d/map-editor-3d.tsx:987-1042`)
+- **Descartar** — discards the simulation state, restores the original map
+
+**Physics rules** (in `packages/iso-core/src/block-physics.ts`):
+- **Support**: `hasSupport(x,y,z)` returns true if `z === 0` or `(x,y,z-1)` has a block
+- **Falling**: blocks descend 1 level per `fallInterval` ticks (6 ticks at 1/60s = ~100ms)
+- **Domino effect**: when a block lands at a new Z, `findUnsupported` re-scans to detect
+  blocks above that lost their support — they join the `falling` list on the next step
+- **Entity push-out**: if a falling block intersects the test character's cell, the character
+  is pushed out via MTV (`pushPlayerOutOfCell`)
+
+**State tracking:**
+- `simFallingRef` — blocks currently falling (updated per tick)
+- `simLandedRef` — blocks that have landed (cumulative, for the final resolution)
+- `simAccumulatorRef` — step accumulator modulo `fallInterval`
+- `simStateRef` — `'running'` or `'paused'` (mirrored as React state for UI)
+
+The simulation tick runs at ~10 fps for visual feedback — it's deliberately slow so the user
+can watch blocks cascade. The actual physics step (`stepBlockPhysics`) is deterministic: same
+input always produces the same output, regardless of frame rate.
+
 ## What is not verified
 
 - The rules the model enforces are covered by `iso-core`'s suite; **this wiring is not**. No test

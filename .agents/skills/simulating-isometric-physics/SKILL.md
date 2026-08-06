@@ -194,6 +194,65 @@ When a task asks to connect the editor to collision, that is the design decision
 does `hasEdge` gain a type, or does the adapter translate types into blocking and non-blocking? It
 is not an implementation detail, and picking one silently locks in door behaviour for the project.
 
+## Block physics: support, falling, domino effect
+
+In addition to character movement, the physics system now includes block physics
+(`packages/iso-core/src/block-physics.ts`) — what happens when a block is unsupported.
+
+**The support rule** (`hasSupport` at `packages/iso-core/src/block-physics.ts:80-89`):
+a block at `(x, y, z)` has support if `z === 0` (the floor is always solid) or if
+`map.hasBlock(x, y, z - 1)`. Every other condition — floating blocks, overhangs — means
+the block is unsupported and should fall.
+
+**Deterministic falling** (`stepBlockPhysics` at `packages/iso-core/src/block-physics.ts:164-282`):
+each unsupported block accumulates a step counter. Every `fallInterval` steps (default 6, at
+1/60s each = 100ms), the block descends 1 level. If the new position has support, it lands.
+If not, it keeps falling. The fall is purely vertical (no horizontal drift).
+
+**Domino effect:** when a block lands at a new Z in a column, the block that was resting on
+it from above loses its support. `stepBlockPhysics` detects this by re-running
+`findUnsupported` against the original occupied set (filtered by columns already in the
+simulation). Newly unsupported blocks join the `falling` list.
+
+**Entity collision:** if a falling block's new position equals the test character's cell,
+the character is pushed out via MTV (`pushOutOf` in `collision-box.ts`). The block is not
+pushed — it's considered more massive.
+
+**Simulation lifecycle:**
+- `initBlockPhysics(world)` — finds all unsupported blocks, returns initial falling set
+- `stepBlockPhysics(world, falling, acc, player, config)` — advances one fixed step
+- `resolveMapAfterSimulation(world, falling, landed)` — computes final positions as if
+  the simulation were applied
+
+The block physics operates on a `BlockWorld` (occupied cells + `CollisionMap`), not directly
+on `MapData`. The editor owns the translation between RLE columns and `BlockWorld`.
+
+## Query API: DDA raycast, AABB overlap, AABB sweep
+
+Three query functions in `packages/iso-core/src/physics-query.ts` answer spatial questions
+against the `CollisionMap` without needing meshes, Three.js, or any renderer:
+
+- **`raycast(origin, direction, maxDistance, map)`** (`physics-query.ts:98-180`) —
+  Amanatides-Woo DDA voxel traversal. Walks the grid cell by cell along the ray. Returns
+  the first occupied cell, its face normal, and the distance. Used by `dda-raycast.ts`
+  for editor picking.
+
+- **`overlap(aabb, entities)`** (`physics-query.ts:210-237`) — tests `GridAabb` against a
+  list of `OverlapEntity`. Iterates the sub-volume of grid cells that overlap the AABB
+  and returns all matching entities. Used for entity-block collision detection.
+
+- **`overlapMap(aabb, map)`** (`physics-query.ts:244-266`) — same as overlap but queries
+  `CollisionMap.hasBlock` directly instead of an entity list. Iterates the sub-volume of
+  cells.
+
+- **`sweep(box, velocity, map)`** (`physics-query.ts:294-460`) — sweeps an `EntityBox`
+  through the grid along a velocity vector. Uses per-axis sweep (X first, then Y, then Z)
+  with sliding — the same order as `resolveMovement` in `collision-box.ts`. Returns the
+  first collision's normal, time (0-1), and the hit cell. Useful for movement prediction
+  and projectile trajectory checking.
+
+All four functions are pure and tested in iso-core — no DOM, no Three.js, no renderer.
+
 ## What is deliberately absent
 
 - **No physics engine, and no decision recorded either way.** There is no Rapier, no matter.js, no
@@ -201,9 +260,11 @@ is not an implementation detail, and picking one silently locks in door behaviou
 - **No continuous height, no ramps, no slopes.** Discrete Z is the decision
   (`docs/adr/0013-geometria-isometrica-64x32-z16.md:1@e194895c`); ramps are a Z model this project
   does not have. A placed `escada` is the intended escape hatch and is not yet honoured — see above.
-- **No voxel ray traversal.** `trace.ts` is an input replay, not a DDA raycast — the name invites the
-  confusion. The camera "ray" of this project is the arithmetic diagonal walk owned by
-  `editing-isometric-maps`, and it steps whole Z levels rather than marching a parametric line.
+- **No voxel ray traversal — IMPLEMENTED in Onda 2.** DDA voxel raycasting now exists
+  in `packages/iso-core/src/dda-raycast.ts` (Amanatides-Woo algorithm) and
+  `packages/iso-core/src/physics-query.ts` (`raycast`, `overlap`, `overlapMap`, `sweep`).
+  The editor picking uses DDA instead of Three.js Raycaster. `trace.ts` remains an input
+  replay (for deterministic verification), not a raycast.
 - **No multi-cell footprint.** The map format forbids it
   (`packages/iso-core/src/map.ts:34@0a012d80`). This is why the classic grid-traversal correctness
   trap — an occupant listed in a voxel whose geometry extends past it, so the first non-empty voxel
@@ -266,5 +327,8 @@ should be labelled as such wherever it is repeated.
 - `packages/iso-core/src/step-up.ts` — the one-level step and why it avoids `canCross`
 - `packages/iso-core/src/jump.ts` — the three phases and the screen-only parabola
 - `packages/iso-core/src/trace.ts` — deterministic replay, the acceptance instrument
+- `packages/iso-core/src/block-physics.ts` — block falling, support, domino effect
+- `packages/iso-core/src/physics-query.ts` — DDA raycast, AABB overlap, AABB sweep
+- `packages/iso-core/src/entity-collision.ts` — entity-vs-entity collision (block hits actor)
 - `.agents/skills/projecting-isometric-geometry/SKILL.md` — the coordinate space this model lives in
-- `.agents/skills/interpolating-pixi-state/SKILL.md` — how integer model state is drawn smoothly
+- `.agents/skills/simulating-editor-physics/SKILL.md` — how the editor runs the physics live

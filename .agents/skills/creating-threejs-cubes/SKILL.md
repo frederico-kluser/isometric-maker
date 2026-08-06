@@ -82,22 +82,42 @@ computed once and shared (`tools/character-builder/src/map/3d/cube3d.ts:402@5182
 `depthWrite: false` on the preview is load-bearing: writing depth would make the preview occlude the
 next frame's raycast against the very cube it is previewing.
 
-## Draw calls
+## Draw calls and InstancedMesh
 
-Every distinct material is a draw call. Under ~100 cubes that is fine; beyond that the answer is
-`InstancedMesh` with an atlas, which is not implemented and has not been needed. The threshold is a
-rule of thumb, never measured here.
+Under ~100 cubes with distinct materials, individual meshes are fine. Beyond that, the answer is
+`BlockInstancing` (`tools/character-builder/src/map/3d/block-instancing.ts`) — one `InstancedMesh`
+per block type, drawing every cell of that type in a single draw call.
+
+`BlockInstancing` is the active renderer for map blocks. `createCubeMesh` still exists and is used
+for non-map cases: the placement preview, the selection highlight, and particle effects. The two
+paths coexist:
+- **Map blocks** → `BlockInstancing.setCell()` — instanced, shared geometry/material, hidden-cell culling
+- **Helpers** → `createCubeMesh()` — individual mesh, repositioned each frame
+
+The instancing layer also handles:
+- **Per-instance color** via `instanceColor` (lazy-allocated, multiplicative with base material)
+- **Hidden cell culling** — cells fully surrounded on 6 sides are never instanced (`computeHiddenCells`)
+- **Free list** — slots are reused when blocks are removed, avoiding memory growth
+- **Shadow quads** — placed in a separate `THREE.Group` in world space, non-instanced (one per visible cell)
+
+The shadow quad is now part of cube mesh creation: `createCubeMesh()` adds one as a child
+(`tools/character-builder/src/map/3d/cube3d.ts:563-565`), and `BlockInstancing.setCell()` creates
+one in the shadow group (`tools/character-builder/src/map/3d/block-instancing.ts:211-213`).
 
 ## What is not verified
 
 - No automated test renders a cube. The claims rest on typechecking and on reading the wiring.
 - The draw-call threshold and `alphaTest = 0.5` are judgment, not measurement.
+- The InstancedMesh capacity doubling (INITIAL_CAPACITY = 1024) was chosen to cover a 32×32 map
+  of a single block type — not profiled at scale.
 
 ## References
 
 - `tools/character-builder/src/map/3d/cube3d.ts` — the cube factory
+- `tools/character-builder/src/map/3d/block-instancing.ts` — the InstancedMesh renderer
 - `tools/character-builder/src/map/3d/cube-canvas.ts` — the isometric cube rasterizer
 - `packages/iso-core/src/iso-cube.ts` — the canonical cube geometry
 - `mapping-sprites-onto-cubes` — what the mesh shows, and why
-- `casting-threejs-shadows` — why the material is unlit
+- `casting-threejs-shadows` — why the material is unlit, and how cube-to-cube shadows work
 - [Three.js BoxGeometry docs](https://threejs.org/docs/#api/en/geometries/BoxGeometry)
+- [Three.js InstancedMesh docs](https://threejs.org/docs/#api/en/objects/InstancedMesh)

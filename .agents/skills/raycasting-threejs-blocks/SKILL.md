@@ -6,24 +6,38 @@ metadata:
   verification_signal: cd tools/character-builder && npx tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck --target es2023 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --allowImportingTsExtensions --jsx react-jsx src/map/3d/scene3d.ts src/map/3d/controls3d.ts src/map/3d/cube3d.ts src/map/3d/pick3d-raycaster.ts src/map/3d/grid3d.ts
 ---
 
-# Raycasting Three.js blocks (Minecraft-style placement)
+# Picking blocks with DDA voxel raycasting
 
 ## When to use
 
 Before converting a mouse position into a map cell in the 3D view, before changing how placement
 decides the destination cell, and before touching the ground plane that makes empty space clickable.
 
-## The canonical flow
+## The canonical flow (DDA, not Raycaster)
 
 ```
 1. mouse (clientX, clientY) → NDC via getBoundingClientRect
-2. raycaster.setFromCamera(ndc, camera)
-3. raycaster.intersectObjects(blockMeshes, false) — sorted by distance
-4. first hit: hit.object = the mesh, hit.face.normal = the face normal (local space)
-5. adjacent cell = block position + rounded world-space normal
+2. raycaster.setFromCamera(ndc, camera) — only to get the ray origin/direction
+3. Convert ray to map coordinates: world (X,Y,Z) → map (x, y, z)
+4. ddaRaycast(origin, direction, isOccupied, maxDistance) — walks RLE directly
+5. First hit: hit.cell = the occupied cell, hit.normal = face normal (map coords)
+6. adjacent cell = hit cell + normal
 ```
 
-Implemented as `pick3d` (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:108-157@7382effa`).
+Implemented as `pick3d` in `tools/character-builder/src/map/3d/pick3d-raycaster.ts:197-280`.
+The DDA engine lives in `packages/iso-core/src/dda-raycast.ts:65-210` — no Three.js
+dependency, no meshes needed.
+
+## Why DDA replaced Three.js Raycaster
+
+After `BlockInstancing`, the map blocks are drawn by `InstancedMesh` — one mesh per block
+type, not one mesh per cell. DDA walks the actual `MapData` RLE columns, so it always sees
+every block regardless of whether a mesh exists for it, and it's immune to matrix staleness
+because it reads data, not transforms.
+
+The contract (`{hit, placement, hitFace}`) and `pickColumnTop` are preserved unchanged —
+the editor tools (`map-editor-3d.tsx`) receive the same result shape and don't know which
+picking engine produced it.
 
 ## Mouse → NDC: the Y inversion is mandatory
 
@@ -37,28 +51,29 @@ return new THREE.Vector2(
 );
 ```
 
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:53-63@7382effa`)
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:71-80`)
 
-## face.normal is local; transform it to world
+The `setFromCamera` call is still needed to obtain the ray, but the ray is then
+converted to map coordinates and handed to DDA — no `intersectObjects` is called.
 
-`hit.face.normal` is in the geometry's local space. For unrotated cubes local equals world, but the
-code still calls `transformDirection(mesh.matrixWorld)` — idempotent here, load-bearing the day a
-mesh has a rotation (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:128-130@7382effa`). The
-normal is then rounded to a cardinal direction (0, ±1, 0) (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:133-137@7382effa`).
+## Face normal comes from the DDA step direction
 
-## The adjacent cell and the half-cube offset
+The DDA tracks which axis the ray last crossed to enter the current cell
+(`packages/iso-core/src/dda-raycast.ts:134-135`). The face normal is the
+**negation** of that step direction: entering a cell by stepping +X means the
+ray hit the -X face. This is computed in
+`packages/iso-core/src/dda-raycast.ts:153-156` and returned as `hit.normal`.
 
-Meshes are positioned at `y + 0.5` (see `bootstrapping-threejs-scene`), so the cell of the hit block
-subtracts the centering offset back:
+In map coordinates: `normal.z === 1` means the ray entered from above → hit the
+top face. Any other Z value, or a lateral axis → side face
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:233`).
 
-```typescript
-z: Math.round(blockPos.y - 0.5),
-```
+## The adjacent cell
 
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:139-144@7382effa`)
-
-The placement cell is the block position plus the direction, with the same offset
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:151-155@7382effa`).
+The placement cell is simply `hit cell + normal` in map coordinates
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:236-240`). No half-cube
+offset math — DDA operates in map (integer) coordinates, not in Three.js world space.
+The coordinate conversion happens once at the boundary.
 
 ## Coordinate mapping
 
@@ -66,64 +81,85 @@ The map is (x, y, z) with z = height; Three.js is (X, Y, Z) with Y = height:
 
 ```
 map → three:  position(x, z, y)
-three → map:  x = round(pos.x),  y = round(pos.z),  z = round(pos.y)
+three → map:  worldToMap: { x: point.x, y: point.z, z: point.y }
 ```
 
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:75-81@7382effa` and
-`tools/character-builder/src/map/3d/pick3d-raycaster.ts:86-89@7382effa`)
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:89-91`)
 
-## Empty space: the invisible ground plane
+The `isOccupied` callback queries the `MapData` RLE columns directly by walking
+the runs for a given column key (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:127-142`).
+This means `getBlockAt` and `isOccupied` decode RLE on every DDA step — a few dozen
+string splits per ray, not a bottleneck.
 
-When the ray misses every block, it is tested against an invisible plane on the floor — `visible:
-false` but still raycastable, `DoubleSide`, rotated flat at y − 0.01, named `ground-plane`
-(`tools/character-builder/src/map/3d/grid3d.ts:100@477d8c0f`). The hit point rounds to a cell with
-z = 0 (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:160-173@7382effa`). The plane is found
-by name via `findGroundPlane` (`tools/character-builder/src/map/3d/scene3d.ts:817@7c752159`).
+## Empty space: ray-plane intersection with z=0
 
-It is one of four coplanar ground planes now — the others are the dark floor, the `ShadowMaterial`
-catcher and the grid. Only this one carries the `ground-plane` name, and only it is picked; the
-others are deliberately unnamed so a rename never turns the shadow catcher into a click target
-(`casting-threejs-shadows`).
+When the DDA finds no block, the ray is tested against the z=0 plane (map coords)
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:247-276`). Only rays pointing
+downward (`direction.z < 0`) can hit the ground. The intersection point is rounded
+to the nearest cell, and the result carries `hitFace: 'ground'`.
+
+The old `findGroundPlane` + `PlaneGeometry` mechanism is still in the code but no
+longer used for picking — the ground is a mathematical plane, not a mesh.
 
 ## hitFace: the stacking contract
 
 Every result carries `hitFace` — `'top'`, `'side'`, `'ground'` or `null`
-(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:42@7382effa`). A top hit places on top of
-the column (`pickColumnTop`, `tools/character-builder/src/map/3d/pick3d-raycaster.ts:188-206@7382effa`); a side hit places on the
-adjacent cell at the same level — the Minecraft behavior.
+(`tools/character-builder/src/map/3d/pick3d-raycaster.ts:55`). A top hit places on top of
+the column (`pickColumnTop`, `tools/character-builder/src/map/3d/pick3d-raycaster.ts:291-308`);
+a side hit places on the adjacent cell at the same level — the Minecraft behavior.
 
-## Traps
+## Traps of the OLD approach (Raycaster)
+
+These no longer apply because DDA replaced the raycaster, but they are preserved so
+nobody re-architects back into them:
 
 1. **`intersectObjects` needs a mutable array.** Its signature takes `Object3D[]`, not
-   `readonly Object3D[]`; passing the readonly mesh list requires `as unknown as THREE.Object3D[]`
-   (`tools/character-builder/src/map/3d/pick3d-raycaster.ts:120@7382effa`).
-2. **Edges and corners.** On an exact edge the raycaster may report either adjacent face's normal;
-   the result is deterministic but not intuitive, and the rounding to cardinal directions absorbs
-   it. This is behavior of three's raycaster, not verified against every edge case in this
-   codebase.
-3. **DoubleSide flips normals.** A `DoubleSide` block material can report an inward normal. Blocks
-   keep the `FrontSide` default; only the invisible ground plane is `DoubleSide`, deliberately, so
-   it stays raycastable from both sides (`tools/character-builder/src/map/3d/grid3d.ts:103@477d8c0f`).
-4. **Preview must not write depth.** The placement preview uses `depthWrite: false` so it cannot
-   block the next frame's raycast (`tools/character-builder/src/map/3d/cube3d.ts:384@51821ec4`).
-5. **The mesh list is maintained, not discovered.** Ask the scene for `blockMeshes()`
-   (`tools/character-builder/src/map/3d/scene3d.ts:675@7c752159`) instead of traversing the graph on
-   every pointer move. `collectBlockMeshes` still exists for callers that only hold a scene.
-6. **The block meshes now rotate with the camera.** `first.face.normal` is in LOCAL space and must be
-   transformed by `matrixWorld` — which the picker already does. What is new is that the transform is
-   no longer a no-op, so skipping it silently places blocks on the wrong side in three of the four
-   views. `applyCubeYaw` refreshes `matrixWorld` itself, because the raycaster never does
-   (`tools/character-builder/src/map/3d/scene3d.ts:339@7c752159`).
+   `readonly Object3D[]`.
+2. **Edges and corners.** On an exact edge the raycaster may report either adjacent
+   face's normal.
+3. **Block meshes rotate with the camera.** `face.normal` is local and must be
+   transformed by `matrixWorld` — skipping it silently places blocks on the wrong side.
+4. **The mesh list is maintained, not discovered.** Traversing the scene graph on every
+   pointer move is expensive.
+5. **InstancedMesh instanceId.** The raycaster reports `instanceId` on `InstancedMesh`
+   hits; you must map that back to a cell position via the `userData.cells` array on
+   the InstancedMesh.
+6. **Hidden cells are not in the InstancedMesh.** Cells fully surrounded on 6 sides are
+   culled and never instantiated — the Raycaster can't pick them, and that's correct.
+
+## Traps of the NEW approach (DDA)
+
+1. **RLE decoding per step.** The DDA calls `isOccupied` for every cell visited. This
+   decodes the RLE runs each time. For a typical ray (< 20 steps), this is fine. For
+   a long ray at a flat angle, it can visit 100+ cells. The safety limit is set to
+   10000 steps (`packages/iso-core/src/dda-raycast.ts:130`).
+2. **Direction near zero on an axis.** The DDA uses `Math.abs(1/dir)` for delta-t;
+   a direction component of exactly zero gives `Infinity`, which is correct but the
+   `stepX`/`stepY`/`stepZ` must also be zero for that axis.
+3. **Origin inside a block.** The DDA skips the starting cell if it's occupied — but
+   only on the first iteration. This handles the edge case where the camera is
+   somehow inside a block.
+4. **Precision at long distances.** The `t` accumulation (floating-point addition) can
+   drift at extreme distances. The `maxDistance` guard limits this, and the grid is
+   finite (max 200 world units).
+5. **Ground plane intersection only works with downward rays.** If the user looks
+   straight down from above, the ray direction's Z is near zero or positive, and the
+   ground plane test fails — the result is `{hit: null, placement: {0,0,0}, hitFace: null}`.
+   In normal isometric viewing angles this never triggers.
+6. **`Math.floor` for cell index.** The DDA uses `Math.floor` for cell coordinates.
+   For negative coordinates, `Math.floor(-0.5) === -1` which is correct for the
+   Amanatides-Woo algorithm (cells extend from `floor(x)` to `floor(x)+1`).
 
 ## What is not verified
 
-The ground plane resizes to follow the map bounds
-(`tools/character-builder/src/map/3d/grid3d.ts:173@477d8c0f`); whether it ever fails to cover
-clicks at extreme zoom was not measured.
+- No automated test verifies picking against a rendered scene. The DDA algorithm is
+  tested in `packages/iso-core/src/dda-raycast.test.ts`; the editor wiring is
+  verified by typecheck, not by integration test.
 
 ## References
 
-- `tools/character-builder/src/map/3d/pick3d-raycaster.ts` — the picking implementation
-- `tools/character-builder/src/map/3d/grid3d.ts` — grid and ground plane
-- `tools/character-builder/src/map/3d/scene3d.ts` — `findGroundPlane` and mesh placement
-- [Three.js Raycaster docs](https://threejs.org/docs/#api/en/core/Raycaster)
+- `packages/iso-core/src/dda-raycast.ts` — the Amanatides-Woo DDA engine
+- `tools/character-builder/src/map/3d/pick3d-raycaster.ts` — the editor-side DDA wiring
+- `tools/character-builder/src/map/3d/scene3d.ts` — `blockMeshes()` for the InstancedMesh list
+- `tools/character-builder/src/map/3d/block-instancing.ts` — `userData.cells` for instanceId mapping
+- Amanatides, J., Woo, A. "A Fast Voxel Traversal Algorithm for Ray Tracing." Eurographics '87.
