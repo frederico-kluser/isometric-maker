@@ -70,6 +70,7 @@ import {
   yawOf,
   ZOOM_EPSILON,
   zoomStep,
+  zoomToFit,
 } from './controls3d.ts';
 import { buildActorVisual, SHADOW_RADIUS } from '../actor.ts';
 
@@ -147,6 +148,19 @@ export interface IsoScene3D {
   animateRotation(targetRotation: Rotation): void;
   /** Os meshes de bloco, para o raycaster. Sem varrer a cena. */
   blockMeshes(): readonly THREE.Mesh[];
+  /**
+   * Define o zoom absoluto mantendo o ponto sob o cursor parado.
+   * Usado por gestos de pinça (trackpad/touch) que produzem um zoom
+   * absoluto, não um delta incremental como a roda.
+   */
+  setZoomAnchored(zoom: number, ndcX: number, ndcY: number): void;
+  /**
+   * Enquadra todos os blocos colocados no viewport com 10% de margem.
+   *
+   * Lê os bounds da última sincronização de mapa (syncBlocks).
+   * `maxHeight` é a altura máxima dos blocos no eixo Y do mundo.
+   */
+  zoomToFit(maxHeight: number, viewportW: number, viewportH: number): void;
   /** Redimensiona o renderer. */
   resize(width: number, height: number): void;
   /** Destrói a cena e libera recursos. */
@@ -270,6 +284,25 @@ export async function createIsoScene3D(
   /** Giro em curso. null = parado. */
   let turning: { from: number; to: number; start: number } | null = null;
 
+  /**
+   * Coalescência de eventos de roda: acumula deltaY entre quadros e aplica
+   * uma única vez por frame. Evita que N eventos em 16 ms gerem N chamadas
+   * a zoomStep + anchorZoom, e garante que a âncora use o zoom corrente
+   * correto (sem coalescência, N eventos no mesmo quadro usariam todos o
+   * mesmo `camera.zoom` de partida).
+   */
+  let pendingWheelDeltaY = 0;
+  let pendingWheelNdcX = 0;
+  let pendingWheelNdcY = 0;
+  let hasPendingWheel = false;
+
+  /**
+   * Bounds do mapa da última sincronização, para zoom-to-fit.
+   * null = mapa vazio ou ainda não sincronizado.
+   */
+  let lastBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
+  let lastMaxHeight = 0;
+
   const drawNow = (): void => {
     renderer.render(scene, camera);
   };
@@ -293,6 +326,25 @@ export async function createIsoScene3D(
     lastFrameTime = now;
 
     let animating = false;
+
+    // Coalescência de roda: aplica o delta acumulado uma vez por frame.
+    if (hasPendingWheel) {
+      const next = zoomStep(zoomGoal, pendingWheelDeltaY);
+      const clamped = clampZoom(next);
+      if (clamped !== zoomGoal) {
+        anchorZoom(
+          camera, target, camera.zoom, clamped,
+          pendingWheelNdcX, pendingWheelNdcY,
+        );
+        placeCamera(camera, target, yaw);
+        zoomGoal = clamped;
+        if (zoomListener) zoomListener(clamped);
+      }
+      pendingWheelDeltaY = 0;
+      hasPendingWheel = false;
+      animating = true;
+      drawPending = true;
+    }
 
     // Zoom: persegue o alvo com constante de tempo, não com fator por quadro.
     if (Math.abs(camera.zoom - zoomGoal) > ZOOM_EPSILON) {
@@ -623,9 +675,30 @@ export async function createIsoScene3D(
     // tem de refletir o que está na tela agora.
     animator.setActive(placedBlocks);
 
+    // Guarda para zoom-to-fit
+    let maxHeight = 0;
+    if (Number.isFinite(minX)) {
+      // maxHeight: varre todas as colunas e pega o maior y
+      for (const [key, runs] of Object.entries(map.blocks)) {
+        const [, , ys = '0'] = key.split(':');
+        const yTop = Number(ys);
+        if (Number.isFinite(yTop) && yTop > maxHeight) maxHeight = yTop;
+        let top = 0;
+        for (const run of runs) top += run.count;
+        if (top > maxHeight) maxHeight = top;
+      }
+    }
+
     const bounds: MapBounds = Number.isFinite(minX)
       ? { minX, maxX, minZ, maxZ }
       : { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+    if (Number.isFinite(minX)) {
+      lastBounds = { minX, maxX, minZ, maxZ };
+      lastMaxHeight = maxHeight;
+    } else {
+      lastBounds = null;
+      lastMaxHeight = 0;
+    }
     if (resizeGroundRig(ground, bounds, scene)) {
       sizeShadowFrustum(sun, ground);
       changed = true;
@@ -688,17 +761,43 @@ export async function createIsoScene3D(
   };
 
   const wheelZoom = (deltaY: number, ndcX: number, ndcY: number): void => {
-    const next = zoomStep(zoomGoal, deltaY);
-    if (next === zoomGoal) return;
-    // A âncora usa o zoom CORRENTE, não o alvo: é o que está na tela agora que
-    // precisa ficar parado sob o cursor.
-    anchorZoom(camera, target, camera.zoom, next, ndcX, ndcY);
+    // Acumula em vez de aplicar imediatamente: o tick aplica o delta
+    // total uma vez por frame, com a âncora no zoom corrente correto.
+    pendingWheelDeltaY += deltaY;
+    pendingWheelNdcX = ndcX;
+    pendingWheelNdcY = ndcY;
+    hasPendingWheel = true;
+    schedule();
+  };
+
+  const setZoomAnchored = (zoom: number, ndcX: number, ndcY: number): void => {
+    // Descarta delta de roda pendente: gesto de pinça substitui a roda.
+    hasPendingWheel = false;
+    pendingWheelDeltaY = 0;
+    const clamped = clampZoom(zoom);
+    if (clamped === zoomGoal) return;
+    anchorZoom(camera, target, camera.zoom, clamped, ndcX, ndcY);
     placeCamera(camera, target, yaw);
-    setZoomGoal(next);
+    zoomGoal = clamped;
+    zoomListener?.(clamped);
+    schedule();
   };
 
   const zoomByFactor = (factor: number): void => {
     setZoomGoal(zoomGoal * factor);
+  };
+
+  const zoomToFitMethod = (maxHeight: number, viewportW: number, viewportH: number): void => {
+    if (!lastBounds) return;
+    const result = zoomToFit(lastBounds, maxHeight, viewportW, viewportH, yaw);
+    // Zera a inércia da roda para o zoom-to-fit dominar.
+    hasPendingWheel = false;
+    pendingWheelDeltaY = 0;
+    zoomGoal = result.zoom;
+    if (zoomListener) zoomListener(result.zoom);
+    target.copy(result.target);
+    placeCamera(camera, target, yaw);
+    schedule();
   };
 
   const setRotation = (rotation: Rotation): void => {
@@ -787,6 +886,8 @@ export async function createIsoScene3D(
     pan,
     wheelZoom,
     zoomByFactor,
+    setZoomAnchored,
+    zoomToFit: zoomToFitMethod,
     zoomTarget: () => zoomGoal,
     onZoomChange: (listener) => {
       zoomListener = listener;
@@ -1098,3 +1199,4 @@ export function disposeParticles(): void {
 
 /** Faixa de zoom aceita pelos controles — reexportada para a UI. */
 export { MIN_ZOOM, MAX_ZOOM };
+export { normalizeWheel, zoomToFit, clampZoom } from './controls3d.ts';

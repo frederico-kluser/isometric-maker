@@ -20,6 +20,8 @@ export const editor = {
     girarDica: 'Girar 90° (tecla R; Shift+R volta)',
     aumentar: 'Aproximar',
     diminuir: 'Afastar',
+    enquadrar: 'Enquadrar tudo',
+    enquadrarDica: 'Zoom para caber todos os blocos',
   },
 
   ferramenta: {

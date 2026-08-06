@@ -25,6 +25,7 @@ import {
   Grid3x3Icon,
   HammerIcon,
   Layers2Icon,
+  Maximize2Icon,
   PaintBucketIcon,
   PencilIcon,
   PlayIcon,
@@ -80,6 +81,8 @@ import {
 import {
   createIsoScene3D,
   spawnParticles,
+  normalizeWheel,
+  clampZoom,
   type IsoScene3D,
 } from './scene3d.ts';
 import { canonicalSpriteUrl } from './cube3d.ts';
@@ -218,6 +221,17 @@ export function MapEditor3D() {
   const rafRef = useRef<number | null>(null);
   /** true entre o clique em Testar e o fim do fetch — evita dois laços. */
   const enteringTestRef = useRef(false);
+
+  // Pinça (trackpad/touch): dois dedos, distância inicial → fator de zoom.
+  const pinchRef = useRef<{
+    initialDist: number;
+    initialZoom: number;
+    centerX: number;
+    centerY: number;
+  } | null>(null);
+
+  // Gesture events do Safari (gesturestart/gesturechange/gestureend).
+  const gestureRef = useRef<{ initialZoom: number } | null>(null);
 
   const map = history.present;
 
@@ -516,8 +530,94 @@ export function MapEditor3D() {
     const rect = e.currentTarget.getBoundingClientRect();
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
-    s3d.wheelZoom(e.deltaY * scale, ndcX, ndcY);
+    s3d.wheelZoom(normalizeWheel(e.deltaY, e.deltaMode), ndcX, ndcY);
+  }, []);
+
+  // ---------------------------------------------------------------- pinça
+
+  const onTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 2) {
+      const t0 = e.touches[0]!;
+      const t1 = e.touches[1]!;
+      const dx = t1.clientX - t0.clientX;
+      const dy = t1.clientY - t0.clientY;
+      pinchRef.current = {
+        initialDist: Math.hypot(dx, dy),
+        initialZoom: scene3dRef.current?.zoomTarget() ?? 2,
+        centerX: (t0.clientX + t1.clientX) / 2,
+        centerY: (t0.clientY + t1.clientY) / 2,
+      };
+    } else {
+      pinchRef.current = null;
+    }
+  }, []);
+
+  const onTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const pinch = pinchRef.current;
+    if (!pinch || e.touches.length !== 2) return;
+    const s3d = scene3dRef.current;
+    if (!s3d) return;
+
+    const t0 = e.touches[0]!;
+    const t1 = e.touches[1]!;
+    const dx = t1.clientX - t0.clientX;
+    const dy = t1.clientY - t0.clientY;
+    const dist = Math.hypot(dx, dy);
+
+    // Threshold de 5px para evitar zoom acidental
+    if (dist < 5 || pinch.initialDist < 5) return;
+
+    const factor = dist / pinch.initialDist;
+    const newZoom = clampZoom(pinch.initialZoom * factor);
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ndcX = ((pinch.centerX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((pinch.centerY - rect.top) / rect.height) * 2 + 1;
+
+    s3d.setZoomAnchored(newZoom, ndcX, ndcY);
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    pinchRef.current = null;
+  }, []);
+
+  // ---------------------------------------------------------------- gesture (Safari)
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gestureRef.current = {
+        initialZoom: scene3dRef.current?.zoomTarget() ?? 2,
+      };
+    };
+
+    const onGestureChange = (e: Event) => {
+      const ge = e as { scale?: number };
+      if (ge.scale === undefined || !gestureRef.current) return;
+      e.preventDefault();
+      const s3d = scene3dRef.current;
+      if (!s3d) return;
+      const newZoom = clampZoom(gestureRef.current.initialZoom * ge.scale);
+      // Safari não expõe o centro do gesto — ancora no centro da tela.
+      s3d.setZoomAnchored(newZoom, 0, 0);
+    };
+
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      gestureRef.current = null;
+    };
+
+    canvas.addEventListener('gesturestart', onGestureStart);
+    canvas.addEventListener('gesturechange', onGestureChange);
+    canvas.addEventListener('gestureend', onGestureEnd);
+    return () => {
+      canvas.removeEventListener('gesturestart', onGestureStart);
+      canvas.removeEventListener('gesturechange', onGestureChange);
+      canvas.removeEventListener('gestureend', onGestureEnd);
+    };
   }, []);
 
   // ---------------------------------------------------------------- rotação
@@ -532,6 +632,24 @@ export function MapEditor3D() {
     scene3dRef.current?.zoomByFactor(
       direction > 0 ? ZOOM_BUTTON_FACTOR : 1 / ZOOM_BUTTON_FACTOR,
     );
+  }, []);
+
+  const zoomToFitMap = useCallback(() => {
+    const s3d = scene3dRef.current;
+    const host = hostRef.current;
+    if (!s3d || !host) return;
+    // maxHeight: altura máxima dos blocos. A cena rastreia do syncBlocks.
+    // Usamos um valor seguro; a cena vai usar lastMaxHeight internamente.
+    // Como o método zoomToFit pede maxHeight explicitamente, calculamos
+    // do mapa corrente.
+    const currentMap = stateRef.current.map;
+    let maxH = 0;
+    for (const [, runs] of Object.entries(currentMap.blocks)) {
+      let top = 0;
+      for (const run of runs) top += run.count;
+      if (top > maxH) maxH = top;
+    }
+    s3d.zoomToFit(maxH, host.clientWidth, host.clientHeight);
   }, []);
 
   // ---------------------------------------------------------------- modo teste
@@ -725,6 +843,32 @@ export function MapEditor3D() {
         rotateTo((Number(e.key) - 1) as Rotation);
         return;
       }
+      // Camera pan com setas (modo edição). 10% do viewport por passo.
+      if (stateRef.current.mode === 'editar') {
+        const s3d = scene3dRef.current;
+        const host = hostRef.current;
+        if (s3d && host) {
+          const step = Math.min(host.clientWidth, host.clientHeight) * 0.1;
+          switch (e.key) {
+            case 'ArrowLeft':
+              e.preventDefault();
+              s3d.pan(step, 0, host.clientWidth, host.clientHeight);
+              return;
+            case 'ArrowRight':
+              e.preventDefault();
+              s3d.pan(-step, 0, host.clientWidth, host.clientHeight);
+              return;
+            case 'ArrowUp':
+              e.preventDefault();
+              s3d.pan(0, step, host.clientWidth, host.clientHeight);
+              return;
+            case 'ArrowDown':
+              e.preventDefault();
+              s3d.pan(0, -step, host.clientWidth, host.clientHeight);
+              return;
+          }
+        }
+      }
       if (stateRef.current.mode === 'testar') return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
@@ -907,6 +1051,9 @@ export function MapEditor3D() {
           >
             <RedoIcon className="size-4" />
           </Button>
+          <Button variant="ghost" size="sm" onClick={zoomToFitMap} aria-label={T.camera.enquadrar} title={T.camera.enquadrarDica}>
+            <Maximize2Icon className="size-4" />
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => zoomBy(-1)} aria-label={T.camera.diminuir}>
             <ZoomOutIcon className="size-4" />
           </Button>
@@ -981,6 +1128,10 @@ export function MapEditor3D() {
               setPickState(null);
             }}
             onWheel={onWheel}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onTouchCancel={onTouchEnd}
             onContextMenu={(e) => e.preventDefault()}
           />
 

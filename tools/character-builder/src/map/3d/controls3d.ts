@@ -274,6 +274,109 @@ export function approach(current: number, goal: number, dt: number): number {
   return current + (goal - current) * alpha;
 }
 
+// ------------------------------------------------------------------ normalização
+
+/**
+ * Converte `deltaY` de um WheelEvent para pixels equivalentes,
+ * independente do `deltaMode` do navegador.
+ *
+ * Firefox manda modo LINE (1), Chrome manda modo PIXEL (0), e o Safari
+ * manda ambos a depender do dispositivo. Sem esta normalização, a roda no
+ * Firefox seria ~17x mais lenta que no Chrome.
+ */
+export function normalizeWheel(deltaY: number, deltaMode: number): number {
+  if (deltaMode === 1) return deltaY * 17;   // CSS line-height padrão
+  if (deltaMode === 2) return deltaY * 800;  // viewport típico
+  return deltaY;
+}
+
+// ------------------------------------------------------------------ zoom-to-fit
+
+/**
+ * Calcula o zoom e o target para enquadrar uma bounding box no viewport.
+ *
+ * Projeta os 8 vértices da caixa no espaço da câmera e deriva o zoom pelo
+ * eixo mais restritivo. Considera a projeção isométrica: as células nos
+ * cantos da tela estão mais distantes em world-space que as do centro.
+ *
+ * O target é o centro geométrico da caixa. O zoom é o menor entre os dois
+ * eixos da tela, com a margem especificada.
+ *
+ * @param bounds - A bounding box do mapa no plano XZ.
+ * @param maxHeight - Altura máxima dos blocos (Y do mundo).
+ * @param viewportW - Largura do viewport em pixels.
+ * @param viewportH - Altura do viewport em pixels.
+ * @param yaw - Yaw corrente da câmera.
+ * @param margin - Margem como fração (0.1 = 10%).
+ */
+export function zoomToFit(
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+  maxHeight: number,
+  viewportW: number,
+  viewportH: number,
+  yaw: number,
+  margin = 0.1,
+): { zoom: number; target: THREE.Vector3 } {
+  const E = ELEVATION;
+  const sy = Math.sin(yaw);
+  const cy = Math.cos(yaw);
+  const se = Math.sin(E);
+  const ce = Math.cos(E);
+
+  // Vetores da câmera no espaço do mundo, ortonormais.
+  // Derivados da lookAt com up=(0,1,0) — ver o cabeçalho de controls3d.ts.
+  const right = new THREE.Vector3(-cy, 0, sy);
+  const up = new THREE.Vector3(-se * sy, ce, -se * cy);
+
+  // Centro da bounding box
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cz = (bounds.minZ + bounds.maxZ) / 2;
+  const cyWorld = maxHeight / 2;
+  const target = new THREE.Vector3(cx, cyWorld, cz);
+
+  // Projeta os 8 vértices no espaço da câmera
+  let camMinX = Infinity;
+  let camMaxX = -Infinity;
+  let camMinY = Infinity;
+  let camMaxY = -Infinity;
+
+  const corners: [number, number, number][] = [
+    [bounds.minX, 0, bounds.minZ],
+    [bounds.maxX, 0, bounds.minZ],
+    [bounds.minX, 0, bounds.maxZ],
+    [bounds.maxX, 0, bounds.maxZ],
+    [bounds.minX, maxHeight, bounds.minZ],
+    [bounds.maxX, maxHeight, bounds.minZ],
+    [bounds.minX, maxHeight, bounds.maxZ],
+    [bounds.maxX, maxHeight, bounds.maxZ],
+  ];
+
+  for (const [wx, wy, wz] of corners) {
+    const dx = wx - cx;
+    const dy = wy - cyWorld;
+    const dz = wz - cz;
+    const camX = dx * right.x + dy * right.y + dz * right.z;
+    const camY = dx * up.x + dy * up.y + dz * up.z;
+    if (camX < camMinX) camMinX = camX;
+    if (camX > camMaxX) camMaxX = camX;
+    if (camY < camMinY) camMinY = camY;
+    if (camY > camMaxY) camMaxY = camY;
+  }
+
+  const extentX = Math.max(Math.abs(camMinX), Math.abs(camMaxX));
+  const extentY = Math.max(Math.abs(camMinY), Math.abs(camMaxY));
+
+  const aspect = viewportW / Math.max(1, viewportH);
+  const halfW = FRUSTUM_HALF_HEIGHT * aspect;  // meia-largura do frustum
+  const halfH = FRUSTUM_HALF_HEIGHT;           // meia-altura do frustum
+
+  const zoomX = extentX > 0 ? halfW / extentX : MAX_ZOOM;
+  const zoomY = extentY > 0 ? halfH / extentY : MAX_ZOOM;
+  const zoom = clampZoom(Math.min(zoomX, zoomY) * (1 - margin));
+
+  return { zoom, target };
+}
+
 // ------------------------------------------------------------------ utilidades
 
 /**
