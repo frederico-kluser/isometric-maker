@@ -395,10 +395,9 @@ export function MapEditor3D() {
       const canvas = canvasRef.current;
       const s3d = scene3dRef.current;
       if (!canvas || !s3d) return null;
-      // A lista vem mantida pela cena; varrer o grafo por movimento de
-      // ponteiro era custo puro.
-      const meshes = s3d.blockMeshes();
+      // DDA opera direto sobre MapData — não precisa de meshes.
       const s = stateRef.current;
+      const map = s.map;
 
       if (s.tool === 'empilhar') {
         return pickColumnTopRaycaster(
@@ -406,12 +405,11 @@ export function MapEditor3D() {
           clientY,
           canvas,
           s3d.camera,
-          s3d.scene,
-          meshes,
-          (x: number, y: number) => mapColumnHeight(s.map, x, y),
+          map,
+          (x: number, y: number) => mapColumnHeight(map, x, y),
         );
       }
-      return pick3d(clientX, clientY, canvas, s3d.camera, s3d.scene, meshes);
+      return pick3d(clientX, clientY, canvas, s3d.camera, map);
     },
     [],
   );

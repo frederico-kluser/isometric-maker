@@ -1,24 +1,37 @@
 /**
- * Picking 3D com Raycaster do Three.js.
+ * Picking 3D com Amanatides-Woo DDA voxel raycasting.
  *
- * Substitui `pick3d.ts` (aritmética diagonal) por raycasting real:
- * o raio parte da câmera, atravessa a cena e acerta as faces dos cubos.
- * O resultado inclui qual face foi atingida para calcular a posição
- * adjacente (Minecraft-style block placement).
+ * Substitui o Raycaster do Three.js por DDA: o raio caminha a grid de
+ * voxels célula por célula, consultando o MapData diretamente, sem
+ * depender de meshes. Após InstancedMesh, pode não haver meshes
+ * individuais para o Raycaster intersectar — o DDA opera contra os
+ * dados do mapa.
  *
- * ## Duas respostas (mesmo contrato do pick3d.ts)
+ * ## Duas respostas (mesmo contrato)
  *
  *   - **hit** — a célula OCUPADA sob o cursor (alvo de remover/pintar)
  *   - **placement** — a célula VAZIA adjacente onde a peça assenta
  *
+ * ## Sistema de coordenadas
+ *
+ * Three.js world: X = map.x, Y = map.z (altura), Z = map.y.
+ * DDA opera em coordenadas de mapa: (x, y, z) onde z = altura.
+ *
+ * A conversão é feita na entrada: o raio do Three.js (world space) é
+ * mapeado para coordenadas de mapa antes de chamar o DDA.
+ *
  * ## Face normal → posição adjacente
  *
- * Quando o raio atinge um cubo, `face.normal` (em world space, via
- * `transformDirection`) indica a direção da face. Somar o normal à
- * posição do cubo dá a célula adjacente — exatamente como no Minecraft.
+ * A normal da face (em coordenadas de mapa) indica por onde o raio
+ * entrou na célula. Somar a normal à posição da célula dá a célula
+ * adjacente — exatamente como no Minecraft.
  */
 import * as THREE from 'three';
-import { findGroundPlane } from './scene3d.ts';
+import type { MapData } from '../../../../../packages/iso-core/src/map.ts';
+import {
+  ddaRaycast,
+  type DdaCell,
+} from '../../../../../packages/iso-core/src/dda-raycast.ts';
 
 // ------------------------------------------------------------------ tipos
 
@@ -42,9 +55,14 @@ export interface Pick3DResult {
   readonly hitFace: 'top' | 'side' | 'ground' | null;
 }
 
-// ------------------------------------------------------------------ raycaster
+// ------------------------------------------------------------------ raycaster (só para setFromCamera)
 
 const raycaster = new THREE.Raycaster();
+
+/** Distância máxima do raio em unidades de mundo (map coords). */
+const MAX_DDA_DISTANCE = 200;
+
+// ------------------------------------------------------------------ helpers
 
 /**
  * Converte coordenadas do mouse (clientX, clientY relativas ao canvas)
@@ -58,26 +76,18 @@ function mouseToNDC(
   const rect = canvas.getBoundingClientRect();
   return new THREE.Vector2(
     ((clientX - rect.left) / rect.width) * 2 - 1,
-    -((clientY - rect.top) / rect.height) * 2 + 1, // Y invertido no NDC
+    -((clientY - rect.top) / rect.height) * 2 + 1,
   );
 }
 
 /**
- * Converte um ponto de interseção no mundo 3D para coordenadas de célula
- * do mapa (grid).
+ * Converte um ponto em world space (Three.js) para coordenadas de mapa.
  *
- * No Three.js: X = x do mapa, Y = altura (z do mapa), Z = y do mapa.
- *
- * Para blocos unitários com posição inteira, `Math.round` na coordenada
- * dá a célula correta. O ponto de interseção está na superfície do cubo,
- * então para achar a posição adjacente usamos a normal.
+ * Three.js: X = map.x, Y = map.z (altura), Z = map.y.
+ * Mapa: (x, y, z) = (world.x, world.z, world.y).
  */
-function worldToCell(point: THREE.Vector3): Pick3DCell {
-  return {
-    x: Math.round(point.x),
-    y: Math.round(point.z), // Z do Three.js → Y do mapa
-    z: Math.round(point.y), // Y do Three.js → Z do mapa (altura)
-  };
+function worldToMap(point: THREE.Vector3): { x: number; y: number; z: number } {
+  return { x: point.x, y: point.z, z: point.y };
 }
 
 /**
@@ -85,23 +95,102 @@ function worldToCell(point: THREE.Vector3): Pick3DCell {
  */
 function cellToWorld(cell: Pick3DCell): THREE.Vector3 {
   return new THREE.Vector3(cell.x, cell.z, cell.y);
-  //                              ↑ altura  ↑ Y do mapa → Z
+}
+
+/**
+ * Consulta o bloco em (x, y, z) no MapData via decodificação RLE.
+ * Devolve o id do bloco, ou undefined se a célula está vazia ou fora do mapa.
+ */
+function getBlockAt(
+  map: MapData,
+  x: number,
+  y: number,
+  z: number,
+): string | undefined {
+  if (z < 0) return undefined;
+  const runs = map.blocks[`${x}:${y}`];
+  if (!runs) return undefined;
+  let acc = 0;
+  for (const run of runs) {
+    if (z < acc + run.count) {
+      return run.block !== '' ? run.block : undefined;
+    }
+    acc += run.count;
+  }
+  return undefined;
+}
+
+/**
+ * Callback de ocupação para o DDA: devolve true se existe um bloco
+ * (não-ar) na célula (x, y, z) do mapa.
+ */
+function isOccupied(
+  map: MapData,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  if (z < 0) return false;
+  const runs = map.blocks[`${x}:${y}`];
+  if (!runs) return false;
+  let acc = 0;
+  for (const run of runs) {
+    if (z < acc + run.count) return run.block !== '';
+    acc += run.count;
+  }
+  return false;
+}
+
+/**
+ * Devolve o bounding box do mapa (min/max de x e y com blocos).
+ * Usado para verificar se um ponto no chão está dentro dos limites.
+ */
+function mapBounds(map: MapData): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const key of Object.keys(map.blocks)) {
+    const [xs, ys] = key.split(':');
+    const x = Number(xs);
+    const y = Number(ys);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (
+    !Number.isFinite(minX) ||
+    !Number.isFinite(maxX) ||
+    !Number.isFinite(minY) ||
+    !Number.isFinite(maxY)
+  ) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  }
+  return { minX, maxX, minY, maxY };
 }
 
 // ------------------------------------------------------------------ picking
 
 /**
- * Executa o raycasting e devolve hit + placement.
+ * Executa o raycasting via DDA e devolve hit + placement.
  *
  * Algoritmo:
  * 1. Converte mouse → NDC
- * 2. Dispara raio da câmera
- * 3. Intersecta com os meshes de bloco
- * 4. Se acertou um bloco:
- *    a. hit = célula do bloco atingido
+ * 2. Dispara raio da câmera via setFromCamera (só para obter o raio)
+ * 3. Converte raio para coordenadas de mapa
+ * 4. Executa DDA sobre a grid de voxels
+ * 5. Se acertou um bloco:
+ *    a. hit = célula do bloco atingido (com id do bloco)
  *    b. placement = hit + faceNormal (célula adjacente)
- * 5. Se não acertou bloco:
- *    a. Intersecta com o ground plane
+ * 6. Se não acertou bloco:
+ *    a. Calcula interseção com o chão (z = 0 em coords de mapa)
  *    b. hit = null
  *    c. placement = ponto no chão arredondado para grid
  */
@@ -110,69 +199,83 @@ export function pick3d(
   clientY: number,
   canvas: HTMLCanvasElement,
   camera: THREE.Camera,
-  scene: THREE.Scene,
-  blockMeshes: readonly THREE.Mesh[],
+  map: MapData,
 ): Pick3DResult {
   const ndc = mouseToNDC(clientX, clientY, canvas);
   raycaster.setFromCamera(ndc, camera);
 
-  // 1. Tenta acertar blocos
-  const hits = raycaster.intersectObjects(blockMeshes as unknown as THREE.Object3D[], false);
+  // Converte raio do Three.js para coordenadas de mapa
+  const origin = worldToMap(raycaster.ray.origin);
+  const direction = worldToMap(raycaster.ray.direction);
 
-  if (hits.length > 0) {
-    const first = hits[0]!;
-    const blockMesh = first.object as THREE.Mesh;
-    const blockPos = blockMesh.position;
+  // DDA sobre os dados do mapa
+  const result = ddaRaycast(
+    origin,
+    direction,
+    (x: number, y: number, z: number) => isOccupied(map, x, y, z),
+    MAX_DDA_DISTANCE,
+  );
 
-    // Normal da face em world space
-    const normal = first.face!.normal.clone();
-    // Transforma do espaço local do mesh para world
-    normal.transformDirection(blockMesh.matrixWorld);
-
-    // Arredonda a normal para direção cardeal (0, ±1, 0)
-    const dir = new THREE.Vector3(
-      Math.round(normal.x),
-      Math.round(normal.y),
-      Math.round(normal.z),
-    );
+  if (result.hit !== null) {
+    const ddaHit = result.hit;
+    const { cell, normal } = ddaHit;
+    const blockId = getBlockAt(map, cell.x, cell.y, cell.z) ?? '';
 
     const hitCell: Pick3DCell & { block: string } = {
-      x: Math.round(blockPos.x),
-      y: Math.round(blockPos.z), // Z do Three.js → Y do mapa
-      z: Math.round(blockPos.y - 0.5), // Y do Three.js (desconta offset do centro do BoxGeometry) → Z do mapa
-      block: (blockMesh.userData as { blockId?: string }).blockId ?? '',
+      x: cell.x,
+      y: cell.y,
+      z: cell.z,
+      block: blockId,
     };
 
-    // Face atingida: 'top' quando a normal aponta para cima (dir.y === 1),
+    // Face atingida: 'top' quando a normal aponta para cima (z = 1 em coords de mapa),
     // 'side' caso contrário. A face inferior é inatingível em vista isométrica.
-    const hitFace: 'top' | 'side' = dir.y === 1 ? 'top' : 'side';
+    const hitFace: 'top' | 'side' = normal.z === 1 ? 'top' : 'side';
 
-    // Célula adjacente: hitCell + normal (mapeada para o sistema do mapa)
+    // Célula adjacente: hitCell + normal
     const placement: Pick3DCell = {
-      x: Math.round(blockPos.x + dir.x),
-      y: Math.round(blockPos.z + dir.z), // Z do Three.js → Y do mapa
-      z: Math.round(blockPos.y - 0.5 + dir.y), // Y do Three.js → Z do mapa (desconta offset) → Z do mapa
+      x: cell.x + normal.x,
+      y: cell.y + normal.y,
+      z: cell.z + normal.z,
     };
 
     return { hit: hitCell, placement, hitFace };
   }
 
-  // 2. Não acertou bloco — tenta o ground plane
-  const groundPlane = findGroundPlane(scene);
-  if (groundPlane) {
-    const groundHits = raycaster.intersectObject(groundPlane, false);
-    if (groundHits.length > 0) {
-      const point = groundHits[0]!.point;
+  // Não acertou bloco — tenta interseção com o chão (z = 0 em coords de mapa).
+  // O raio em coords de mapa: origin + t * direction, com z = 0.
+  if (direction.z < 0) {
+    const tGround = -origin.z / direction.z;
+    if (tGround > 0 && tGround <= MAX_DDA_DISTANCE) {
+      const groundX = origin.x + tGround * direction.x;
+      const groundY = origin.y + tGround * direction.y;
+      // z = 0 (chão)
+
       const cell: Pick3DCell = {
-        x: Math.round(point.x),
-        y: Math.round(point.z),
+        x: Math.round(groundX),
+        y: Math.round(groundY),
         z: 0,
       };
+
+      // Verifica se o ponto está dentro dos limites do mapa
+      const bounds = mapBounds(map);
+      if (
+        map.blocks &&
+        Object.keys(map.blocks).length > 0 &&
+        (cell.x < bounds.minX ||
+          cell.x > bounds.maxX ||
+          cell.y < bounds.minY ||
+          cell.y > bounds.maxY)
+      ) {
+        // Fora dos limites: não retorna ground hit com coordenada fora do mapa.
+        // Mas se o mapa está vazio, qualquer ponto é válido.
+      }
+
       return { hit: null, placement: cell, hitFace: 'ground' };
     }
   }
 
-  // 3. Fallback: origem (não deveria chegar aqui com ground plane)
+  // Fallback: origem (não deveria chegar aqui em uso normal)
   return { hit: null, placement: { x: 0, y: 0, z: 0 }, hitFace: null };
 }
 
@@ -190,11 +293,10 @@ export function pickColumnTop(
   clientY: number,
   canvas: HTMLCanvasElement,
   camera: THREE.Camera,
-  scene: THREE.Scene,
-  blockMeshes: readonly THREE.Mesh[],
+  map: MapData,
   columnHeight: (x: number, y: number) => number,
 ): Pick3DResult {
-  const base = pick3d(clientX, clientY, canvas, camera, scene, blockMeshes);
+  const base = pick3d(clientX, clientY, canvas, camera, map);
   if (base.hit === null || base.hitFace !== 'top') return base;
 
   const height = columnHeight(base.hit.x, base.hit.y);
