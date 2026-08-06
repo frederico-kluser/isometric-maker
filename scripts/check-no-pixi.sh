@@ -19,6 +19,9 @@
 #     PixiJS, a 0037 tirou metade dele e a 0047 tirou o resto. Um verificador
 #     que obrigasse a apagar o nome apagaria junto o motivo de cada uma existir,
 #     e a próxima pessoa a perguntar "por que Three.js?" não teria resposta.
+#   - `docs/README.md` — é um índice das ADRs e da timeline. A mesma lógica de
+#     "não se edita" se aplica: reescrever a tabela de ADRs para esconder que o
+#     PixiJS existiu falsearia o registro histórico de decisões.
 #   - `PLANO-DE-EXECUCAO.md` e `ERROS-*.md` — são REGISTROS do que foi feito,
 #     com data. Reescrevê-los para esconder que o PixiJS existiu seria falsear
 #     o histórico, e `validate-plan.mjs` valida a forma deles.
@@ -43,6 +46,10 @@ NC='\033[0m'
 
 # As ADRs têm licença para nomear o que foi removido — ver o cabeçalho.
 ADR_ALLOW='docs/adr/'
+
+# O README é um índice de ADRs e da timeline — mesma lógica: editar suas
+# menções ao PixiJS falsearia o registro histórico de decisões.
+README_ALLOW='docs/README\.md'
 
 # O próprio verificador nomeia o proibido em cada linha — excluí-lo é
 # obrigatório. `--exclude` do grep casa pelo NOME do arquivo, não pelo caminho.
@@ -103,7 +110,8 @@ fi
 mentions="$(grep -rniE 'pixi\.?js|\bpixi\b' \
   --include='*.md' --include='*.mdx' "${DOC_PATHS[@]}" \
   --exclude-dir=node_modules --exclude-dir=.git 2>/dev/null \
-  | grep -vE "$ADR_ALLOW" || true)"
+  | grep -vE "$ADR_ALLOW" \
+  | grep -vE "$README_ALLOW" || true)"
 if [ -n "$mentions" ]; then
   echo -e "  menção em documentação: ${RED}FAIL${NC}"
   echo "$mentions" | head -20 | sed 's/^/        /'

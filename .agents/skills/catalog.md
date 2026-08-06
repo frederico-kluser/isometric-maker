@@ -17,7 +17,6 @@ skill still reads as if a server decided anything, that is a leftover and a defe
 | Skill | Type | Fires on |
 |---|---|---|
 | [`project-router`](project-router/SKILL.md) | router | **every** request that touches this repo — it asks clarifying questions in pt-BR, writes `TASK_PLAN.md`, selects the chain, and deletes the plan at the end |
-| [`routing-pixijs-work`](routing-pixijs-work/SKILL.md) | router | sub-router, entered from `project-router` for PixiJS work — the exported game's runtime (`tools/runtime`) and the atlas packer (`tools/pixellab-pipeline/src/atlas.ts`) — splits every question into "what the API does" (vendored upstream) and "how this repo does it" (the ten bridge skills below); the map editor's 3D rendering routes to the Three.js family instead |
 
 Nothing else should be planned or edited before the router runs.
 
@@ -68,34 +67,9 @@ material table. Those are absences with no convention yet, and inventing one to 
 failure this library exists to prevent. Undo/redo and camera rotation used to be on that list and are
 now implemented; the skill says so, because a stale absence wastes a whole task.
 
-## Knowledge — PixiJS, and what upstream cannot know
-
-The `pixi.js` package publishes its own 26 agent skills, vendored here with provenance. **These ten
-do not restate the API.** Each carries what this repo does with PixiJS and hands the API question to
-the upstream skill named in its references. **The family was re-scoped with the 3D pivot: the map
-editor no longer uses PixiJS.** What remains is `tools/runtime` — the exported game's runtime, still
-pinned at pixi.js 8.19.0 — and `tools/pixellab-pipeline/src/atlas.ts`, the atlas packer. All ten
-share one verification signal:
-`node .agents/skills/scripts/check-pixi-claims.mjs`, which resolves every PixiJS symbol they name
-against the pinned declarations and **fails on deprecated ones**, because v8 kept the v7 methods as
-shims and v7 code therefore typechecks clean.
-
-| Skill | Owns |
-|---|---|
-| [`bootstrapping-pixi-app`](bootstrapping-pixi-app/SKILL.md) | async init, the ticker callback that is not a number, the integer-only upscale the 2:1 diamond needs, complete teardown |
-| [`choosing-pixi-renderer`](choosing-pixi-renderer/SKILL.md) | the pixel-art policy, the three sharpness bugs and their three different causes, the whole-number stage scale the 2:1 diamond needs |
-| [`composing-pixi-scene`](composing-pixi-scene/SKILL.md) | world/screen split, depth by isometric cell plus Z, the cull-area coordinate space that changed in 8.16.0 |
-| [`animating-pixi-sprites`](animating-pixi-sprites/SKILL.md) | the two-file atlas contract, the canonical direction order, the measured anchor, wardrobe as a silhouette problem |
-| [`rendering-pixi-tilemap`](rendering-pixi-tilemap/SKILL.md) | the batching container that no longer takes sprites, its empty bounds, and three questions this project has not answered |
-| [`handling-pixi-input`](handling-pixi-input/SKILL.md) | in an editor the click **is** the edit, the interactivity default that emits nothing, picking as arithmetic instead of hit-testing |
-| [`building-pixi-ui`](building-pixi-ui/SKILL.md) | pt-BR accents that break naive glyph atlases, why editor chrome needs glyph text, no verified UI toolkit |
-| [`applying-pixi-filters`](applying-pixi-filters/SKILL.md) | the render-target budget, and which effects are cheaper as art than as shaders |
-| [`interpolating-pixi-state`](interpolating-pixi-state/SKILL.md) | render clock apart from logic clock, smoothing motion between grid cells, the jump whose parabola exists only on screen |
-| [`profiling-pixi-performance`](profiling-pixi-performance/SKILL.md) | there is no baseline yet, draw calls over sprite counts, the GC options that are now silently ignored |
-
 ## Knowledge — Three.js, the editor and runtime renderer
 
-The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Ten skills
+The map editor is **Three.js only**: the 2D renderer was removed with the pivot. Ten skills
 carry how this editor renders and behaves — scene boot, mesh, art, camera, picking, shadow,
 instancing, profiling, live physics — plus the runtime's sprite rendering from the PixelLab atlas.
 Verification signals vary: editor skills use `cd tools/character-builder && npx tsc --noEmit`;
@@ -145,10 +119,6 @@ nothing; that is the intended outcome.
 | `node .agents/skills/scripts/lint-skills.mjs [name]` | frontmatter, naming, description triggers, body budget, provenance, `<evolution>` presence |
 | `node .agents/skills/scripts/run-skill-evals.mjs [--skill N] [--write-token]` | routing evals, body invariants, citation resolution — and the **only** way to mint the token the write gate requires |
 | `node .agents/skills/scripts/check-spec-claims.mjs` | every endpoint and enum a skill asserts exists in the vendored spec |
-| `node .agents/skills/scripts/check-pixi-claims.mjs` | every PixiJS symbol a skill asserts exists in the pinned declarations, is not deprecated, and every upstream skill it cites is present |
-| `node scripts/check-pixi-pin.mjs` | the three sources of the PixiJS pin agree — **currently failing**: pixi.js was removed from character-builder, so that source is gone; the script needs updating (see `scripts/gate.sh`) |
-| `node .agents/skills/routing-pixijs-work/scripts/inspect-pixi.mjs <cmd>` | query the PixiJS surface without loading 47.533 lines |
-| `node tools/pixi-reference/scripts/vendor-types.mjs [--check]` | regenerate or verify the vendored PixiJS snapshot |
 | `node .agents/skills/scripts/validate-bootstrap.mjs [--phase N]` | the phase gates |
 | `node .agents/skills/querying-pixellab-api/scripts/inspect-spec.mjs <cmd>` | query the spec without loading it — `summary`, `list`, `endpoint`, `response`, `flow`, `tag`, `grep`, `enums`, `limits` |
 
@@ -170,9 +140,3 @@ every agent profile. Those carry general PixelLab lore and general engine design
 carry what is true of **this repository** — this snapshot, this CLI, these tsconfigs, these ADRs —
 and defer to the global pair rather than restating them.
 
-The same rule applies one level out, to a library that ships its own: `pixi.js` publishes 26 agent
-skills inside the npm package, and they are vendored verbatim under
-`tools/pixi-reference/vendor/skills/` rather than rewritten. They describe the API; the ten skills
-above describe this game. Copying upstream's text into ours would fork a document that upstream keeps
-current on every release and we would not — see
-[`docs/adr/0009-conhecimento-pixijs-vendorizado.md`](../../docs/adr/0009-conhecimento-pixijs-vendorizado.md).
