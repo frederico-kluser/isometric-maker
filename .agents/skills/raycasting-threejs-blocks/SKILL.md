@@ -25,7 +25,7 @@ decides the destination cell, and before touching the ground plane that makes em
 ```
 
 Implemented as `pick3d` in `tools/character-builder/src/map/3d/pick3d-raycaster.ts:197-280`.
-The DDA engine lives in `packages/iso-core/src/dda-raycast.ts:65-210` — no Three.js
+The DDA engine lives in `packages/iso-core/src/dda-raycast.ts:65-210@39ca9f0a` — no Three.js
 dependency, no meshes needed.
 
 ## Why DDA replaced Three.js Raycaster

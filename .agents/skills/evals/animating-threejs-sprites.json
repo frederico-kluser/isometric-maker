@@ -12,7 +12,7 @@
   ],
   "invariants": [
     {
-      "must_contain": "was NEVER PixiJS-specific",
+      "must_contain": "was NEVER specific to any one engine",
       "why": "the format is TexturePacker JSON Hash; assuming PixiJS ownership leads to wrong parsers"
     },
     {
