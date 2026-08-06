@@ -36,6 +36,15 @@
  * mesma peça mudar de cor ao girar a câmera, que se lê como bug. A sombra
  * projetada continua existindo — ela cai no CHÃO, ver `grid3d.ts`.
  *
+ * ## Sombra entre cubos — o quad `ShadowMaterial`
+ *
+ * O chão recebe sombra via um plano `ShadowMaterial` (`grid3d.ts`). Para cubos
+ * empilhados, cada cubo ganha um quad filho com `ShadowMaterial` logo acima da
+ * face +Y (topo). Ele amostra o shadow map da mesma luz que o chão e escurece
+ * onde um cubo superior projeta sombra — sem tocar na pixel art do cubo, sem
+ * acender luzes e sem invalidar o laço render-on-demand. Geometria e material
+ * são compartilhados entre todos os cubos.
+ *
  * ## O bloco animado (ADR 0032), que até 2026-08-04 não animava
  *
  * A técnica `texture` grava UMA folha horizontal com todos os quadros
@@ -94,6 +103,57 @@ const ALPHA_TEST = 0.5;
 
 /** Matiz do bloco sem arte nem matiz declarado. Cinza-azulado neutro. */
 const DEFAULT_HUE = 210;
+
+/**
+ * Opacidade da sombra entre cubos. Mesmo valor do chão (`grid3d.ts`) para
+ * consistência visual — a sombra que um cubo projeta no bloco de baixo tem a
+ * mesma intensidade da sombra que ele projeta no chão.
+ */
+const CUBE_SHADOW_OPACITY = 0.42;
+
+/**
+ * Altura do quad de sombra acima da face +Y. Suficiente para evitar z-fighting
+ * sem descolar visualmente do topo do cubo.
+ */
+const SHADOW_QUAD_EPS = 0.001;
+
+// ------------------------------------------------------------------ quad de sombra por cubo
+
+/** Geometria compartilhada do quad de sombra — um quadrado 1×1 no plano XZ. */
+let _sharedShadowQuadGeom: THREE.PlaneGeometry | null = null;
+
+/** Material compartilhado do quad de sombra — `ShadowMaterial` com opacidade fixa. */
+let _sharedShadowQuadMat: THREE.ShadowMaterial | null = null;
+
+/**
+ * Cria (ou devolve do cache) o quad `ShadowMaterial` que recebe sombra no topo
+ * do cubo.
+ *
+ * Geometria e material são compartilhados entre TODOS os cubos — o quad só existe
+ * para amostrar o shadow map, e a posição world-space de cada um é dada pela
+ * hierarquia do grafo de cena (o quad é filho do mesh do cubo).
+ */
+function createCubeShadowQuad(): THREE.Mesh {
+  if (!_sharedShadowQuadGeom) {
+    _sharedShadowQuadGeom = new THREE.PlaneGeometry(1, 1);
+  }
+  if (!_sharedShadowQuadMat) {
+    _sharedShadowQuadMat = new THREE.ShadowMaterial({
+      color: 0x000000,
+      opacity: CUBE_SHADOW_OPACITY,
+      // depthWrite desligado: onde não há sombra o quad é transparente, e
+      // escrever profundidade faria ele ocluir o grid e os cubos atrás.
+      depthWrite: false,
+    });
+  }
+  const quad = new THREE.Mesh(_sharedShadowQuadGeom, _sharedShadowQuadMat);
+  // PlaneGeometry nasce no plano XY (normal +Z). Girar −90° em X deita no
+  // plano XZ (normal +Y), que é o topo do cubo.
+  quad.rotation.x = -Math.PI / 2;
+  quad.receiveShadow = true;
+  quad.renderOrder = 1; // mesma ordem do catcher do chão
+  return quad;
+}
 
 // ------------------------------------------------------------------ geometria com UV de sprite
 
@@ -487,14 +547,23 @@ function proceduralArt(hue: number): CubeArt {
 /**
  * Cria o mesh de um cubo.
  *
- * `castShadow` sim, `receiveShadow` não: material sem iluminação ignora shadow
- * map, então marcar `receiveShadow` só custaria a checagem por fragmento sem
- * escurecer nada. Quem recebe sombra é o chão (`grid3d.ts`).
+ * `castShadow` sim: o cubo projeta sombra no chão e nos cubos abaixo.
+ * `receiveShadow` não: o material é `MeshBasicMaterial`, que ignora shadow map.
+ * Quem recebe a sombra de cubos superiores é o quad `ShadowMaterial` filho,
+ * ancorado logo acima da face +Y — o mesmo truque de desacoplamento que o chão
+ * usa (`grid3d.ts`).
  */
 export function createCubeMesh(art: CubeArt): THREE.Mesh {
   const mesh = new THREE.Mesh(art.geometry, art.material);
   mesh.castShadow = true;
   mesh.receiveShadow = false;
+
+  // Quad filho que recebe sombra de cubos acima. Geometria e material são
+  // compartilhados: um draw call a mais por cubo, sem alocação extra.
+  const shadowQuad = createCubeShadowQuad();
+  shadowQuad.position.y = CUBE_SIZE / 2 + SHADOW_QUAD_EPS;
+  mesh.add(shadowQuad);
+
   return mesh;
 }
 
@@ -583,5 +652,13 @@ export function disposeCubeCache(): void {
   if (highlightEdges) {
     highlightEdges.dispose();
     highlightEdges = null;
+  }
+  if (_sharedShadowQuadGeom) {
+    _sharedShadowQuadGeom.dispose();
+    _sharedShadowQuadGeom = null;
+  }
+  if (_sharedShadowQuadMat) {
+    _sharedShadowQuadMat.dispose();
+    _sharedShadowQuadMat = null;
   }
 }
