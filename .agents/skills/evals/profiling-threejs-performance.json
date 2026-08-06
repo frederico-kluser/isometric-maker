@@ -1,0 +1,35 @@
+{
+  "skill": "profiling-threejs-performance",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o editor esta lento quando eu mexo o mapa", "should_trigger": true },
+    { "query": "quantos draw calls este quadro esta fazendo", "should_trigger": true },
+    { "query": "por que o FPS caiu depois da ultima mudanca", "should_trigger": true },
+    { "query": "o zoom esta travando quando tem muitos blocos", "should_trigger": true },
+    { "query": "gerar um tileset novo no pixel lab", "should_trigger": false },
+    { "query": "configurar a ancora do sprite do personagem", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "FPS is meaningless here",
+      "why": "the editor is render-on-demand; FPS as a metric will mislead every investigation"
+    },
+    {
+      "must_contain": "render.calls` and `render.triangles",
+      "why": "these are the only honest numbers; losing them loses the entire profiling story"
+    },
+    {
+      "must_contain": "one shot flag consumed by the renderer after one frame",
+      "why": "needsUpdate is not a mode; confusing it for a toggle leads to stale shadow maps"
+    },
+    {
+      "must_contain": "reset()` is essential",
+      "why": "without reset, render.calls accumulates since boot and the reading is wrong"
+    },
+    {
+      "must_contain": "Nao ha baseline de desempenho",
+      "why": "explicitly stating there is no performance baseline prevents false certainty"
+    }
+  ],
+  "check_provenance": true
+}

@@ -1,0 +1,36 @@
+{
+  "skill": "animating-threejs-sprites",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o sprite do personagem esta borrado no jogo", "should_trigger": true },
+    { "query": "a ancora do sprite esta errada, os pes estao flutuando", "should_trigger": true },
+    { "query": "a direcao do personagem nao bate com a animacao", "should_trigger": true },
+    { "query": "como o atlas json vira textura no three.js", "should_trigger": true },
+    { "query": "o sprite esta de cabeca para baixo no runtime", "should_trigger": true },
+    { "query": "adicionar um bloco de pedra no mapa do editor", "should_trigger": false },
+    { "query": "como configurar a sombra dos cubos", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "was NEVER PixiJS-specific",
+      "why": "the format is TexturePacker JSON Hash; assuming PixiJS ownership leads to wrong parsers"
+    },
+    {
+      "must_contain": "clone of the sheet",
+      "why": "each frame is a clone with different repeat/offset, sharing the GPU texture — not a separate image"
+    },
+    {
+      "must_contain": "1 - sidecar.anchor.y",
+      "why": "V inversion is the single most common sprite bug; removing this would leave it undocumented"
+    },
+    {
+      "must_contain": "NearestFilter",
+      "why": "pixel art with LinearFilter is blurred; this must survive any edit that touches texture settings"
+    },
+    {
+      "must_contain": "S, SW, W, NW, N, NE, E, SE",
+      "why": "the canonical direction order; getting it wrong misaligns all direction-dependent logic"
+    }
+  ],
+  "check_provenance": true
+}

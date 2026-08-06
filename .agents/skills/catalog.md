@@ -93,11 +93,13 @@ shims and v7 code therefore typechecks clean.
 | [`interpolating-pixi-state`](interpolating-pixi-state/SKILL.md) | render clock apart from logic clock, smoothing motion between grid cells, the jump whose parabola exists only on screen |
 | [`profiling-pixi-performance`](profiling-pixi-performance/SKILL.md) | there is no baseline yet, draw calls over sprite counts, the GC options that are now silently ignored |
 
-## Knowledge — Three.js, the map editor's renderer
+## Knowledge — Three.js, the editor and runtime renderer
 
-The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Seven skills
-carry how this editor renders and behaves — scene boot, mesh, art, camera, picking, shadow, live
-physics. They share one verification signal: `cd tools/character-builder && npx tsc --noEmit`.
+The map editor is **Three.js only**: the 2D PixiJS renderer was removed with the pivot. Ten skills
+carry how this editor renders and behaves — scene boot, mesh, art, camera, picking, shadow,
+instancing, profiling, live physics — plus the runtime's sprite rendering from the PixelLab atlas.
+Verification signals vary: editor skills use `cd tools/character-builder && npx tsc --noEmit`;
+sprite rendering uses `cd tools/pixellab-pipeline && npm run typecheck && npm test`.
 
 | Skill | Owns |
 |---|---|
@@ -107,9 +109,13 @@ physics. They share one verification signal: `cd tools/character-builder && npx 
 | [`controlling-threejs-camera`](controlling-threejs-camera/SKILL.md) | the orbit target that pan moves, continuous damped zoom anchored on the cursor, discrete 90° turns, no OrbitControls |
 | [`raycasting-threejs-blocks`](raycasting-threejs-blocks/SKILL.md) | Raycaster, face normal → adjacent cell, ground plane, 6 traps |
 | [`casting-threejs-shadows`](casting-threejs-shadows/SKILL.md) | the light that only casts, the `ShadowMaterial` catcher, why cubes do not receive, `autoUpdate = false` |
+| [`instancing-threejs-cubes`](instancing-threejs-cubes/SKILL.md) | InstancedMesh per block type, cell-to-instance map, free-list slot reuse, hidden-cell culling, per-instance matrix for cube yaw, `instanceColor` for cell tinting, and why picking left the Raycaster |
+| [`profiling-threejs-performance`](profiling-threejs-performance/SKILL.md) | `renderer.info` as the only honest number, draw calls vs object counts, the coalescing frame loop that stops when nothing animates, what InstancedMesh and culling do to the draw-call budget |
 | [`simulating-editor-physics`](simulating-editor-physics/SKILL.md) | test mode: the rAF loop, refs over React state, the collision index, the two direction conversions, push-out |
+| [`animating-threejs-sprites`](animating-threejs-sprites/SKILL.md) | the two-file atlas contract (TexturePacker JSON Hash + sidecar), how the runtime clones the sheet texture with `repeat`/`offset` per frame, V inversion, `NearestFilter`, the canonical 8-direction order, and the measured anchor |
 
-The split between the last four and the first three is deliberate. `creating-threejs-cubes` owns the
+The split between the first three (bootstrapping, cubes, sprite mapping) and the rest is deliberate.
+`creating-threejs-cubes` owns the
 **object**; `mapping-sprites-onto-cubes` owns the **image on it**. A task about art that looks sheared
 needs the second; a task about a cube that renders black needs the first. Loading only one of the
 pair is how a UV bug gets fixed by changing a material.

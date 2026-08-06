@@ -1,0 +1,35 @@
+{
+  "skill": "instancing-threejs-cubes",
+  "min_overlap": 2,
+  "routing": [
+    { "query": "o bloco sumiu do mapa depois que eu coloquei um do lado", "should_trigger": true },
+    { "query": "por que tem tanto draw call no editor", "should_trigger": true },
+    { "query": "como achar qual cubo eu cliquei com o raycaster", "should_trigger": true },
+    { "query": "a cor da celula nao muda quando eu pinto", "should_trigger": true },
+    { "query": "gerar um personagem novo no pixel lab", "should_trigger": false },
+    { "query": "exportar o mapa em json", "should_trigger": false }
+  ],
+  "invariants": [
+    {
+      "must_contain": "one entry per `blockId`",
+      "why": "the core design decision: InstancedMesh per block type, not global and not per cell"
+    },
+    {
+      "must_contain": "needsUpdate = true` is mandatory",
+      "why": "setMatrixAt without needsUpdate is silent no-op; this must survive any edit"
+    },
+    {
+      "must_contain": "MUST run before instancing",
+      "why": "hidden-cell culling is a pre-pass; running it after creating instances wastes the work"
+    },
+    {
+      "must_contain": "free list",
+      "why": "the slot reuse mechanism; describing allocation without it would miss the performance story"
+    },
+    {
+      "must_contain": "shadow quad per cube is NOT instanced",
+      "why": "each quad needs its own world position for the shadow map; grouping them under InstancedMesh would break shadows between stacked cubes"
+    }
+  ],
+  "check_provenance": true
+}
