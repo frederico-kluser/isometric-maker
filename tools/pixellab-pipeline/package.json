@@ -12,7 +12,7 @@
     "refresh-openapi": "node scripts/refresh-openapi.mjs",
     "cli": "node src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/*.test.ts"
+    "test": "NODE_OPTIONS=--experimental-strip-types node --test src/*.test.ts"
   },
   "dependencies": {
     "sharp": "^0.34.2"

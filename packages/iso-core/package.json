@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && node -e \"process.stdout.write('multi-célula: coberto por testes (src/map.test.ts: single-cell constraint)\\n')\"",
-    "test": "node --test src/*.test.ts"
+    "test": "NODE_OPTIONS=--experimental-strip-types node --test src/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

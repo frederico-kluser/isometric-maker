@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test server/*.test.ts src/*.test.ts \"src/**/*.test.ts\""
+    "test": "NODE_OPTIONS=--experimental-strip-types node --test server/*.test.ts src/*.test.ts \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
