@@ -254,7 +254,7 @@ estimate and both running totals in hand, before every run. Nothing mechanical w
 - `docs/01-pixellab/modelo-assincrono.md` — 202/poll/423/410/529 semantics
 - Sibling skill `querying-pixellab-api` for anything about the API surface itself
 
-## <evolution>
+## registo de aprendizado (memória CoALA local)
 
 On task completion, run the memory pipeline. The external signal for this skill is
 `cd tools/pixellab-pipeline && npm test && node src/cli.ts plan`: the suite must stay green **and**

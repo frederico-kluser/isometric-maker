@@ -177,7 +177,7 @@ that cite them move in the same commit — never "delete now, repair later".
 - `docs/README.md` — the index that must be kept current
 - Sibling skill `querying-pixellab-api` before citing any endpoint in prose
 
-## <evolution>
+## registo de aprendizado (memória CoALA local)
 
 On task completion, run the memory pipeline. The external signal is `bash scripts/check-docs.sh`
 returning clean.

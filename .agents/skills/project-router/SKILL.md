@@ -86,7 +86,7 @@ The usual mappings:
 | anything under `docs/`, the README, or a decision record | `writing-project-docs` |
 | **anything drawn on screen** — renderer, scene, camera, sprite, atlas, tilemap, editor chrome, input, frame rate | the Three.js family for the map editor; for the runtime, `animating-threejs-sprites` loads the atlas and `bootstrapping-threejs-scene` boots the viewport |
 | **map editor 3D** — renderer, scene, camera, picking, art, shadow, test mode | the Three.js family: `bootstrapping-threejs-scene`, `creating-threejs-cubes`, `mapping-sprites-onto-cubes`, `controlling-threejs-camera`, `raycasting-threejs-blocks`, `casting-threejs-shadows`, `simulating-editor-physics`; hand off, do not enumerate |
-| no existing skill fits | `meta-skill-evolution`, to propose one as a draft |
+| no existing skill fits | a memória CoALA local (`coala.py add`), to propose one as a draft |
 
 **The isometric skills are the model, not the renderer, and the split matters.** What is *true*
 about the world — which cell a pixel falls in, what may occupy it, what draws before what — belongs
@@ -117,7 +117,7 @@ than silently drifting.
 
 ### 8. On completion
 
-1. Run each involved **task** skill's `<evolution>` section. Usually this writes nothing, and that is
+1. Run each involved **task** skill's registo de aprendizado (memória CoALA local) section. Usually this writes nothing, and that is
    the healthy outcome.
 2. Report what was actually verified, with the command output. If a test failed, say so.
 3. **Delete `TASK_PLAN.md`.**
@@ -128,9 +128,9 @@ than silently drifting.
 - **Never delete the bootstrap artifacts**: `project-analysis.md`, `skill-map.md`, `catalog.md`,
   `validation-report.md`, `.bootstrap-state.json`. Those are the audit trail.
 - Skills with broad side effects are not auto-invocable. `generate` spends real money and
-  `meta-skill-consolidate` deletes knowledge; both need explicit confirmation with the numbers in
+  a memória CoALA local (supersessão por `--key`) deletes knowledge; both need explicit confirmation with the numbers in
   hand.
-- If no skill covers the task, do not improvise a permanent rule. Invoke `meta-skill-evolution` to
+- If no skill covers the task, do not improvise a permanent rule. Invoke a memória CoALA local (`coala.py add`) to
   propose a new skill as a **draft for review**.
 - Never skip the evolution step. Skipping it is how the system stops learning; running it and writing
   nothing is normal.

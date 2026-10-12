@@ -180,4 +180,4 @@ POT would waste up to 72% of the texture.
 - `generating-pixellab-characters` -- producing the character whose sprites are packed here
 - [TexturePacker JSON Hash format](https://www.codeandweb.com/texturepacker/documentation) -- the format the `.json` conforms to
 
-<evolution></evolution>
+registo de aprendizado (memória CoALA local)</evolution>

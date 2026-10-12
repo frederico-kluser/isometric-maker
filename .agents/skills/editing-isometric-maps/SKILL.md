@@ -268,7 +268,7 @@ Entries that are now implemented and must not be claimed as absent:
 - **coalesced wheel zoom** — accumulated per frame, anchored on cursor, continuous damped
 
 These are absences, not defects. **Do not invent a convention to fill one.** Propose it through
-`meta-skill-evolution` as a draft, or ask. A rule invented to make a table look complete is exactly
+a memória CoALA local (`coala.py add`) as a draft, or ask. A rule invented to make a table look complete is exactly
 the failure this skill library exists to prevent.
 
 ## Rules

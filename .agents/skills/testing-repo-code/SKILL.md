@@ -105,7 +105,7 @@ side effect of another task.
 - Sibling skill `guarding-generation-cost` — what the untested modules actually guarantee
 - Sibling skill `writing-repo-typescript` — why `typecheck` is a separate signal from `test`
 
-## <evolution>
+## registo de aprendizado (memória CoALA local)
 
 On task completion, run the memory pipeline. The external signal for this skill is `npm test` in
 `tools/pixellab-pipeline`.

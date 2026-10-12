@@ -102,21 +102,19 @@ pair is how a UV bug gets fixed by changing a material.
 | [`testing-repo-code`](testing-repo-code/SKILL.md) | the Node test runner, what good tests look like here, and exactly which money-critical modules have **no** coverage | `npm test` in `tools/pixellab-pipeline` |
 | [`writing-project-docs`](writing-project-docs/SKILL.md) | the twelve doc conventions — four checked, eight not — ADR authoring, and the `**Substitui:**` supersession mechanism | `bash scripts/check-docs.sh` |
 
-Every task skill ends with an `<evolution>` section. It runs at task completion and usually writes
+Every task skill ends with an registo de aprendizado (memória CoALA local) section. It runs at task completion and usually writes
 nothing; that is the intended outcome.
 
 ## Meta — how the library changes
 
 | Skill | Owns | Verification signal |
 |---|---|---|
-| [`meta-skill-evolution`](meta-skill-evolution/SKILL.md) | the five-step memory pipeline: importance → external verification → conflict detection → regression gating → git commit. Decides update / propose draft / discard | `lint-skills.mjs && run-skill-evals.mjs` |
-| [`meta-skill-consolidate`](meta-skill-consolidate/SKILL.md) | periodic GC: dedupe, contradiction resolution, provenance staleness, token budget. Deletions need a second opinion and human approval | same, plus a diff for review |
 
 ## Tooling
 
 | Command | Does |
 |---|---|
-| `node .agents/skills/scripts/lint-skills.mjs [name]` | frontmatter, naming, description triggers, body budget, provenance, `<evolution>` presence |
+| `node .agents/skills/scripts/lint-skills.mjs [name]` | frontmatter, naming, description triggers, body budget, provenance, registo de aprendizado (memória CoALA local) presence |
 | `node .agents/skills/scripts/run-skill-evals.mjs [--skill N] [--write-token]` | routing evals, body invariants, citation resolution — and the **only** way to mint the token the write gate requires |
 | `node .agents/skills/scripts/check-spec-claims.mjs` | every endpoint and enum a skill asserts exists in the vendored spec |
 | `node .agents/skills/scripts/validate-bootstrap.mjs [--phase N]` | the phase gates |

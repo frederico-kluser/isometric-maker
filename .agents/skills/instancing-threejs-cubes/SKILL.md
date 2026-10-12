@@ -150,4 +150,4 @@ editor's primary picking path no longer uses it.
 - `raycasting-threejs-blocks` -- the Raycaster approach and why DDA replaced it for picking
 - `mapping-sprites-onto-cubes` -- how the UV mapping places the sprite on the cube faces
 
-<evolution></evolution>
+registo de aprendizado (memória CoALA local)</evolution>

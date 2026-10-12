@@ -141,4 +141,4 @@ But if you read after multiple draws without resetting, the value is the sum of 
 - `casting-threejs-shadows` -- the shadow rig and autoUpdate discipline
 - [Three.js WebGLInfo docs](https://threejs.org/docs/#api/en/renderers/WebGLInfo)
 
-<evolution></evolution>
+registo de aprendizado (memória CoALA local)</evolution>
