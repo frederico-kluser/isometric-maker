@@ -35,3 +35,7 @@ TASK_PLAN.md
 .claude/scheduled_tasks.json
 
 .deep-orchestrator/
+
+# Artefactos do pnpm num projeto npm (o lockfile canónico é package-lock.json)
+pnpm-lock.yaml
+pnpm-workspace.yaml
